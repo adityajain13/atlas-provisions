@@ -1,0 +1,15 @@
+{
+  "name": "@provisions/worker",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@provisions/shared": "*",
+    "hono": "^4.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "typescript": "^5.6.3",
+    "wrangler": "^4.0.0"
+  }
+}
