@@ -2,15 +2,20 @@ import {
   buildList,
   costFixedMeals,
   expandWeek,
+  expiringSoon,
   round2,
   toPlannedMeals,
+  torontoDate,
+  usableItems,
   validate,
   type Deal,
   type Household,
   type MatchedItem,
   type MealPlan,
+  type PantryItem,
   type PlannedMeal,
   type PlanRequest,
+  type RatingSignals,
   type ValidationIssue,
 } from '@provisions/shared';
 import { buildAvailable, buildPayload, SYSTEM_PROMPT, type PlannerPayload } from './prompt';
@@ -24,6 +29,9 @@ export interface RunInput {
   client: PlannerClient;
   recentDinnerNames: string[];
   neverBuy: string[]; // ingredient ids from never-buy item rules
+  pantry?: PantryItem[]; // all pantry items; expired ones are ignored
+  ratings?: RatingSignals; // favourites, avoid and never from meal ratings
+  today?: string; // YYYY-MM-DD on the Toronto calendar; defaults to today
   maxAttempts?: number;
 }
 
@@ -45,6 +53,10 @@ const errorCount = (issues: ValidationIssue[]) => issues.filter((i) => i.severit
 export async function runPlanner(input: RunInput): Promise<MealPlan> {
   const { household, request, deals, matched, client, recentDinnerNames, neverBuy } = input;
   const maxAttempts = Math.max(1, input.maxAttempts ?? 3);
+  const today = input.today ?? torontoDate();
+  const pantry = usableItems(input.pantry ?? [], today);
+  const ratings = input.ratings ?? { favourites: [], avoid: [], never: [] };
+  const dueSoon = request.useItUp ? expiringSoon(pantry, today) : [];
 
   const { cells, fixed: placements } = expandWeek(household, request);
   const fixedCost = costFixedMeals(placements, household, deals, matched);
@@ -58,12 +70,12 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
     slot: p.slot,
     eaters: p.eaters,
   }));
-  const available = buildAvailable(deals, fixedCost);
+  const available = buildAvailable(deals, fixedCost, pantry);
   const availableIds = new Set(available.map((a) => a.id));
 
   // Price and check one set of planned meals. Shape issues from toPlannedMeals come in as well.
   const evaluate = (meals: PlannedMeal[], shapeIssues: ValidationIssue[], notes: string): MealPlan => {
-    const list = buildList(meals, fixedCost, deals, matched, stores, household.maxStores, priceMatchStores);
+    const list = buildList(meals, fixedCost, deals, matched, stores, household.maxStores, priceMatchStores, pantry);
     const totalCost = round2(list.reduce((sum, i) => sum + i.total, 0));
     const plan: MealPlan = {
       weekOf: request.weekOf,
@@ -89,6 +101,8 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
         available: availableIds,
         neverBuy: new Set(neverBuy),
         recentDinnerNames,
+        useFirst: dueSoon.map((i) => ({ ingredientId: i.ingredientId, expiresOn: i.expiresOn })),
+        neverMeals: ratings.never,
       }),
     ];
     return plan;
@@ -105,6 +119,9 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
     available,
     neverBuy,
     recentDinnerNames,
+    pantryUseFirst: dueSoon.map((i) => i.ingredientId),
+    favourites: ratings.favourites,
+    avoid: [...ratings.avoid, ...ratings.never],
   });
 
   let best: MealPlan | null = null;

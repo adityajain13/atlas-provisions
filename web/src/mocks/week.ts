@@ -4,6 +4,13 @@ import type { Day, Slot } from '@provisions/shared';
 
 export type MockTag = { kind: 'craving' | 'deal' | 'leftover'; text: string };
 
+// A planned meal the household can rate. Only meals from a saved plan have one.
+export type Rateable = {
+  name: string;
+  ingredientIds: string[];
+  personIds: string[]; // real household members eating it
+};
+
 export type MockMeal = {
   slot: Slot;
   who: string;
@@ -12,6 +19,7 @@ export type MockMeal = {
   cost: number | null;
   fixed?: boolean;
   tags: MockTag[];
+  rateable?: Rateable;
 };
 
 export type MockDay = {

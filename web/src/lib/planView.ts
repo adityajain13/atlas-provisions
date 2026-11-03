@@ -8,7 +8,7 @@ import {
   type PlannedMeal,
   type Slot,
 } from '@provisions/shared';
-import type { MockDay, MockItem, MockMeal, MockTag, MockWeek, Category } from '../mocks/week';
+import type { MockDay, MockItem, MockMeal, MockTag, MockWeek, Category, Rateable } from '../mocks/week';
 import { DAY_SHORT } from './labels';
 
 // Turn a saved MealPlan into the shapes the Week and List screens already draw.
@@ -82,6 +82,15 @@ function tagsOf(meal: PlannedMeal, cravings: string[]): MockTag[] {
   return tags;
 }
 
+// Only household members can rate a meal. Guests are not in the people map.
+function rateableOf(meal: PlannedMeal, people: Map<string, string>): { rateable?: Rateable } {
+  const personIds = meal.eaters.filter((id) => people.has(id));
+  if (personIds.length === 0) return {};
+  return {
+    rateable: { name: meal.name, ingredientIds: meal.ingredients.map((i) => i.ingredientId), personIds },
+  };
+}
+
 function detailOf(meal: PlannedMeal): string {
   const names = meal.ingredients.map((i) => ingredientName(i.ingredientId));
   if (names.length <= 4) return names.join(', ');
@@ -102,6 +111,7 @@ export function planToWeek(plan: MealPlan, people: Map<string, string>): MockWee
           detail: detailOf(m),
           cost: mealCost(m, prices),
           tags: tagsOf(m, plan.request.cravings),
+          ...rateableOf(m, people),
         },
       }));
     const fixed: { slot: Slot; meal: MockMeal }[] = plan.fixedMeals

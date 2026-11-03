@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { expandWeek } from './grid';
-import { defaultHousehold, type Household, type FixedMeal } from './index';
+import { HouseholdSchema, defaultHousehold, type Household, type FixedMeal } from './index';
 import type { PlanRequest } from './plan';
 
 const people = [
@@ -123,5 +123,38 @@ describe('expandWeek', () => {
       }),
     );
     expect(cellAt(cells, 'sun', 'dinner')!.eaters).toEqual(['ann', 'ben', 'guest-1']);
+  });
+});
+
+describe('expandWeek: time caps', () => {
+  it('puts the household time cap on the matching cell only', () => {
+    const { cells } = expandWeek(household({ timeCaps: { tue: { dinner: 15 } } }), request());
+    expect(cellAt(cells, 'tue', 'dinner')!.maxMinutes).toBe(15);
+    expect(cellAt(cells, 'tue', 'lunch')!.maxMinutes).toBeUndefined();
+    expect(cellAt(cells, 'wed', 'dinner')!.maxMinutes).toBeUndefined();
+  });
+
+  it('lets a week override cap win over the household cap', () => {
+    const h = household({ timeCaps: { tue: { dinner: 15 } } });
+    const { cells } = expandWeek(h, request({ overrides: [{ day: 'tue', slot: 'dinner', maxMinutes: 45 }] }));
+    expect(cellAt(cells, 'tue', 'dinner')!.maxMinutes).toBe(45);
+  });
+
+  it('applies a week override cap to a cell with no household cap', () => {
+    const { cells } = expandWeek(household(), request({ overrides: [{ day: 'sat', slot: 'lunch', maxMinutes: 30 }] }));
+    expect(cellAt(cells, 'sat', 'lunch')!.maxMinutes).toBe(30);
+  });
+});
+
+describe('HouseholdSchema: timeCaps', () => {
+  it('reads a stored household saved before time caps existed as having none', () => {
+    const { timeCaps: _drop, ...older } = defaultHousehold();
+    const parsed = HouseholdSchema.parse(older);
+    expect(parsed.timeCaps).toEqual({});
+  });
+
+  it('rejects caps outside 5 to 180 minutes', () => {
+    const bad = { ...defaultHousehold(), timeCaps: { mon: { dinner: 3 } } };
+    expect(HouseholdSchema.safeParse(bad).success).toBe(false);
   });
 });

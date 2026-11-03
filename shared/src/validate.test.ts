@@ -3,6 +3,9 @@ import { INGREDIENTS } from './catalog';
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
 import { buildList, toPlannedMeals, validate, type ValidateContext } from './validate';
 import { defaultHousehold, type Household } from './index';
+import { expandWeek } from './grid';
+import type { PantryItem } from './pantry';
+import type { PlanRequest } from './plan';
 import type { FixedCost } from './fixed';
 import type { ListItem, MealPlan, PlannedMeal, RawMeal, SlotCell } from './plan';
 import type { Deal } from './scoring';
@@ -509,5 +512,71 @@ describe('buildList: price-match hint', () => {
     };
     const list = buildList(meals, NO_FIXED, [deal('broccoli', 'A', 5), deal('spinach', 'A', 1)], [matchedItem], ['A', 'B'], 1, ['A']);
     expect(list.find((i) => i.ingredientId === 'broccoli')!.priceMatch).toEqual({ fromStore: 'B', pricePerUnit: 3 });
+  });
+});
+
+describe('validate: busy hard cap from household time caps', () => {
+  it('a timeCaps entry becomes a hard error for a meal over it', () => {
+    const h = household({ timeCaps: { wed: { dinner: 15 } } });
+    const { cells } = expandWeek(h, { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [], useItUp: true });
+    const meals = cleanMeals(cells).map((m) => (m.day === 'wed' && m.slot === 'dinner' ? { ...m, activeMinutes: 20 } : m));
+    const issues = validate(planOf(meals), ctxOf({ cells, household: h }));
+    expect(issues.find((i) => i.check === 'busy')).toMatchObject({ severity: 'error' });
+    expect(issues.find((i) => i.check === 'busy')!.message).toContain('allows 15');
+  });
+
+  it('a week override cap wins over the household cap', () => {
+    const h = household({ timeCaps: { wed: { dinner: 15 } } });
+    const request: PlanRequest = { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [{ day: 'wed', slot: 'dinner', maxMinutes: 30 }], useItUp: true };
+    const { cells } = expandWeek(h, request);
+    expect(cells.find((c) => c.day === 'wed' && c.slot === 'dinner')!.maxMinutes).toBe(30);
+  });
+});
+
+describe('validate: use-it-up', () => {
+  const soon = [{ ingredientId: 'spinach', expiresOn: '2026-11-12' }];
+
+  it('warns when a pantry item due soon is in no meal', () => {
+    const issues = validate(planOf(cleanMeals()), ctxOf({ useFirst: soon }));
+    const hit = issues.find((i) => i.check === 'use-it-up');
+    expect(hit).toMatchObject({ severity: 'warning' });
+    expect(hit!.message).toBe('Use Spinach before Nov 12: add it to a meal.');
+  });
+
+  it('passes when a meal uses the item', () => {
+    const meals = cleanMeals().map((m, i) => (i === 0 ? { ...m, ingredients: [{ ingredientId: 'spinach', qty: 0.2, unit: 'kg' as const }] } : m));
+    expect(checksOf(validate(planOf(meals), ctxOf({ useFirst: soon })), 'warning')).not.toContain('use-it-up');
+  });
+
+  it('does nothing when use-it-up is off', () => {
+    const issues = validate(planOf(cleanMeals(), {}, { useItUp: false }), ctxOf({ useFirst: soon }));
+    expect(checksOf(issues, 'warning')).not.toContain('use-it-up');
+  });
+});
+
+describe('validate: never-again', () => {
+  it('errors when a planned meal matches a never name, ignoring case', () => {
+    const meals = cleanMeals().map((m, i) => (i === 0 ? { ...m, name: 'Liver and onions' } : m));
+    const issues = validate(planOf(meals), ctxOf({ neverMeals: ['liver AND onions'] }));
+    expect(issues.find((i) => i.check === 'never-again')).toMatchObject({ severity: 'error' });
+  });
+
+  it('passes when no planned meal is on the never list', () => {
+    expect(checksOf(validate(planOf(cleanMeals()), ctxOf({ neverMeals: ['Liver and onions'] })))).not.toContain('never-again');
+  });
+});
+
+describe('buildList: pantry', () => {
+  it('leaves out an ingredient the pantry covers fully', () => {
+    const pantry: PantryItem[] = [{ id: 'p1', ingredientId: 'broccoli', qty: 2, unit: 'kg', addedOn: '2026-11-01', expiresOn: '2026-11-08', source: 'manual' }];
+    const list = buildList(oneMeal([{ id: 'broccoli', qty: 1 }]), NO_FIXED, [deal('broccoli', 'A', 2)], [], ['A'], 1, [], pantry);
+    expect(list).toEqual([]);
+  });
+
+  it('buys only the part the pantry does not cover, rounding packs up', () => {
+    // Need 1 kg, pantry holds 0.6 kg, packs are 0.5 kg: 0.4 kg short, so one pack.
+    const pantry: PantryItem[] = [{ id: 'p1', ingredientId: 'broccoli', qty: 0.6, unit: 'kg', addedOn: '2026-11-01', expiresOn: '2026-11-08', source: 'manual' }];
+    const list = buildList(oneMeal([{ id: 'broccoli', qty: 1 }]), NO_FIXED, [deal('broccoli', 'A', 2, 0.5)], [], ['A'], 1, [], pantry);
+    expect(list[0]).toMatchObject({ packs: 1, total: 1, usedIn: ['m1'] });
   });
 });

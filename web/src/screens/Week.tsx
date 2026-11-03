@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { flyerWeekOf, type Day, type MealPlan } from '@provisions/shared';
-import { errorMessage, getHousehold, getPlan } from '../api';
+import { flyerWeekOf, type Day, type MealPlan, type Rating, type RatingKind } from '@provisions/shared';
+import { errorMessage, getHousehold, getPlan, getRatings, saveRating } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { RefreshIcon } from '../components/Icons';
@@ -9,7 +9,24 @@ import { SamplePill } from '../components/SamplePill';
 import { secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
 import { planToWeek } from '../lib/planView';
-import { MOCK_WEEK, type MockTag } from '../mocks/week';
+import { MOCK_WEEK, type MockTag, type Rateable } from '../mocks/week';
+
+const RATING_OPTIONS: { value: RatingKind; label: string }[] = [
+  { value: 'up', label: 'Liked' },
+  { value: 'down', label: 'Not again' },
+  { value: 'never', label: 'Never' },
+];
+
+const sameMeal = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** The rating everyone eating the meal has given it, or null when they differ or none has rated it. */
+function ratingFor(ratings: Rating[], meal: Rateable): RatingKind | null {
+  const values = meal.personIds.map(
+    (id) => ratings.find((r) => r.personId === id && sameMeal(r.mealName, meal.name))?.rating ?? null,
+  );
+  const first = values[0];
+  return first && values.every((v) => v === first) ? first : null;
+}
 
 const TAG_TONE: Record<MockTag['kind'], string> = {
   craving: 'border-herb text-herbLight',
@@ -23,14 +40,17 @@ export default function Week() {
   const [selected, setSelected] = useState<Day>('thu');
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [source, setSource] = useState<Source>({ status: 'loading' });
+  const [ratings, setRatings] = useState<Rating[]>([]);
+  const [ratingError, setRatingError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     const weekOf = flyerWeekOf(new Date());
-    Promise.all([getPlan(weekOf), getHousehold().catch(() => null)])
-      .then(([plan, household]) => {
+    Promise.all([getPlan(weekOf), getHousehold().catch(() => null), getRatings().catch(() => [] as Rating[])])
+      .then(([plan, household, saved]) => {
         if (!alive) return;
         setNames(new Map((household?.people ?? []).map((p) => [p.id, p.name])));
+        setRatings(saved);
         setSource(plan ? { status: 'plan', plan } : { status: 'sample', error: null });
       })
       .catch((e: unknown) => {
@@ -55,6 +75,22 @@ export default function Week() {
   const day = week.days.find((d) => d.key === selected) ?? week.days[0]!;
   const pct = week.budget > 0 ? Math.min(100, (week.spent / week.budget) * 100) : 0;
   const errors = plan?.issues.filter((i) => i.severity === 'error') ?? [];
+
+  // Records the rating for every household member eating the meal, then reloads the ratings.
+  async function rate(meal: Rateable, value: RatingKind) {
+    setRatingError(null);
+    try {
+      await Promise.all(
+        meal.personIds.map((personId) =>
+          saveRating({ mealName: meal.name, personId, rating: value, ingredientIds: meal.ingredientIds }),
+        ),
+      );
+      setRatings(await getRatings());
+    } catch (e) {
+      setRatingError(errorMessage(e));
+      setRatings(await getRatings().catch(() => ratings));
+    }
+  }
 
   return (
     <Page>
@@ -164,10 +200,30 @@ export default function Week() {
                 ))}
               </div>
             )}
+            {m.rateable && (
+              <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label={`Rate ${m.name}`}>
+                {RATING_OPTIONS.map((opt) => {
+                  const on = ratingFor(ratings, m.rateable!) === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => rate(m.rateable!, opt.value)}
+                      className={`h-11 rounded-md border text-[13px] ${on ? 'border-herb text-herbLight' : 'border-edge text-muted'}`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </article>
         ))}
         {day.meals.length === 0 && <p className="text-[14px] text-muted">Nothing planned.</p>}
       </div>
+
+      {ratingError && <p className="mt-6 text-[13px] text-[#D98C7A]">Could not save rating: {ratingError}</p>}
 
       <Link to="/plan" className={`mt-10 w-full ${secondaryBtn}`}>
         Plan next week

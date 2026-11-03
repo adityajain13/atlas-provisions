@@ -112,6 +112,8 @@ export const HouseholdSchema = z.object({
   maxStores: z.number().int().min(1).max(5),
   defaultBudget: z.number().min(0, 'Budget cannot be negative'),
   itemRules: z.array(ItemRuleSchema),
+  // timeCaps[day][slot] = most active minutes a meal in that slot may take (busy nights).
+  timeCaps: z.record(z.record(z.number().int().min(5).max(180))).default({}),
 });
 export type Household = z.infer<typeof HouseholdSchema>;
 
@@ -143,6 +145,7 @@ export function defaultHousehold(): Household {
     maxStores: 2,
     defaultBudget: 150,
     itemRules: [],
+    timeCaps: {},
   };
 }
 
@@ -170,3 +173,5 @@ export * from './plan';
 export * from './grid';
 export * from './fixed';
 export * from './validate';
+export * from './pantry';
+export * from './ratings';
