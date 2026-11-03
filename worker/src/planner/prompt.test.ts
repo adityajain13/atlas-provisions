@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHousehold, expandWeek, type Deal, type FixedCost, type PlanRequest, type Household } from '@provisions/shared';
-import { buildAvailable, buildPayload, SYSTEM_PROMPT } from './prompt';
+import { defaultHousehold, expandWeek, INGREDIENT_BY_ID, type Deal, type FixedCost, type PlanRequest, type Household } from '@provisions/shared';
+import { buildAvailable, buildPayload, SUBMIT_PLAN_TOOL, SYSTEM_PROMPT } from './prompt';
 
 const noFixed: FixedCost = { cost: 0, listItems: [], macrosByPerson: {}, leftovers: [], needs: [], issues: [] };
 
@@ -9,6 +9,15 @@ function deal(ingredientId: string, score: number, staple = false): Deal {
 }
 
 describe('buildAvailable', () => {
+  it('gives each available item its ingredient shelf life, for the prep rules', () => {
+    const out = buildAvailable([deal('broccoli', 0.5)], noFixed, [
+      { id: 'p1', ingredientId: 'greek-yogurt', qty: 0.4, unit: INGREDIENT_BY_ID['greek-yogurt']!.baseUnit, addedOn: '2026-11-10', expiresOn: '2026-11-13', source: 'manual' as const },
+    ]);
+    const shelf = (id: string) => out.find((a) => a.id === id)?.shelfLifeDays;
+    expect(shelf('broccoli')).toBe(INGREDIENT_BY_ID['broccoli']!.shelfLifeDays);
+    expect(shelf('greek-yogurt')).toBe(INGREDIENT_BY_ID['greek-yogurt']!.shelfLifeDays);
+  });
+
   it('keeps the best-scoring entry per ingredient and marks staples', () => {
     const out = buildAvailable([deal('broccoli', 0.2), deal('broccoli', 0.5), deal('butter', 0.1, true)], noFixed);
     expect(out.find((a) => a.id === 'broccoli')).toMatchObject({ source: 'deal', score: 0.5 });
@@ -51,6 +60,7 @@ describe('buildPayload', () => {
     expect(payload.people[0]).toMatchObject({ id: 'ann', proteinTargetG: 80 });
     expect(payload.feedback).toBeNull();
     expect(payload.neverBuy).toEqual(['cheddar']);
+    expect(payload.prepDay).toBe('sun');
   });
 
   it('fills useFirst from fixed-meal leftovers only when use-it-up is on, and avoid only with the 14-day rule', () => {
@@ -95,6 +105,22 @@ describe('buildPayload', () => {
     expect(payload.useFirst).toEqual(['spinach']);
     expect(payload.favourites).toEqual(['Tacos']);
     expect(payload.avoid).toEqual(['Fish', 'Chili']); // the 14-day rule is off here, so recent dinners are not added
+  });
+
+  it('system prompt has the prep rules, and says to omit prep without a prep day', () => {
+    expect(SYSTEM_PROMPT).toContain('If `prepDay` is null, omit `prep`.');
+    expect(SYSTEM_PROMPT).toContain('shelfLifeDays');
+    expect(SYSTEM_PROMPT).toContain('forMeals');
+    expect(SYSTEM_PROMPT).toContain('90 minutes');
+  });
+
+  it('submit_plan takes an optional prep list whose steps link to meal ids', () => {
+    const schema = SUBMIT_PLAN_TOOL.input_schema;
+    expect(schema.required).toEqual(['meals', 'notes']);
+    const prep = schema.properties.prep;
+    expect(prep.required).toEqual(['day', 'steps']);
+    expect(prep.properties.steps.items.required).toEqual(['id', 'task', 'minutes', 'forMeals']);
+    expect(prep.properties.steps.items.properties.forMeals.type).toBe('array');
   });
 
   it('system prompt asks for the submit_plan tool and the no-prices rule', () => {

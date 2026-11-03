@@ -270,3 +270,106 @@ describe('runPlanner: pantry and ratings', () => {
     expect(plan.issues.some((i) => i.check === 'never-again' && i.severity === 'error')).toBe(true);
   });
 });
+
+describe('runPlanner: prep in the same call', () => {
+  /** A prep list for one step, serving the given meal ids. */
+  const prepWith = (task: string, forMeals: string[]) => ({ day: 'sun', steps: [{ task, minutes: 10, forMeals }] });
+  const isPrepIssue = (i: { check: string }) => i.check === 'prep';
+  const PREP_MISSING = { check: 'prep', severity: 'warning', message: "Prep plan wasn't included; tap Regenerate prep." };
+
+  it('returns the prep from the same call, with ids, rounded minutes and only this plan\'s meal ids', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const raw: RawPlan = {
+      ...planFor(cells, DEAL_ID, DEAL_UNIT_QTY),
+      prep: {
+        day: 'sun',
+        steps: [
+          { id: 'whatever', task: 'Cook rice', minutes: 20.4, forMeals: ['m0', 'ghost-meal'], storage: 'fridge, 4 days' },
+          { id: 'x', task: 'Chop onion', minutes: 5, forMeals: ['m1'] },
+        ],
+      },
+    };
+    const { client, submitPlan, seen } = fakeClient([raw]);
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPlan).toHaveBeenCalledTimes(1);
+    expect(plan.prep).toEqual({
+      day: 'sun',
+      steps: [
+        { id: 'prep-1', task: 'Cook rice', minutes: 20, forMeals: ['m0'], storage: 'fridge, 4 days' },
+        { id: 'prep-2', task: 'Chop onion', minutes: 5, forMeals: ['m1'] },
+      ],
+      totalMinutes: 25,
+    });
+    expect(plan.issues.filter(isPrepIssue)).toEqual([]);
+    expect((seen[0]!.payload as unknown as { prepDay: string }).prepDay).toBe('sun');
+  });
+
+  it('takes the prep from the attempt that is retried and then kept', async () => {
+    const h = household();
+    const req = request({ budget: 150 });
+    const cells = cellsOf(h, req);
+    const first: RawPlan = { ...planFor(cells, DEAL_ID, 200), prep: prepWith('First attempt prep', ['m0']) }; // over budget
+    const second: RawPlan = { ...planFor(cells, DEAL_ID, DEAL_UNIT_QTY), prep: prepWith('Second attempt prep', ['m0']) };
+    const { client, submitPlan } = fakeClient([first, second]);
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPlan).toHaveBeenCalledTimes(2);
+    expect(plan.prep?.steps.map((s) => s.task)).toEqual(['Second attempt prep']);
+  });
+
+  it('keeps the prep of the attempt with the fewest errors, not the last attempt', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const withBadCells = (n: number, task: string): RawPlan => {
+      const plan = planFor(cells, DEAL_ID, DEAL_UNIT_QTY);
+      plan.meals.slice(0, n).forEach((m) => (m.ingredients = [{ id: 'not-a-real-ingredient', qty: 1 }]));
+      return { ...plan, prep: prepWith(task, ['m0']) };
+    };
+    const { client } = fakeClient([withBadCells(cells.length, 'Worst attempt'), withBadCells(1, 'Best attempt'), withBadCells(3, 'Last attempt')]);
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(plan.attempts).toBe(3);
+    expect(plan.issues.filter((i) => i.severity === 'error')).toHaveLength(1);
+    expect(plan.prep?.steps.map((s) => s.task)).toEqual(['Best attempt']);
+  });
+
+  it.each([
+    ['is missing', undefined],
+    ['is the wrong shape', { steps: [{ task: '', minutes: 5, forMeals: [] }] }],
+  ])('warns and does not retry when the prep %s', async (_label, prep) => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const raw: RawPlan = { ...planFor(cells, DEAL_ID, DEAL_UNIT_QTY), prep };
+    const { client, submitPlan } = fakeClient([raw]);
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPlan).toHaveBeenCalledTimes(1);
+    expect(plan.attempts).toBe(1);
+    expect(plan.prep).toBeUndefined();
+    expect(plan.issues.filter(isPrepIssue)).toEqual([PREP_MISSING]);
+    expect(plan.issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('sends no prep day and no prep warning when the household has no prep day', async () => {
+    const h = household({ prepDay: null });
+    const req = request();
+    const cells = cellsOf(h, req);
+    const raw: RawPlan = { ...planFor(cells, DEAL_ID, DEAL_UNIT_QTY), prep: prepWith('Ignored prep', ['m0']) };
+    const { client, seen } = fakeClient([raw]);
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect((seen[0]!.payload as unknown as { prepDay: unknown }).prepDay).toBeNull();
+    expect(plan.prep).toBeUndefined();
+    expect(plan.issues.filter(isPrepIssue)).toEqual([]);
+  });
+});

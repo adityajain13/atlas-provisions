@@ -102,6 +102,12 @@ export async function generatePlan(req: PlanRequest): Promise<MealPlan> {
   return (await res.json()) as MealPlan;
 }
 
+/** Rebuilds only the batch prep of a saved plan, with one Haiku call. Returns the updated plan. */
+export async function regeneratePrep(weekOf: string): Promise<MealPlan> {
+  const res = await ensureOk(await authFetch(`${BASE}/plan/${weekOf}/prep`, { method: 'POST' }));
+  return (await res.json()) as MealPlan;
+}
+
 /** The saved plan for a week, or null when there is none. */
 export async function getPlan(weekOf: string): Promise<MealPlan | null> {
   const res = await authFetch(`${BASE}/plan/${weekOf}`);
