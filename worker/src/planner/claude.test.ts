@@ -28,7 +28,7 @@ describe('anthropicClient', () => {
     expect(headers['anthropic-version']).toBe('2023-06-01');
     const body = JSON.parse(init.body as string);
     expect(body.model).toBe('test-model');
-    expect(body.max_tokens).toBe(8000);
+    expect(body.max_tokens).toBe(16000);
     expect(body.system).toEqual([{ type: 'text', text: 'SYSTEM', cache_control: { type: 'ephemeral' } }]);
     expect(body.tools).toEqual([SUBMIT_PLAN_TOOL]);
     expect(body.tool_choice).toEqual({ type: 'tool', name: 'submit_plan' });
@@ -56,5 +56,16 @@ describe('anthropicClient', () => {
   it('throws when the tool input has no meals array', async () => {
     const client = anthropicClient('k', 'm', fetchReturning(200, toolUse({ notes: 'no meals' })));
     await expect(client.submitPlan('s', {})).rejects.toThrow('no meals array');
+  });
+
+  it('passes the prep list from the same call through, unchecked', async () => {
+    const prep = { day: 'sun', steps: [{ id: 'a', task: 'Cook rice', minutes: 20, forMeals: ['thu-dinner'] }] };
+    const client = anthropicClient('k', 'm', fetchReturning(200, toolUse({ ...PLAN_INPUT, prep })));
+    expect(await client.submitPlan('s', {})).toEqual({ ...PLAN_INPUT, prep });
+  });
+
+  it('leaves prep out when the call did not return it', async () => {
+    const client = anthropicClient('k', 'm', fetchReturning(200, toolUse(PLAN_INPUT)));
+    expect(await client.submitPlan('s', {})).not.toHaveProperty('prep');
   });
 });

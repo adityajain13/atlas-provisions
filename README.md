@@ -57,6 +57,10 @@ curl "http://localhost:8787/provisions/api/deals?date=2026-11-12"
 
 The dev route returns 404 unless `DEV=1`. It is `0` in `wrangler.jsonc`, so it is off in deploys.
 
+## Planner
+
+A plan is one Claude call that returns the meals and the batch-prep list together; "Regenerate prep" is a separate Haiku call that rebuilds only the prep.
+
 ## Testing
 
 `npm test` runs vitest over `shared/` and `worker/`. Most tests cover pure logic (parsing, matching,

@@ -1,6 +1,8 @@
 import {
+  DAYS,
   INGREDIENT_BY_ID,
   VARIETY_RULES,
+  type Day,
   type Deal,
   type PantryItem,
   type FixedCost,
@@ -24,6 +26,9 @@ export const SYSTEM_PROMPT = [
   'Respect `varietyRules` that are true. Avoid `avoid` meals; you may reuse `favourites`.',
   'Quantities are in each ingredient\'s `unit`, as the total for that meal. Do not estimate prices; code computes cost.',
   'If `feedback` is present, the previous plan broke these checks. Fix every error listed there and keep what already worked.',
+  'Batch prep: when `prepDay` is set, also return `prep` for that day: cook ahead what keeps (grains, proteins, sauces), wash and chop, marinate, with active minutes and how to store each step.',
+  'Only prep what keeps until it is eaten: respect each ingredient\'s `shelfLifeDays`. Link each prep step to the meal ids it serves in `forMeals`. Keep prep under 90 minutes total when possible.',
+  'If `prepDay` is null, omit `prep`.',
   'Return the plan only via the submit_plan tool.',
 ].join('\n');
 
@@ -62,6 +67,33 @@ export const SUBMIT_PLAN_TOOL = {
         },
       },
       notes: { type: 'string', description: 'Short notes for the household about the week' },
+      prep: {
+        type: 'object',
+        description: "Batch-prep list for the household's prep day, only when payload.prepDay is set.",
+        properties: {
+          day: { type: 'string', enum: [...DAYS], description: 'The prep day, as given in `prepDay` (its key)' },
+          steps: {
+            type: 'array',
+            maxItems: 30,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                task: { type: 'string', description: 'What to do, e.g. "Cook a tray of chicken thighs"' },
+                minutes: { type: 'number', description: 'Active minutes for this step' },
+                forMeals: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Meal ids from this same submission that this step serves',
+                },
+                storage: { type: 'string', description: 'How to store it and until when, e.g. "fridge, 3 days"' },
+              },
+              required: ['id', 'task', 'minutes', 'forMeals'],
+            },
+          },
+        },
+        required: ['day', 'steps'],
+      },
     },
     required: ['meals', 'notes'],
   },
@@ -76,6 +108,7 @@ export interface AvailableItem {
   source: 'deal' | 'staple' | 'pantry' | 'fixed-leftover';
   allergens: string[];
   vegetarian: boolean;
+  shelfLifeDays: number;
 }
 
 /**
@@ -101,6 +134,7 @@ export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryIt
       source,
       allergens: ing.allergens,
       vegetarian: ing.vegetarian,
+      shelfLifeDays: ing.shelfLifeDays,
     });
   }
   const stock = new Map<string, number>();
@@ -119,6 +153,7 @@ export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryIt
       source: 'pantry',
       allergens: ing.allergens,
       vegetarian: ing.vegetarian,
+      shelfLifeDays: ing.shelfLifeDays,
     });
   }
   for (const l of fixed.leftovers) {
@@ -134,6 +169,7 @@ export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryIt
       source: 'fixed-leftover',
       allergens: ing.allergens,
       vegetarian: ing.vegetarian,
+      shelfLifeDays: ing.shelfLifeDays,
     });
   }
   return [...byId.values()];
@@ -169,6 +205,7 @@ export interface PlannerPayload {
   favourites: string[];
   avoid: string[];
   feedback: ValidationIssue[] | null;
+  prepDay: Day | null;
 }
 
 export function buildPayload(input: PayloadInput): PlannerPayload {
@@ -177,6 +214,7 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
   const noRepeat = household.varietyRules.noRepeatDinner14 === true;
   return {
     weekOf: request.weekOf,
+    prepDay: household.prepDay,
     slots: input.cells.map((c) => ({
       id: `${c.day}-${c.slot}`,
       day: c.day,

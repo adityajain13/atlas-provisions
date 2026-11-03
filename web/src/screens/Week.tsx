@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { flyerWeekOf, type Day, type MealPlan, type Rating, type RatingKind } from '@provisions/shared';
-import { errorMessage, getHousehold, getPlan, getRatings, saveRating } from '../api';
+import { errorMessage, getHousehold, getPlan, getRatings, regeneratePrep, saveRating } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { PrepArticle } from '../components/PrepArticle';
@@ -44,6 +44,8 @@ export default function Week() {
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [ratingError, setRatingError] = useState<string | null>(null);
   const [prepDay, setPrepDay] = useState<Day | null>(null);
+  const [prepBusy, setPrepBusy] = useState(false);
+  const [prepError, setPrepError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -81,6 +83,20 @@ export default function Week() {
   const prep = plan?.prep && plan.prep.day === selected ? plan.prep : null;
   const prepWarning =
     plan && !plan.prep && prepDay === selected ? (plan.issues.find((i) => i.check === 'prep')?.message ?? null) : null;
+
+  // Rebuilds the prep list alone and shows the plan it returns.
+  async function retryPrep() {
+    if (!plan) return;
+    setPrepBusy(true);
+    setPrepError(null);
+    try {
+      setSource({ status: 'plan', plan: await regeneratePrep(plan.weekOf) });
+    } catch (e) {
+      setPrepError(errorMessage(e));
+    } finally {
+      setPrepBusy(false);
+    }
+  }
 
   // Records the rating for every household member eating the meal, then reloads the ratings.
   async function rate(meal: Rateable, value: RatingKind) {
@@ -177,7 +193,20 @@ export default function Week() {
 
       <div className="mt-6 space-y-6">
         {plan && prep && <PrepArticle plan={plan} prep={prep} />}
-        {prepWarning && <p className="text-[13px] text-muted">{prepWarning}</p>}
+        {prepWarning && (
+          <div className="space-y-3">
+            <p className="text-[13px] text-muted">{prepWarning}</p>
+            <button
+              type="button"
+              onClick={retryPrep}
+              disabled={prepBusy}
+              className={`${secondaryBtn} disabled:opacity-40`}
+            >
+              {prepBusy ? 'Regenerating prep…' : 'Regenerate prep'}
+            </button>
+            {prepError && <p className="text-[13px] text-[#D98C7A]">Could not regenerate prep: {prepError}</p>}
+          </div>
+        )}
         {day.meals.map((m) => (
           <article key={`${m.slot}-${m.name}`} className="border-t border-line pt-4">
             <div className="flex items-center justify-between">

@@ -212,6 +212,7 @@ app.post(`${API}/plan`, async (c) => {
     const today = torontoDate();
     const pantry = await loadPantry(c.env.DB);
     const ratings = ratingSignals(await loadRatings(c.env.DB), household.people, today);
+    // One Claude call makes the meals and, when a prep day is set, the prep list.
     const plan = await runPlanner({
       household,
       request,
@@ -224,20 +225,14 @@ app.post(`${API}/plan`, async (c) => {
       today,
       client: anthropicClient(apiKey, c.env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
     });
-    // Batch prep is optional: attachPrep never throws, so the plan is saved either way.
-    const withPrep = await attachPrep(
-      plan,
-      household.prepDay,
-      anthropicPrepClient(apiKey, c.env.PREP_MODEL ?? DEFAULT_PREP_MODEL),
-    );
-    await savePlan(c.env.DB, withPrep);
-    return c.json(withPrep);
+    await savePlan(c.env.DB, plan);
+    return c.json(plan);
   } catch (e) {
     return c.text(e instanceof Error ? e.message : 'Planner failed', 500);
   }
 });
 
-// Regenerates only the batch prep for a saved plan, for the household's current prep day.
+// Regenerates only the batch prep for a saved plan, for the household's current prep day (one Haiku call).
 app.post(`${API}/plan/:weekOf/prep`, async (c) => {
   const apiKey = c.env.ANTHROPIC_API_KEY;
   if (!apiKey) return c.text('Planner not configured: add the ANTHROPIC_API_KEY secret.', 503);

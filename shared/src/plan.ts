@@ -135,6 +135,7 @@ export interface RawMeal {
 export interface RawPlan {
   meals: RawMeal[];
   notes: string;
+  prep?: unknown; // the batch-prep list from the same call, when prepDay is set; checked by the worker
 }
 
 export interface MealPlan {

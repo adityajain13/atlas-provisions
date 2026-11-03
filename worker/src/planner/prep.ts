@@ -78,11 +78,11 @@ export function buildPrepPayload(plan: MealPlan, prepDay: Day) {
 }
 
 /**
- * Ask the model for the prep list and check it. Ids are assigned here, minutes are rounded, and
- * meal ids that are not in the plan are dropped. Throws when the output does not match the shape.
+ * Check a model's prep output and turn it into a PrepPlan. Ids are assigned here (the model's
+ * step ids are ignored), minutes are rounded, and meal ids not in `mealIds` are dropped. The day
+ * is `prepDay`, the household's setting. Throws when the output does not match the shape.
  */
-export async function generatePrep(plan: MealPlan, prepDay: Day, client: PrepClient): Promise<PrepPlan> {
-  const raw = await client.submitPrep(prepSystemPrompt(prepDay), buildPrepPayload(plan, prepDay));
+export function normalisePrep(raw: unknown, prepDay: Day, mealIds: ReadonlySet<string>): PrepPlan {
   const parsed = RawPrepSchema.safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
@@ -90,7 +90,6 @@ export async function generatePrep(plan: MealPlan, prepDay: Day, client: PrepCli
     throw new Error(`The prep list was not in the expected shape${where}`);
   }
 
-  const mealIds = new Set(plan.meals.map((m) => m.id));
   const steps: PrepStep[] = parsed.data.steps.map((s, i) => ({
     id: `prep-${i + 1}`,
     task: s.task,
@@ -100,6 +99,15 @@ export async function generatePrep(plan: MealPlan, prepDay: Day, client: PrepCli
   }));
   const totalMinutes = steps.reduce((sum, s) => sum + s.minutes, 0);
   return PrepPlanSchema.parse({ day: prepDay, steps, totalMinutes });
+}
+
+/**
+ * Ask the model for the prep list and check it. Used by the on-demand regenerate path. Throws
+ * when the output does not match the shape.
+ */
+export async function generatePrep(plan: MealPlan, prepDay: Day, client: PrepClient): Promise<PrepPlan> {
+  const raw = await client.submitPrep(prepSystemPrompt(prepDay), buildPrepPayload(plan, prepDay));
+  return normalisePrep(raw, prepDay, new Set(plan.meals.map((m) => m.id)));
 }
 
 /**

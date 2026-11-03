@@ -80,13 +80,18 @@ export function anthropicClient(
 ): PlannerClient {
   return {
     async submitPlan(system, payload) {
-      const input = (await callTool(apiKey, model, system, payload, SUBMIT_PLAN_TOOL, fetchImpl)) as
+      const input = (await callTool(apiKey, model, system, payload, SUBMIT_PLAN_TOOL, fetchImpl, 16000)) as
         | Partial<RawPlan>
         | undefined;
       if (!input || !Array.isArray(input.meals)) {
         throw new Error('submit_plan input has no meals array');
       }
-      return { meals: input.meals, notes: typeof input.notes === 'string' ? input.notes : '' };
+      return {
+        meals: input.meals,
+        notes: typeof input.notes === 'string' ? input.notes : '',
+        // Checked by runPlanner against the kept attempt's meals. Missing or invalid prep is not an error.
+        ...(input.prep !== undefined ? { prep: input.prep } : {}),
+      };
     },
   };
 }

@@ -8,6 +8,7 @@ import {
   torontoDate,
   usableItems,
   validate,
+  type Day,
   type Deal,
   type Household,
   type MatchedItem,
@@ -15,11 +16,29 @@ import {
   type PantryItem,
   type PlannedMeal,
   type PlanRequest,
+  type PrepPlan,
   type RatingSignals,
+  type RawPlan,
   type ValidationIssue,
 } from '@provisions/shared';
 import { buildAvailable, buildPayload, SYSTEM_PROMPT, type PlannerPayload } from './prompt';
 import type { PlannerClient } from './claude';
+import { normalisePrep } from './prep';
+
+const PREP_MISSING: ValidationIssue = {
+  check: 'prep',
+  severity: 'warning',
+  message: "Prep plan wasn't included; tap Regenerate prep.",
+};
+
+/** The prep list from one call's output, checked against that call's meals. Undefined when missing or invalid. */
+function prepFrom(raw: RawPlan, meals: PlannedMeal[], prepDay: Day): PrepPlan | undefined {
+  try {
+    return normalisePrep(raw.prep, prepDay, new Set(meals.map((m) => m.id)));
+  } catch {
+    return undefined;
+  }
+}
 
 export interface RunInput {
   household: Household;
@@ -45,9 +64,11 @@ function storeNames(household: Household, deals: Deal[], matched: MatchedItem[])
 const errorCount = (issues: ValidationIssue[]) => issues.filter((i) => i.severity === 'error').length;
 
 /**
- * Plan one week. Expand the grid, cost the fixed meals, ask the model for meals, then price and
- * check the result. If there are errors and attempts remain, the issues go back to the model as
- * feedback and it tries again. The attempt with the fewest errors, then the lowest cost, is kept.
+ * Plan one week. Expand the grid, cost the fixed meals, ask the model for meals (and, when the
+ * household has a prep day, the prep list in the same call), then price and check the result. If
+ * there are errors and attempts remain, the issues go back to the model as feedback and it tries
+ * again. The attempt with the fewest errors, then the lowest cost, is kept, with its own prep.
+ * Prep never counts as an error and never triggers a retry: missing or invalid prep is a warning.
  * With no plannable cells the model is not called.
  */
 export async function runPlanner(input: RunInput): Promise<MealPlan> {
@@ -125,6 +146,7 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
   });
 
   let best: MealPlan | null = null;
+  let bestPrep: PrepPlan | undefined;
   let attempts = 0;
   while (attempts < maxAttempts) {
     attempts++;
@@ -134,11 +156,17 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
     const errors = errorCount(plan.issues);
     if (best === null || errors < errorCount(best.issues) || (errors === errorCount(best.issues) && plan.totalCost < best.totalCost)) {
       best = plan;
+      bestPrep = household.prepDay ? prepFrom(raw, meals, household.prepDay) : undefined;
     }
     if (errors === 0) break;
     payload.feedback = plan.issues;
   }
 
-  best!.attempts = attempts;
-  return best!;
+  const kept = best!;
+  kept.attempts = attempts;
+  if (household.prepDay) {
+    if (bestPrep) kept.prep = bestPrep;
+    else kept.issues = [...kept.issues, PREP_MISSING];
+  }
+  return kept;
 }
