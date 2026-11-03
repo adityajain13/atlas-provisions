@@ -1,0 +1,322 @@
+[
+  {
+    "ingredientId": "chicken-thigh-boneless",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 9.4,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "chicken-thigh-boneless",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 9.9,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "chicken-thigh-boneless",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 8.8,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "chicken-thigh-boneless",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 9.6,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "ground-beef",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 8.6,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "ground-beef",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 8.9,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "ground-beef",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 9.2,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "ground-beef",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 8.4,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "salmon-fillet",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 22.5,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "salmon-fillet",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 24,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "salmon-fillet",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 21.8,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "salmon-fillet",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 23.1,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "eggs-large",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 0.29,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "eggs-large",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 0.31,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "eggs-large",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 0.27,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "eggs-large",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 0.3,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "bananas",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 0.68,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "bananas",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 0.66,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "bananas",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 0.7,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "bananas",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 0.64,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "green-bell-pepper",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 1.9,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "green-bell-pepper",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 2.1,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "green-bell-pepper",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 1.8,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "green-bell-pepper",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 2,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "grapes-red",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 6.8,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "grapes-red",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 7.1,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "grapes-red",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 6.5,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "grapes-red",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 6.9,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "milk-2-percent",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 1.3,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "milk-2-percent",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 1.34,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "milk-2-percent",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 1.28,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "milk-2-percent",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 1.36,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "greek-yogurt",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 6.5,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "greek-yogurt",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 6.8,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "greek-yogurt",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 6.2,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "greek-yogurt",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 6.6,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "frozen-peas",
+    "store": "No Frills",
+    "date": "2026-09-21",
+    "pricePerUnit": 2.9,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "frozen-peas",
+    "store": "FreshCo",
+    "date": "2026-10-05",
+    "pricePerUnit": 3.1,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "frozen-peas",
+    "store": "No Frills",
+    "date": "2026-10-19",
+    "pricePerUnit": 2.7,
+    "onSale": false,
+    "source": "fixture"
+  },
+  {
+    "ingredientId": "frozen-peas",
+    "store": "FreshCo",
+    "date": "2026-11-02",
+    "pricePerUnit": 2.8,
+    "onSale": false,
+    "source": "fixture"
+  }
+]

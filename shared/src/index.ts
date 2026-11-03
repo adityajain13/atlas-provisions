@@ -152,3 +152,18 @@ export function defaultHousehold(): Household {
 export function newId(): string {
   return crypto.randomUUID();
 }
+
+// Flyer ingest, catalogue and deal scoring (milestone 2A).
+// The catalogue's Ingredient interface is exported as CatalogIngredient because
+// this file already exports the zod Ingredient schema type above.
+export {
+  CATEGORY_ORDER,
+  INGREDIENTS,
+  INGREDIENT_BY_ID,
+  type Category,
+  type BaseUnit,
+  type Ingredient as CatalogIngredient,
+} from './catalog';
+export * from './parse';
+export * from './match';
+export * from './scoring';
