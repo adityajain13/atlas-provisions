@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   CATEGORY_ORDER,
   INGREDIENT_BY_ID,
-  INGREDIENTS,
   expiringSoon,
   formatUseBy,
   torontoDate,
@@ -14,9 +13,10 @@ import {
 import { addPantryItem, errorMessage, getPantry, removePantryItem, updatePantryItem } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
-import { ScanReceiptButton } from '../components/ScanReceiptButton';
+import { IngredientPicker } from '../components/IngredientPicker';
+import { ReceiptFlow } from '../components/ReceiptFlow';
 import { Section } from '../components/Section';
-import { addBtn, eyebrow, fieldCls, linkBtn, removeIconBtn } from '../components/ui';
+import { addBtn, fieldCls, linkBtn, removeIconBtn } from '../components/ui';
 
 const ERROR_TEXT = 'text-[#D98C7A]';
 const MAX_QTY = 10000;
@@ -35,11 +35,15 @@ export default function Pantry() {
   const [items, setItems] = useState<PantryItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     getPantry()
       .then(setItems)
       .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const today = torontoDate();
   const soon = items ? expiringSoon(items, today) : [];
@@ -116,7 +120,7 @@ export default function Pantry() {
       <Header title="Pantry" subtitle={subtitle} />
 
       <div className="mt-6">
-        <ScanReceiptButton />
+        <ReceiptFlow onSaved={reload} />
       </div>
 
       {error && <p className={`mt-4 text-[13px] ${ERROR_TEXT}`}>Could not update the pantry: {error}</p>}
@@ -152,14 +156,7 @@ export default function Pantry() {
   );
 }
 
-function matches(query: string): CatalogIngredient[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  return INGREDIENTS.filter((i) => i.name.toLowerCase().includes(q) || i.aliases.some((a) => a.includes(q))).slice(0, 8);
-}
-
 function AddForm({ onAdded }: { onAdded: (item: PantryItem) => void }) {
-  const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<CatalogIngredient | null>(null);
   const [qty, setQty] = useState('1');
   const [saving, setSaving] = useState(false);
@@ -167,7 +164,6 @@ function AddForm({ onAdded }: { onAdded: (item: PantryItem) => void }) {
 
   const amount = Number(qty);
   const valid = picked !== null && Number.isFinite(amount) && amount > 0 && amount <= MAX_QTY;
-  const results = picked ? [] : matches(query);
 
   async function add() {
     if (!picked || !valid) return;
@@ -177,7 +173,6 @@ function AddForm({ onAdded }: { onAdded: (item: PantryItem) => void }) {
       const item = await addPantryItem({ ingredientId: picked.id, qty: amount });
       onAdded(item);
       setPicked(null);
-      setQuery('');
       setQty('1');
     } catch (e) {
       setAddError(errorMessage(e));
@@ -214,34 +209,7 @@ function AddForm({ onAdded }: { onAdded: (item: PantryItem) => void }) {
           </div>
         </div>
       ) : (
-        <div>
-          <input
-            className={fieldCls}
-            placeholder="Search ingredients"
-            aria-label="Search ingredients"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          {results.length > 0 && (
-            <ul className="mt-2 space-y-1.5">
-              {results.map((i) => (
-                <li key={i.id}>
-                  <button
-                    type="button"
-                    onClick={() => setPicked(i)}
-                    className="flex h-11 w-full items-center justify-between rounded-md border border-edge px-3 text-left"
-                  >
-                    <span className="text-[15px] text-paper">{i.name}</span>
-                    <span className={eyebrow}>{i.category}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {query.trim() && results.length === 0 && (
-            <p className="mt-2 text-[13px] text-muted">No ingredient matches that.</p>
-          )}
-        </div>
+        <IngredientPicker onPick={setPicked} />
       )}
       {addError && <p className={`mt-3 text-[13px] ${ERROR_TEXT}`}>Could not add: {addError}</p>}
     </Section>

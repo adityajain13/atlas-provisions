@@ -6,9 +6,11 @@ import {
   type MealPlan,
   type PantryCreate,
   type PantryItem,
+  type ParsedReceipt,
   type PlanRequest,
   type Rating,
   type RatingInput,
+  type ReceiptCommit,
 } from '@provisions/shared';
 
 const BASE = '/provisions/api';
@@ -110,5 +112,36 @@ export async function saveRating(input: RatingInput): Promise<Rating> {
       body: JSON.stringify(input),
     }),
     (raw) => RatingSchema.parse(raw),
+  );
+}
+
+// ---- Receipts (milestone 3B) ----
+
+/** Reads a receipt photo (base64 JPEG). Nothing is saved until commitReceipt. */
+export async function parseReceipt(image: string): Promise<ParsedReceipt> {
+  return json(
+    await fetch(`${BASE}/receipts/parse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image }),
+    }),
+    (raw) => raw as ParsedReceipt,
+  );
+}
+
+export interface ReceiptCommitResult {
+  prices: number;
+  matches: number;
+  pantryItems: number;
+}
+
+export async function commitReceipt(input: ReceiptCommit): Promise<ReceiptCommitResult> {
+  return json(
+    await fetch(`${BASE}/receipts/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+    (raw) => raw as ReceiptCommitResult,
   );
 }

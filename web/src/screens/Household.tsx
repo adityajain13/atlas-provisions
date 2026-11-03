@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent,
 import {
   ALLERGEN_PRESETS,
   DAYS,
+  DAY_LONG,
   HouseholdSchema,
   SLOTS,
   UNITS,
@@ -100,6 +101,7 @@ export default function HouseholdScreen() {
         <>
           <PeopleSection h={h} update={update} />
           <ScheduleSection h={h} update={update} />
+          <PrepSection h={h} update={update} />
           <FixedMealsSection h={h} update={update} />
           <AllergiesSection h={h} />
           <EquipmentSection h={h} update={update} />
@@ -406,6 +408,32 @@ function ScheduleSection({ h, update }: { h: Household; update: Update }) {
         </div>
       ))}
       <TimeCaps h={h} update={update} />
+    </Section>
+  );
+}
+
+// ---------- Batch prep ----------
+
+function PrepSection({ h, update }: { h: Household; update: Update }) {
+  return (
+    <Section title="Batch prep" caption="Each new plan gets a prep list for this day.">
+      <label className="flex items-center justify-between gap-4">
+        <span className="text-[15px] text-paper">Prep day</span>
+        <select
+          className={`${fieldCls} w-40`}
+          value={h.prepDay ?? 'none'}
+          onChange={(e) =>
+            update((prev) => ({ ...prev, prepDay: e.target.value === 'none' ? null : (e.target.value as Day) }))
+          }
+        >
+          <option value="none">None</option>
+          {DAYS.map((d) => (
+            <option key={d} value={d}>
+              {DAY_LONG[d]}
+            </option>
+          ))}
+        </select>
+      </label>
     </Section>
   );
 }

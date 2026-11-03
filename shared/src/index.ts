@@ -114,6 +114,8 @@ export const HouseholdSchema = z.object({
   itemRules: z.array(ItemRuleSchema),
   // timeCaps[day][slot] = most active minutes a meal in that slot may take (busy nights).
   timeCaps: z.record(z.record(z.number().int().min(5).max(180))).default({}),
+  // Day to batch-prep for (Thu to Wed), or null for none. Stored households without it get Sunday.
+  prepDay: z.enum(DAYS).nullable().default('sun'),
 });
 export type Household = z.infer<typeof HouseholdSchema>;
 
@@ -146,6 +148,7 @@ export function defaultHousehold(): Household {
     defaultBudget: 150,
     itemRules: [],
     timeCaps: {},
+    prepDay: 'sun',
   };
 }
 
@@ -175,3 +178,5 @@ export * from './fixed';
 export * from './validate';
 export * from './pantry';
 export * from './ratings';
+export * from './prep';
+export * from './receipt';
