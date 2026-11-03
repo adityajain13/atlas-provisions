@@ -1,10 +1,7 @@
 import { z } from 'zod';
 
-export const DAYS = ['thu', 'fri', 'sat', 'sun', 'mon', 'tue', 'wed'] as const; // flyer week order, Thu to Wed
-export type Day = (typeof DAYS)[number];
-
-export const SLOTS = ['breakfast', 'lunch', 'dinner'] as const;
-export type Slot = (typeof SLOTS)[number];
+import { DAYS, SLOTS, type Day, type Slot } from './calendar';
+export { DAYS, SLOTS, DAY_LONG, isWeeknight, type Day, type Slot } from './calendar';
 
 export const UNITS = ['g', 'kg', 'ml', 'l', 'each'] as const;
 export type Unit = (typeof UNITS)[number];
@@ -167,3 +164,9 @@ export {
 export * from './parse';
 export * from './match';
 export * from './scoring';
+export * from './units';
+export * from './offers';
+export * from './plan';
+export * from './grid';
+export * from './fixed';
+export * from './validate';

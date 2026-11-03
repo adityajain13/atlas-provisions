@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Day } from '@provisions/shared';
+import { flyerWeekOf, type Day, type MealPlan } from '@provisions/shared';
+import { errorMessage, getHousehold, getPlan } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { RefreshIcon } from '../components/Icons';
+import { SamplePill } from '../components/SamplePill';
 import { secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
+import { planToWeek } from '../lib/planView';
 import { MOCK_WEEK, type MockTag } from '../mocks/week';
 
 const TAG_TONE: Record<MockTag['kind'], string> = {
@@ -14,27 +17,64 @@ const TAG_TONE: Record<MockTag['kind'], string> = {
   leftover: 'border-edge text-muted',
 };
 
+type Source = { status: 'loading' } | { status: 'plan'; plan: MealPlan } | { status: 'sample'; error: string | null };
+
 export default function Week() {
   const [selected, setSelected] = useState<Day>('thu');
-  const week = MOCK_WEEK;
-  const day = week.days.find((d) => d.key === selected) ?? week.days[0];
-  const pct = Math.min(100, (week.spent / week.budget) * 100);
+  const [names, setNames] = useState<Map<string, string>>(new Map());
+  const [source, setSource] = useState<Source>({ status: 'loading' });
+
+  useEffect(() => {
+    let alive = true;
+    const weekOf = flyerWeekOf(new Date());
+    Promise.all([getPlan(weekOf), getHousehold().catch(() => null)])
+      .then(([plan, household]) => {
+        if (!alive) return;
+        setNames(new Map((household?.people ?? []).map((p) => [p.id, p.name])));
+        setSource(plan ? { status: 'plan', plan } : { status: 'sample', error: null });
+      })
+      .catch((e: unknown) => {
+        if (alive) setSource({ status: 'sample', error: errorMessage(e) });
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (source.status === 'loading') {
+    return (
+      <Page>
+        <Header title="Your week" />
+        <p className="mt-10 text-[14px] text-muted">Loading&hellip;</p>
+      </Page>
+    );
+  }
+
+  const plan = source.status === 'plan' ? source.plan : null;
+  const week = plan ? planToWeek(plan, names) : MOCK_WEEK;
+  const day = week.days.find((d) => d.key === selected) ?? week.days[0]!;
+  const pct = week.budget > 0 ? Math.min(100, (week.spent / week.budget) * 100) : 0;
+  const errors = plan?.issues.filter((i) => i.severity === 'error') ?? [];
 
   return (
     <Page>
       <Header
         size="lg"
-        subtitle={`Flyer week · ${week.label}`}
+        subtitle={
+          <>
+            Flyer week · {week.label}
+            {!plan && <SamplePill />}
+          </>
+        }
         action={
-          <button
-            type="button"
-            disabled
-            title="Planner coming in the next milestone"
-            aria-label="Regenerate week (coming soon)"
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-edge text-muted disabled:cursor-not-allowed disabled:opacity-60"
+          <Link
+            to="/plan"
+            aria-label="Plan this week"
+            title="Plan this week"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-edge text-muted"
           >
             <RefreshIcon />
-          </button>
+          </Link>
         }
         title={
           <>
@@ -44,6 +84,21 @@ export default function Week() {
           </>
         }
       />
+
+      {source.status === 'sample' && source.error && (
+        <p className="mt-6 text-[13px] text-muted">Could not load this week's plan: {source.error}</p>
+      )}
+
+      {errors.length > 0 && (
+        <div className="mt-6 rounded-lg border border-edge px-4 py-3">
+          <p className="text-[14px] text-paper">Plan has unresolved issues</p>
+          <ul className="mt-2 space-y-1.5 text-[13px] text-muted">
+            {errors.map((i) => (
+              <li key={i.message}>{i.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-8 border-y border-line py-4">
         <div className="flex items-end justify-between gap-3">
@@ -101,7 +156,7 @@ export default function Week() {
               <div className="mt-3 flex flex-wrap gap-2">
                 {m.tags.map((t) => (
                   <span
-                    key={t.text}
+                    key={`${t.kind}-${t.text}`}
                     className={`rounded-full border px-2.5 py-1 text-[12px] ${TAG_TONE[t.kind]}`}
                   >
                     {t.text}

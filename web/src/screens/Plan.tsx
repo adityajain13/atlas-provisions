@@ -1,7 +1,15 @@
 import { Fragment, useEffect, useState, type KeyboardEvent } from 'react';
-import { Link } from 'react-router-dom';
-import { DAYS, SLOTS, type Day, type Household, type Slot } from '@provisions/shared';
-import { getHousehold, errorMessage } from '../api';
+import { Link, useNavigate } from 'react-router-dom';
+import {
+  DAYS,
+  SLOTS,
+  flyerWeekOf,
+  type Day,
+  type Household,
+  type Slot,
+  type WeekOverride,
+} from '@provisions/shared';
+import { errorMessage, generatePlan, getHousehold } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { Section } from '../components/Section';
@@ -17,6 +25,9 @@ export default function Plan() {
   // Headcount overrides per cell, keyed `${slot}-${day}`. Absent means default.
   const [overrides, setOverrides] = useState<Record<string, number>>({});
   const [useItUp, setUseItUp] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     getHousehold()
@@ -47,6 +58,43 @@ export default function Plan() {
       else delete next[key];
       return next;
     });
+  }
+
+  // Only cells that differ from the default headcount. Out (0) becomes eatingOut.
+  function buildOverrides(): WeekOverride[] {
+    const out: WeekOverride[] = [];
+    for (const day of DAYS) {
+      for (const slot of SLOTS) {
+        if (isFixed(day, slot)) continue;
+        const value = overrides[`${slot}-${day}`];
+        if (value === undefined || value === defaultCount(day, slot)) continue;
+        out.push(value === 0 ? { day, slot, eatingOut: true } : { day, slot, headcount: value });
+      }
+    }
+    return out;
+  }
+
+  async function generate() {
+    const budgetNumber = Number(budgetValue);
+    if (!Number.isFinite(budgetNumber) || budgetNumber < 1 || budgetNumber > 2000) {
+      setGenerateError('Budget must be between $1 and $2,000.');
+      return;
+    }
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      await generatePlan({
+        weekOf: flyerWeekOf(new Date()),
+        budget: budgetNumber,
+        cravings,
+        overrides: buildOverrides(),
+        useItUp,
+      });
+      navigate('/');
+    } catch (e) {
+      setGenerateError(errorMessage(e));
+      setGenerating(false);
+    }
   }
 
   function addCraving() {
@@ -157,12 +205,12 @@ export default function Plan() {
                       key={key}
                       type="button"
                       onClick={() => cycle(key)}
-                      aria-label={`${label}: ${value} eating`}
+                      aria-label={value === 0 ? `${label}: out` : `${label}: ${value} eating`}
                       className={`flex h-11 items-center justify-center rounded-md border text-[15px] ${
                         changed ? 'border-herb text-herbLight' : 'border-edge text-paper'
                       }`}
                     >
-                      {value}
+                      {value === 0 ? <span className="text-[13px] text-muted">Out</span> : value}
                     </button>
                   );
                 })}
@@ -192,12 +240,17 @@ export default function Plan() {
       </Section>
 
       <div className="mt-10">
-        <button type="button" disabled className={ctaBtn}>
-          Generate plan
+        <button
+          type="button"
+          disabled={generating || household === null}
+          onClick={generate}
+          className={ctaBtn}
+        >
+          {generating ? 'Planning… this takes up to a minute' : 'Generate plan'}
         </button>
-        <p className="mt-3 text-center text-[13px] text-muted">
-          Planner coming in the next milestone
-        </p>
+        {generateError && (
+          <p className="mt-3 rounded-md border border-herb px-4 py-3 text-[14px] text-muted">{generateError}</p>
+        )}
       </div>
     </Page>
   );
