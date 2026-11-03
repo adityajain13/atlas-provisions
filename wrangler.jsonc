@@ -11,6 +11,17 @@
       "migrations_dir": "worker/migrations"
     }
   ],
-  "vars": { "DEV": "0", "PLANNER_MODEL": "claude-sonnet-5-5" },
+  // Sign-in codes via Email Routing (free plan). Only delivers to verified destination addresses,
+  // so the address in ALLOWED_EMAILS must be one (see README).
+  "send_email": [{ "name": "EMAIL" }],
+  "vars": {
+    "DEV": "0",
+    "PLANNER_MODEL": "claude-sonnet-5-5",
+    // Sender for sign-in mail. Suggested address; it may need adding in Email Routing (see README).
+    "MAIL_FROM": "provisions@adityajain.ca"
+  },
+  // Secrets (set with `npx wrangler secret put NAME`, or in the Cloudflare dashboard):
+  //   ALLOWED_EMAILS     comma-separated emails allowed to sign in. Nobody can sign in without it.
+  //   ANTHROPIC_API_KEY  Claude API key (planner, receipts)
   "routes": [{ "pattern": "adityajain.ca/provisions*", "zone_name": "adityajain.ca" }]
 }

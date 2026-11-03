@@ -1,1 +1,5 @@
 DEV=1
+# Local sign-in: the code and one-tap link are printed to the console instead of emailed.
+# Use an address from ALLOWED_EMAILS.
+ALLOWED_EMAILS=you@example.com
+DEV_AUTH_EMAIL=you@example.com

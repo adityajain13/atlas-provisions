@@ -20,6 +20,28 @@ npm run dev                                  # terminal 2: Vite on :5173
 
 Open http://localhost:5173/provisions/
 
+## Sign-in
+
+Sign in with an email code, the same as Atlas Journeys. The app emails a 6-digit code and a
+one-tap link. Only addresses in `ALLOWED_EMAILS` get a code, and a session lasts a year and rolls
+forward on use. Only a SHA-256 of the session token is stored, in D1 (`sessions`). Every
+`/provisions/api/*` route needs a session except `/provisions/api/health` and `/provisions/api/auth/*`.
+
+Set-up (once):
+
+1. `ALLOWED_EMAILS` secret: `npx wrangler secret put ALLOWED_EMAILS`, then your address. Without it nobody can sign in.
+2. Email Routing: the `send_email` binding only delivers to **verified destination addresses**. Verify the
+   `ALLOWED_EMAILS` address in Cloudflare Email Routing.
+3. Sender: `MAIL_FROM` in `wrangler.jsonc` is `provisions@adityajain.ca`. If Cloudflare refuses mail from that
+   address, add it as a custom address in Email Routing (it does not need a routing rule). This was not
+   checked against the live zone.
+4. Migrations: `0004_auth.sql` adds `login_codes` and `sessions`. The deploy workflow applies it. By hand:
+   `npx wrangler d1 migrations apply atlas-provisions --remote`.
+
+Local dev: `.dev.vars` (copied from `.dev.vars.example`) sets `DEV=1` and `DEV_AUTH_EMAIL`. With both set,
+the Worker prints the code and one-tap link to its console and sends no mail. Use an address from
+`ALLOWED_EMAILS`. `DEV` is `0` in `wrangler.jsonc`, so this is off in deploys.
+
 ## Flyer data and deals (dev fixtures)
 
 The flyer and price-history fixtures under `worker/fixtures/` are invented sample
@@ -37,9 +59,10 @@ The dev route returns 404 unless `DEV=1`. It is `0` in `wrangler.jsonc`, so it i
 
 ## Testing
 
-`npm test` runs vitest over `shared/` and `worker/`. The tests cover pure logic only
-(parsing, matching, scoring, catalogue invariants, the fixture match rate). D1 access in
-`worker/src/db.ts` is not unit tested.
+`npm test` runs vitest over `shared/` and `worker/`. Most tests cover pure logic (parsing, matching,
+scoring, catalogue invariants, the fixture match rate, sign-in helpers). The sign-in tests run the real
+Worker app against an in-memory D1 stub and a stub mailer, so they make no network calls. `worker/src/db.ts`
+is not unit tested.
 
 ## Deploy
 
