@@ -1,0 +1,20 @@
+{
+  "name": "atlas-provisions",
+  "private": true,
+  "workspaces": [
+    "web",
+    "worker",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w web",
+    "dev:worker": "wrangler dev",
+    "build": "npm run build -w web",
+    "typecheck": "tsc -p web --noEmit && tsc -p worker --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply atlas-provisions --local",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
