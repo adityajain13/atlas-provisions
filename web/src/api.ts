@@ -1,4 +1,4 @@
-import { HouseholdSchema, type Household } from '@provisions/shared';
+import { HouseholdSchema, type Household, type MealPlan, type PlanRequest } from '@provisions/shared';
 
 const BASE = '/provisions/api';
 
@@ -28,4 +28,23 @@ export async function saveHousehold(household: Household): Promise<Household> {
     }),
   );
   return HouseholdSchema.parse(await res.json());
+}
+
+/** Plan a week. Takes up to a minute. Errors carry the server's message as-is. */
+export async function generatePlan(req: PlanRequest): Promise<MealPlan> {
+  const res = await ensureOk(
+    await fetch(`${BASE}/plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
+  );
+  return (await res.json()) as MealPlan;
+}
+
+/** The saved plan for a week, or null when there is none. */
+export async function getPlan(weekOf: string): Promise<MealPlan | null> {
+  const res = await fetch(`${BASE}/plan/${weekOf}`);
+  if (res.status === 404) return null;
+  return (await ensureOk(res)).json() as Promise<MealPlan>;
 }

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
+import { flyerWeekOf, type MealPlan } from '@provisions/shared';
+import { errorMessage, getPlan } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
+import { SamplePill } from '../components/SamplePill';
 import { eyebrow } from '../components/ui';
-import { CATEGORY_ORDER, MOCK_LIST } from '../mocks/week';
+import { planToList } from '../lib/planView';
+import { CATEGORY_ORDER, MOCK_LIST, type MockItem } from '../mocks/week';
 
-const STORAGE_KEY = `provisions:list:${MOCK_LIST.weekOf}`;
+type View = { weekOf: string; stores: string[]; items: MockItem[] };
 
-function readChecked(): Set<string> {
+function readChecked(key: string): Set<string> {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return new Set();
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return new Set();
@@ -19,17 +23,61 @@ function readChecked(): Set<string> {
 }
 
 export default function List() {
-  const [checked, setChecked] = useState<Set<string>>(readChecked);
+  const [state, setState] = useState<{ status: 'loading' } | { status: 'ready'; view: View; plan: boolean; error: string | null }>({
+    status: 'loading',
+  });
+
+  useEffect(() => {
+    let alive = true;
+    getPlan(flyerWeekOf(new Date()))
+      .then((plan: MealPlan | null) => {
+        if (!alive) return;
+        setState(
+          plan
+            ? { status: 'ready', view: planToList(plan), plan: true, error: null }
+            : { status: 'ready', view: { weekOf: MOCK_LIST.weekOf, stores: MOCK_LIST.stores, items: MOCK_LIST.items }, plan: false, error: null },
+        );
+      })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        setState({
+          status: 'ready',
+          view: { weekOf: MOCK_LIST.weekOf, stores: MOCK_LIST.stores, items: MOCK_LIST.items },
+          plan: false,
+          error: errorMessage(e),
+        });
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (state.status === 'loading') {
+    return (
+      <Page>
+        <Header title="Shopping list" />
+        <p className="mt-10 text-[14px] text-muted">Loading&hellip;</p>
+      </Page>
+    );
+  }
+
+  // Mounted only once the view is known, so the checked state comes from this week's key.
+  return <ListBody view={state.view} plan={state.plan} error={state.error} />;
+}
+
+function ListBody({ view, plan, error }: { view: View; plan: boolean; error: string | null }) {
+  const storageKey = `provisions:list:${view.weekOf}`;
+  const [checked, setChecked] = useState<Set<string>>(() => readChecked(storageKey));
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([...checked]));
+      window.localStorage.setItem(storageKey, JSON.stringify([...checked]));
     } catch {
       // Storage unavailable (private window or blocked). The list still works in memory.
     }
-  }, [checked]);
+  }, [checked, storageKey]);
 
-  const items = MOCK_LIST.items;
+  const items = view.items;
   const total = items.reduce((sum, i) => sum + i.price, 0);
 
   function toggle(id: string) {
@@ -44,11 +92,19 @@ export default function List() {
   return (
     <Page>
       <Header
-        subtitle={`${MOCK_LIST.stores.length} stores · ${items.length} items · $${total.toFixed(2)}`}
+        subtitle={
+          <>
+            {`${view.stores.length} stores · ${items.length} items · $${total.toFixed(2)}`}
+            {!plan && <SamplePill />}
+          </>
+        }
         title="Shopping list"
       />
 
-      {MOCK_LIST.stores.map((store) => {
+      {error && <p className="mt-6 text-[13px] text-muted">Could not load this week's plan: {error}</p>}
+      {plan && items.length === 0 && <p className="mt-10 text-[14px] text-muted">Nothing to buy.</p>}
+
+      {view.stores.map((store) => {
         const storeItems = items.filter((i) => i.store === store);
         const subtotal = storeItems.reduce((sum, i) => sum + i.price, 0);
         return (
@@ -83,7 +139,7 @@ export default function List() {
                                 }`}
                               >
                                 {item.name}
-                                <span className="ml-2 text-[13px] text-muted">{item.qty}</span>
+                                {item.qty && <span className="ml-2 text-[13px] text-muted">{item.qty}</span>}
                               </span>
                               {item.note && (
                                 <span

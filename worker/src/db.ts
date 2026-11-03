@@ -1,5 +1,5 @@
 // Thin D1 access. Not unit tested: the logic lives in shared/ and is tested there.
-import type { FlyerItem, HistoryPoint, MatchedItem } from '@provisions/shared';
+import type { FlyerItem, HistoryPoint, MatchedItem, MealPlan } from '@provisions/shared';
 
 interface FlyerRow {
   id: string;
@@ -110,4 +110,38 @@ export async function recordPrices(db: D1Database, matched: MatchedItem[], date:
     ),
   );
   return matched.length;
+}
+
+// ---- Meal plans (milestone 2B) ----
+
+/** Saved plans whose week starts in [fromWeek, beforeWeek). */
+export async function plansBetween(db: D1Database, fromWeek: string, beforeWeek: string): Promise<MealPlan[]> {
+  const { results } = await db
+    .prepare('SELECT data FROM meal_plans WHERE week_of >= ? AND week_of < ?')
+    .bind(fromWeek, beforeWeek)
+    .all<{ data: string }>();
+  return results.flatMap((r) => {
+    try {
+      return [JSON.parse(r.data) as MealPlan];
+    } catch {
+      return [];
+    }
+  });
+}
+
+export async function loadPlan(db: D1Database, weekOf: string): Promise<MealPlan | null> {
+  const row = await db.prepare('SELECT data FROM meal_plans WHERE week_of = ?').bind(weekOf).first<{ data: string }>();
+  if (!row) return null;
+  return JSON.parse(row.data) as MealPlan;
+}
+
+/** Insert or replace the plan for its week. */
+export async function savePlan(db: D1Database, plan: MealPlan): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO meal_plans (week_of, data, created_at) VALUES (?, ?, ?)
+       ON CONFLICT(week_of) DO UPDATE SET data = excluded.data, created_at = excluded.created_at`,
+    )
+    .bind(plan.weekOf, JSON.stringify(plan), plan.generatedAt)
+    .run();
 }

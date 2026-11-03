@@ -11,6 +11,6 @@
       "migrations_dir": "worker/migrations"
     }
   ],
-  "vars": { "DEV": "0" },
+  "vars": { "DEV": "0", "PLANNER_MODEL": "claude-sonnet-5-5" },
   "routes": [{ "pattern": "adityajain.ca/provisions*", "zone_name": "adityajain.ca" }]
 }
