@@ -11,5 +11,6 @@
       "migrations_dir": "worker/migrations"
     }
   ],
+  "vars": { "DEV": "0" },
   "routes": [{ "pattern": "adityajain.ca/provisions*", "zone_name": "adityajain.ca" }]
 }

@@ -1,0 +1,807 @@
+[
+  {
+    "id": "fx-001",
+    "store": "No Frills",
+    "rawName": "PC Boneless Skinless Chicken Thighs",
+    "priceText": "4.39/kg",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1.5 kg"
+  },
+  {
+    "id": "fx-002",
+    "store": "FreshCo",
+    "rawName": "Boneless Chicken Thighs Family Pack",
+    "priceText": "$5.99/kg",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1.2 kg"
+  },
+  {
+    "id": "fx-003",
+    "store": "Walmart",
+    "rawName": "Great Value Boneless Chicken Thighs",
+    "priceText": "$4.97/kg",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1.36 kg"
+  },
+  {
+    "id": "fx-004",
+    "store": "No Frills",
+    "rawName": "Chicken Drumsticks",
+    "priceText": "$2.99/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "907 g"
+  },
+  {
+    "id": "fx-005",
+    "store": "Food Basics",
+    "rawName": "Whole Chicken Roaster",
+    "priceText": "$1.99/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-006",
+    "store": "No Frills",
+    "rawName": "Ground Beef Lean 85%",
+    "priceText": "$5.99/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "907 g"
+  },
+  {
+    "id": "fx-007",
+    "store": "Food Basics",
+    "rawName": "Lean Ground Beef",
+    "priceText": "$6.49/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "907 g"
+  },
+  {
+    "id": "fx-008",
+    "store": "No Frills",
+    "rawName": "Ground Turkey",
+    "priceText": "$4.99/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "907 g"
+  },
+  {
+    "id": "fx-009",
+    "store": "FreshCo",
+    "rawName": "Ground Pork",
+    "priceText": "$3.49/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "907 g"
+  },
+  {
+    "id": "fx-010",
+    "store": "Food Basics",
+    "rawName": "Pork Chops Bone-In",
+    "priceText": "$3.99/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-011",
+    "store": "Walmart",
+    "rawName": "Pork Tenderloin",
+    "priceText": "$4.49/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-012",
+    "store": "FreshCo",
+    "rawName": "Italian Sausage Sweet",
+    "priceText": "$4.99/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 kg"
+  },
+  {
+    "id": "fx-013",
+    "store": "No Frills",
+    "rawName": "Salmon Atlantic Fillet",
+    "priceText": "$12.99/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 lb"
+  },
+  {
+    "id": "fx-014",
+    "store": "Food Basics",
+    "rawName": "Tilapia Fillets",
+    "priceText": "$9.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1.5 kg"
+  },
+  {
+    "id": "fx-015",
+    "store": "FreshCo",
+    "rawName": "Shrimp Raw Tail-on",
+    "priceText": "$8.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "454 g"
+  },
+  {
+    "id": "fx-016",
+    "store": "Walmart",
+    "rawName": "Chunk Light Tuna in Water",
+    "priceText": "2/$3",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "170 g"
+  },
+  {
+    "id": "fx-017",
+    "store": "No Frills",
+    "rawName": "Large Eggs",
+    "priceText": "$3.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "dozen"
+  },
+  {
+    "id": "fx-018",
+    "store": "FreshCo",
+    "rawName": "Large Eggs 18 ct",
+    "priceText": "$4.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "18 ct"
+  },
+  {
+    "id": "fx-019",
+    "store": "Food Basics",
+    "rawName": "Eggs Grade A Large",
+    "priceText": "$4.29",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "dozen"
+  },
+  {
+    "id": "fx-020",
+    "store": "No Frills",
+    "rawName": "Firm Tofu",
+    "priceText": "$2.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "454 g"
+  },
+  {
+    "id": "fx-021",
+    "store": "No Frills",
+    "rawName": "Canned Chickpeas",
+    "priceText": "$1.19",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "540 mL"
+  },
+  {
+    "id": "fx-022",
+    "store": "Walmart",
+    "rawName": "Canned Black Beans",
+    "priceText": "2/$3",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "540 mL"
+  },
+  {
+    "id": "fx-023",
+    "store": "Food Basics",
+    "rawName": "Red Kidney Beans",
+    "priceText": "$1.29",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "540 mL"
+  },
+  {
+    "id": "fx-024",
+    "store": "FreshCo",
+    "rawName": "Red Lentils",
+    "priceText": "$3.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 kg"
+  },
+  {
+    "id": "fx-025",
+    "store": "Food Basics",
+    "rawName": "Dry Chickpeas",
+    "priceText": "$2.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "900 g"
+  },
+  {
+    "id": "fx-026",
+    "store": "No Frills",
+    "rawName": "Bananas",
+    "priceText": "$1.49/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-027",
+    "store": "Food Basics",
+    "rawName": "Gala Apples",
+    "priceText": "$3.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "3 lb"
+  },
+  {
+    "id": "fx-028",
+    "store": "FreshCo",
+    "rawName": "Navel Oranges",
+    "priceText": "$4.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "3 lb"
+  },
+  {
+    "id": "fx-029",
+    "store": "No Frills",
+    "rawName": "Red Seedless Grapes",
+    "priceText": "2/$5",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 kg"
+  },
+  {
+    "id": "fx-030",
+    "store": "FreshCo",
+    "rawName": "Red Grapes",
+    "priceText": "$3.99/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-031",
+    "store": "Walmart",
+    "rawName": "Green Seedless Grapes",
+    "priceText": "$2.97/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-032",
+    "store": "No Frills",
+    "rawName": "Red Bell Peppers",
+    "priceText": "$0.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-033",
+    "store": "FreshCo",
+    "rawName": "Red Peppers",
+    "priceText": "$1.29",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-034",
+    "store": "No Frills",
+    "rawName": "Green Peppers",
+    "priceText": "$0.79",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-035",
+    "store": "Food Basics",
+    "rawName": "Yellow Onions",
+    "priceText": "$3.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "3 lb"
+  },
+  {
+    "id": "fx-036",
+    "store": "Walmart",
+    "rawName": "Baby Carrots",
+    "priceText": "$2.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 kg"
+  },
+  {
+    "id": "fx-037",
+    "store": "Food Basics",
+    "rawName": "Sweet Potatoes",
+    "priceText": "$1.29/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-038",
+    "store": "No Frills",
+    "rawName": "Russet Potatoes",
+    "priceText": "$4.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "10 lb"
+  },
+  {
+    "id": "fx-039",
+    "store": "FreshCo",
+    "rawName": "Broccoli Crown",
+    "priceText": "$1.99/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-040",
+    "store": "No Frills",
+    "rawName": "Mini Cucumbers",
+    "priceText": "$2.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "454 g"
+  },
+  {
+    "id": "fx-041",
+    "store": "Food Basics",
+    "rawName": "Spinach",
+    "priceText": "$2.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "283 g"
+  },
+  {
+    "id": "fx-042",
+    "store": "Walmart",
+    "rawName": "Cauliflower Head",
+    "priceText": "$2.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-043",
+    "store": "FreshCo",
+    "rawName": "Zucchini",
+    "priceText": "$1.49/lb",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-044",
+    "store": "No Frills",
+    "rawName": "White Mushrooms",
+    "priceText": "2/$5",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "227 g"
+  },
+  {
+    "id": "fx-045",
+    "store": "Food Basics",
+    "rawName": "Corn on the Cob",
+    "priceText": "$3.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "4 pk"
+  },
+  {
+    "id": "fx-046",
+    "store": "No Frills",
+    "rawName": "Romaine Hearts",
+    "priceText": "$4.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "3 pk"
+  },
+  {
+    "id": "fx-047",
+    "store": "FreshCo",
+    "rawName": "Kale Bunch",
+    "priceText": "$2.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "300 g"
+  },
+  {
+    "id": "fx-048",
+    "store": "Food Basics",
+    "rawName": "Strawberries",
+    "priceText": "$2.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "454 g"
+  },
+  {
+    "id": "fx-049",
+    "store": "Walmart",
+    "rawName": "Blueberries",
+    "priceText": "$3.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "300 g"
+  },
+  {
+    "id": "fx-050",
+    "store": "No Frills",
+    "rawName": "Avocados Hass",
+    "priceText": "$0.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-051",
+    "store": "FreshCo",
+    "rawName": "Lemons",
+    "priceText": "3/$1",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture"
+  },
+  {
+    "id": "fx-052",
+    "store": "No Frills",
+    "rawName": "Garlic Bulbs",
+    "priceText": "$0.79",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "100 g"
+  },
+  {
+    "id": "fx-053",
+    "store": "Food Basics",
+    "rawName": "Cilantro Bunch",
+    "priceText": "$0.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "bunch"
+  },
+  {
+    "id": "fx-054",
+    "store": "No Frills",
+    "rawName": "Milk 2% 4 L",
+    "priceText": "$5.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "4 L"
+  },
+  {
+    "id": "fx-055",
+    "store": "FreshCo",
+    "rawName": "Greek Yogurt Plain",
+    "priceText": "$4.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "900 g"
+  },
+  {
+    "id": "fx-056",
+    "store": "Food Basics",
+    "rawName": "Vanilla Yogurt",
+    "priceText": "$3.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "650 g"
+  },
+  {
+    "id": "fx-057",
+    "store": "No Frills",
+    "rawName": "Mozzarella Shredded",
+    "priceText": "$4.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "500 g"
+  },
+  {
+    "id": "fx-058",
+    "store": "FreshCo",
+    "rawName": "Cheddar Old",
+    "priceText": "$5.29",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "400 g"
+  },
+  {
+    "id": "fx-059",
+    "store": "Walmart",
+    "rawName": "Salted Butter",
+    "priceText": "$5.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "454 g"
+  },
+  {
+    "id": "fx-060",
+    "store": "Food Basics",
+    "rawName": "Whipping Cream",
+    "priceText": "$5.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 L"
+  },
+  {
+    "id": "fx-061",
+    "store": "No Frills",
+    "rawName": "Frozen Peas",
+    "priceText": "$2.29",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "750 g"
+  },
+  {
+    "id": "fx-062",
+    "store": "FreshCo",
+    "rawName": "Frozen Mixed Vegetables",
+    "priceText": "$3.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 kg"
+  },
+  {
+    "id": "fx-063",
+    "store": "Walmart",
+    "rawName": "Frozen Mixed Berries",
+    "priceText": "$5.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "600 g"
+  },
+  {
+    "id": "fx-064",
+    "store": "Food Basics",
+    "rawName": "Frozen Broccoli",
+    "priceText": "$2.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "750 g"
+  },
+  {
+    "id": "fx-065",
+    "store": "No Frills",
+    "rawName": "Bread White",
+    "priceText": "2/$5",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "675 g"
+  },
+  {
+    "id": "fx-066",
+    "store": "FreshCo",
+    "rawName": "Bagels",
+    "priceText": "$2.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "6 pk"
+  },
+  {
+    "id": "fx-067",
+    "store": "Food Basics",
+    "rawName": "Flour Tortillas",
+    "priceText": "$3.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "10 pk"
+  },
+  {
+    "id": "fx-068",
+    "store": "No Frills",
+    "rawName": "Hummus Classic",
+    "priceText": "$3.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "500 g"
+  },
+  {
+    "id": "fx-069",
+    "store": "FreshCo",
+    "rawName": "Deli Ham Shaved",
+    "priceText": "$3.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "200 g"
+  },
+  {
+    "id": "fx-070",
+    "store": "Walmart",
+    "rawName": "Coconut Milk",
+    "priceText": "2/$4",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "400 mL"
+  },
+  {
+    "id": "fx-071",
+    "store": "No Frills",
+    "rawName": "Basmati Rice",
+    "priceText": "$6.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "2 kg"
+  },
+  {
+    "id": "fx-072",
+    "store": "FreshCo",
+    "rawName": "Jasmine Rice",
+    "priceText": "$5.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "2 kg"
+  },
+  {
+    "id": "fx-073",
+    "store": "Food Basics",
+    "rawName": "Brown Rice",
+    "priceText": "$3.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 kg"
+  },
+  {
+    "id": "fx-074",
+    "store": "No Frills",
+    "rawName": "Compliments Spaghetti",
+    "priceText": "$1.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "900 g"
+  },
+  {
+    "id": "fx-075",
+    "store": "FreshCo",
+    "rawName": "Canned Diced Tomatoes",
+    "priceText": "3/$4",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "796 mL"
+  },
+  {
+    "id": "fx-076",
+    "store": "Walmart",
+    "rawName": "Peanut Butter Smooth",
+    "priceText": "$5.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 kg"
+  },
+  {
+    "id": "fx-077",
+    "store": "No Frills",
+    "rawName": "Soy Sauce",
+    "priceText": "$2.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "375 mL"
+  },
+  {
+    "id": "fx-078",
+    "store": "Food Basics",
+    "rawName": "Rolled Oats",
+    "priceText": "$3.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "1 kg"
+  },
+  {
+    "id": "fx-079",
+    "store": "FreshCo",
+    "rawName": "Quinoa",
+    "priceText": "$7.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "900 g"
+  },
+  {
+    "id": "fx-080",
+    "store": "Walmart",
+    "rawName": "Honey",
+    "priceText": "$8.49",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "375 g"
+  },
+  {
+    "id": "fx-081",
+    "store": "No Frills",
+    "rawName": "Tide Pods 81 ct",
+    "priceText": "$14.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "81 ct"
+  },
+  {
+    "id": "fx-082",
+    "store": "FreshCo",
+    "rawName": "Doritos Nacho Cheese",
+    "priceText": "$3.99",
+    "validFrom": "2026-11-12",
+    "validTo": "2026-11-18",
+    "source": "fixture",
+    "sizeText": "235 g"
+  }
+]

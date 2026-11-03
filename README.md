@@ -20,6 +20,27 @@ npm run dev                                  # terminal 2: Vite on :5173
 
 Open http://localhost:5173/provisions/
 
+## Flyer data and deals (dev fixtures)
+
+The flyer and price-history fixtures under `worker/fixtures/` are invented sample
+prices for testing. They are not real store prices.
+
+To load them locally, copy `.dev.vars.example` to `.dev.vars` (this enables the dev
+route), start `npm run dev:worker`, then:
+
+```sh
+curl -X POST http://localhost:8787/provisions/api/dev/load-fixtures
+curl "http://localhost:8787/provisions/api/deals?date=2026-11-12"
+```
+
+The dev route returns 404 unless `DEV=1`. It is `0` in `wrangler.jsonc`, so it is off in deploys.
+
+## Testing
+
+`npm test` runs vitest over `shared/` and `worker/`. The tests cover pure logic only
+(parsing, matching, scoring, catalogue invariants, the fixture match rate). D1 access in
+`worker/src/db.ts` is not unit tested.
+
 ## Deploy
 
 ```sh
