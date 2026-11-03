@@ -51,22 +51,26 @@ import { anthropicClient, anthropicPrepClient } from './planner/claude';
 import { attachPrep } from './planner/prep';
 import { runPlanner } from './planner/run';
 import { MAX_RECEIPT_IMAGE_CHARS, parseReceiptImage } from './receipts';
+import { authRoutes, type AuthEnv } from './auth';
+import { requireSession } from './authMiddleware';
 
-type Env = {
-  DB: D1Database;
+type Env = AuthEnv & {
   ASSETS: Fetcher;
   ANTHROPIC_API_KEY?: string;
   PLANNER_MODEL?: string;
   PREP_MODEL?: string;
   RECEIPT_MODEL?: string;
   EXTRACT_MODEL?: string;
-  DEV?: string;
 };
 
 const API = '/provisions/api';
 const DEFAULT_PLANNER_MODEL = 'claude-sonnet-5-5';
 const DEFAULT_PREP_MODEL = 'claude-haiku-5-5';
 const app = new Hono<{ Bindings: Env }>();
+
+// Sign-in is required for every API route except health and /auth/* (checked in the middleware).
+app.use(`${API}/*`, requireSession);
+app.route(`${API}/auth`, authRoutes);
 
 function formatZod(error: ZodError): string {
   return error.issues
@@ -359,7 +363,6 @@ app.get(`${API}/plan/:weekOf`, async (c) => {
 // ---- Receipts (milestone 3B) ----
 
 // Reads a receipt photo (base64 JPEG) into structured lines. Nothing is saved until commit.
-// TODO(auth): the app has no sign-in yet. Add the session check to both receipt routes.
 app.post(`${API}/receipts/parse`, async (c) => {
   if (!c.env.ANTHROPIC_API_KEY) {
     return c.text('Receipt reader not configured: add the ANTHROPIC_API_KEY secret.', 503);

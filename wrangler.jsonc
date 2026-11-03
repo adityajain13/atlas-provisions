@@ -11,6 +11,11 @@
       "migrations_dir": "worker/migrations"
     }
   ],
-  "vars": { "DEV": "0", "PLANNER_MODEL": "claude-sonnet-5-5" },
+  "send_email": [{ "name": "EMAIL" }],
+  "vars": {
+    "DEV": "0",
+    "PLANNER_MODEL": "claude-sonnet-5-5",
+    "MAIL_FROM": "provisions@adityajain.ca"
+  },
   "routes": [{ "pattern": "adityajain.ca/provisions*", "zone_name": "adityajain.ca" }]
 }

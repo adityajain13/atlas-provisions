@@ -1,6 +1,5 @@
 // Grocery receipt reading. Copied from the travel planner's worker/receipts.ts and adapted:
 // the category field is gone, and each line gets an optional printed size and item code.
-// TODO(auth): the app has no sign-in yet. Add the session check here when it does.
 
 export const MAX_RECEIPT_IMAGE_CHARS = 6_000_000;
 

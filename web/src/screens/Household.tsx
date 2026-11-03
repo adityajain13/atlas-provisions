@@ -31,6 +31,7 @@ import {
   secondaryBtn,
 } from '../components/ui';
 import { DAY_LETTER, DAY_SHORT, SLOT_LABEL, SLOT_LETTER, formatDays } from '../lib/labels';
+import { useSession } from '../session';
 
 type Update = (fn: (prev: Household) => Household) => void;
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string };
@@ -110,7 +111,23 @@ export default function HouseholdScreen() {
           <ItemRulesSection h={h} update={update} />
         </>
       )}
+
+      <SessionRow />
     </Page>
+  );
+}
+
+/** Who is signed in on this device, with sign out. */
+function SessionRow() {
+  const { state, signOut } = useSession();
+  if (state.status !== 'in') return null;
+  return (
+    <p className="mt-10 border-t border-line pt-4 text-[13px] text-muted">
+      Signed in as {state.email} ·{' '}
+      <button type="button" onClick={() => void signOut()} className="text-herb">
+        Sign out
+      </button>
+    </p>
   );
 }
 
