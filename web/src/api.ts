@@ -1,4 +1,15 @@
-import { HouseholdSchema, type Household, type MealPlan, type PlanRequest } from '@provisions/shared';
+import {
+  HouseholdSchema,
+  PantryItemSchema,
+  RatingSchema,
+  type Household,
+  type MealPlan,
+  type PantryCreate,
+  type PantryItem,
+  type PlanRequest,
+  type Rating,
+  type RatingInput,
+} from '@provisions/shared';
 
 const BASE = '/provisions/api';
 
@@ -47,4 +58,57 @@ export async function getPlan(weekOf: string): Promise<MealPlan | null> {
   const res = await fetch(`${BASE}/plan/${weekOf}`);
   if (res.status === 404) return null;
   return (await ensureOk(res)).json() as Promise<MealPlan>;
+}
+
+// ---- Pantry (milestone 3A) ----
+
+async function json<T>(res: Response, parse: (raw: unknown) => T): Promise<T> {
+  return parse(await (await ensureOk(res)).json());
+}
+
+export async function getPantry(): Promise<PantryItem[]> {
+  return json(await fetch(`${BASE}/pantry`), (raw) => PantryItemSchema.array().parse(raw));
+}
+
+export async function addPantryItem(input: PantryCreate): Promise<PantryItem> {
+  return json(
+    await fetch(`${BASE}/pantry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+    (raw) => PantryItemSchema.parse(raw),
+  );
+}
+
+export async function updatePantryItem(id: string, patch: { qty?: number; expiresOn?: string }): Promise<PantryItem> {
+  return json(
+    await fetch(`${BASE}/pantry/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+    (raw) => PantryItemSchema.parse(raw),
+  );
+}
+
+export async function removePantryItem(id: string): Promise<void> {
+  await ensureOk(await fetch(`${BASE}/pantry/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+}
+
+// ---- Meal ratings (milestone 3A) ----
+
+export async function getRatings(): Promise<Rating[]> {
+  return json(await fetch(`${BASE}/ratings`), (raw) => RatingSchema.array().parse(raw));
+}
+
+export async function saveRating(input: RatingInput): Promise<Rating> {
+  return json(
+    await fetch(`${BASE}/ratings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+    (raw) => RatingSchema.parse(raw),
+  );
 }

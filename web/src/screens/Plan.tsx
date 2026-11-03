@@ -200,17 +200,21 @@ export default function Plan() {
                   const override = overrides[key];
                   const value = override ?? def;
                   const changed = override !== undefined && override !== def;
+                  const cap = household.timeCaps[day]?.[slot];
                   return (
                     <button
                       key={key}
                       type="button"
                       onClick={() => cycle(key)}
-                      aria-label={value === 0 ? `${label}: out` : `${label}: ${value} eating`}
-                      className={`flex h-11 items-center justify-center rounded-md border text-[15px] ${
+                      aria-label={`${value === 0 ? `${label}: out` : `${label}: ${value} eating`}${
+                        cap ? `, ${cap} minute cap` : ''
+                      }`}
+                      className={`flex h-11 flex-col items-center justify-center rounded-md border text-[15px] ${
                         changed ? 'border-herb text-herbLight' : 'border-edge text-paper'
                       }`}
                     >
                       {value === 0 ? <span className="text-[13px] text-muted">Out</span> : value}
+                      {cap !== undefined && <span className="text-[10px] leading-none text-muted">{cap}m</span>}
                     </button>
                   );
                 })}

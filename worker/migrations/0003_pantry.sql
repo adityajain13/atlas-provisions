@@ -1,0 +1,1 @@
+CREATE TABLE pantry_items (id TEXT PRIMARY KEY, ingredient_id TEXT NOT NULL, qty REAL NOT NULL, unit TEXT NOT NULL CHECK (unit IN ('kg','l','each')), added_on TEXT NOT NULL, expires_on TEXT NOT NULL, source TEXT NOT NULL CHECK (source IN ('manual','receipt','plan-leftover')));

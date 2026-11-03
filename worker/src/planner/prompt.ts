@@ -2,6 +2,7 @@ import {
   INGREDIENT_BY_ID,
   VARIETY_RULES,
   type Deal,
+  type PantryItem,
   type FixedCost,
   type FixedPlacement,
   type Household,
@@ -72,16 +73,18 @@ export interface AvailableItem {
   unit: string;
   packQty: number;
   score: number;
-  source: 'deal' | 'staple' | 'fixed-leftover';
+  source: 'deal' | 'staple' | 'pantry' | 'fixed-leftover';
   allergens: string[];
   vegetarian: boolean;
 }
 
 /**
  * What the planner may use: one entry per ingredient. Deals and staples come from scoring.
- * Fixed-meal pack remainders are added as 'fixed-leftover', with the remainder as packQty.
+ * Pantry stock is added as 'pantry' with its quantity as packQty and score 1, so it beats a deal
+ * for the same ingredient. Fixed-meal pack remainders are added as 'fixed-leftover', with the
+ * remainder as packQty, when nothing else covers the ingredient.
  */
-export function buildAvailable(deals: Deal[], fixed: FixedCost): AvailableItem[] {
+export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryItem[] = []): AvailableItem[] {
   const byId = new Map<string, AvailableItem>();
   for (const d of deals) {
     const ing = INGREDIENT_BY_ID[d.ingredientId];
@@ -96,6 +99,24 @@ export function buildAvailable(deals: Deal[], fixed: FixedCost): AvailableItem[]
       packQty: d.packQty,
       score: Number(d.score.toFixed(3)),
       source,
+      allergens: ing.allergens,
+      vegetarian: ing.vegetarian,
+    });
+  }
+  const stock = new Map<string, number>();
+  for (const item of pantry) stock.set(item.ingredientId, (stock.get(item.ingredientId) ?? 0) + item.qty);
+  for (const [ingredientId, qty] of stock) {
+    const ing = INGREDIENT_BY_ID[ingredientId];
+    if (!ing) continue;
+    const prev = byId.get(ingredientId);
+    if (prev && prev.score >= 1) continue;
+    byId.set(ingredientId, {
+      id: ing.id,
+      name: ing.name,
+      unit: ing.baseUnit,
+      packQty: Number(qty.toFixed(3)),
+      score: 1,
+      source: 'pantry',
       allergens: ing.allergens,
       vegetarian: ing.vegetarian,
     });
@@ -127,6 +148,9 @@ export interface PayloadInput {
   available: AvailableItem[];
   neverBuy: string[];
   recentDinnerNames: string[];
+  pantryUseFirst?: string[]; // ingredient ids from pantry stock due soon
+  favourites?: string[]; // meal names the household has liked
+  avoid?: string[]; // meal names to skip, from ratings
 }
 
 export interface PlannerPayload {
@@ -179,9 +203,16 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
     equipment: household.equipment.filter((e) => e.owned).map((e) => e.name),
     varietyRules: VARIETY_RULES.filter((r) => household.varietyRules[r.key] === true).map((r) => ({ key: r.key, label: r.label })),
     available: input.available,
-    useFirst: request.useItUp ? input.available.filter((a) => a.source === 'fixed-leftover').map((a) => a.id) : [],
-    favourites: [],
-    avoid: noRepeat ? input.recentDinnerNames : [],
+    useFirst: request.useItUp
+      ? [
+          ...new Set([
+            ...input.available.filter((a) => a.source === 'fixed-leftover').map((a) => a.id),
+            ...(input.pantryUseFirst ?? []),
+          ]),
+        ]
+      : [],
+    favourites: input.favourites ?? [],
+    avoid: [...new Set([...(noRepeat ? input.recentDinnerNames : []), ...(input.avoid ?? [])])],
     feedback: null,
   };
 }

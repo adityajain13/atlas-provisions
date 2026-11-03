@@ -1,5 +1,12 @@
 // Thin D1 access. Not unit tested: the logic lives in shared/ and is tested there.
-import type { FlyerItem, HistoryPoint, MatchedItem, MealPlan } from '@provisions/shared';
+import type {
+  FlyerItem,
+  HistoryPoint,
+  MatchedItem,
+  MealPlan,
+  PantryItem,
+  Rating,
+} from '@provisions/shared';
 
 interface FlyerRow {
   id: string;
@@ -144,4 +151,109 @@ export async function savePlan(db: D1Database, plan: MealPlan): Promise<void> {
     )
     .bind(plan.weekOf, JSON.stringify(plan), plan.generatedAt)
     .run();
+}
+
+// ---- Pantry (milestone 3A) ----
+
+interface PantryRow {
+  id: string;
+  ingredient_id: string;
+  qty: number;
+  unit: PantryItem['unit'];
+  added_on: string;
+  expires_on: string;
+  source: PantryItem['source'];
+}
+
+interface RatingRow {
+  id: string;
+  meal_name: string;
+  person_id: string;
+  rating: Rating['rating'];
+  ingredient_ids: string;
+  date: string;
+}
+
+const toPantryItem = (r: PantryRow): PantryItem => ({
+  id: r.id,
+  ingredientId: r.ingredient_id,
+  qty: r.qty,
+  unit: r.unit,
+  addedOn: r.added_on,
+  expiresOn: r.expires_on,
+  source: r.source,
+});
+
+export async function loadPantry(db: D1Database): Promise<PantryItem[]> {
+  const { results } = await db
+    .prepare('SELECT * FROM pantry_items ORDER BY expires_on, added_on, id')
+    .all<PantryRow>();
+  return results.map(toPantryItem);
+}
+
+export async function loadPantryItem(db: D1Database, id: string): Promise<PantryItem | null> {
+  const row = await db.prepare('SELECT * FROM pantry_items WHERE id = ?').bind(id).first<PantryRow>();
+  return row ? toPantryItem(row) : null;
+}
+
+export async function insertPantryItem(db: D1Database, item: PantryItem): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO pantry_items (id, ingredient_id, qty, unit, added_on, expires_on, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(item.id, item.ingredientId, item.qty, item.unit, item.addedOn, item.expiresOn, item.source)
+    .run();
+}
+
+/** Set quantity and use-by date. Returns false when no item has that id. */
+export async function updatePantryItem(db: D1Database, item: PantryItem): Promise<boolean> {
+  const res = await db
+    .prepare('UPDATE pantry_items SET qty = ?, expires_on = ? WHERE id = ?')
+    .bind(item.qty, item.expiresOn, item.id)
+    .run();
+  return (res.meta.changes ?? 0) > 0;
+}
+
+export async function deletePantryItem(db: D1Database, id: string): Promise<boolean> {
+  const res = await db.prepare('DELETE FROM pantry_items WHERE id = ?').bind(id).run();
+  return (res.meta.changes ?? 0) > 0;
+}
+
+// ---- Meal ratings (milestone 3A) ----
+
+const toRating = (r: RatingRow): Rating => ({
+  id: r.id,
+  mealName: r.meal_name,
+  personId: r.person_id,
+  rating: r.rating,
+  ingredientIds: JSON.parse(r.ingredient_ids) as string[],
+  date: r.date,
+});
+
+export async function loadRatings(db: D1Database): Promise<Rating[]> {
+  const { results } = await db.prepare('SELECT * FROM meal_ratings').all<RatingRow>();
+  return results.map(toRating);
+}
+
+/** One rating per meal name (case-insensitive) and person: the old one is replaced. */
+export async function upsertRating(db: D1Database, rating: Rating): Promise<void> {
+  await db.batch([
+    db
+      .prepare('DELETE FROM meal_ratings WHERE meal_name = ? COLLATE NOCASE AND person_id = ?')
+      .bind(rating.mealName, rating.personId),
+    db
+      .prepare(
+        `INSERT INTO meal_ratings (id, meal_name, person_id, rating, ingredient_ids, date)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        rating.id,
+        rating.mealName,
+        rating.personId,
+        rating.rating,
+        JSON.stringify(rating.ingredientIds),
+        rating.date,
+      ),
+  ]);
 }

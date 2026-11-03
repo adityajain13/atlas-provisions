@@ -1,30 +1,47 @@
 import { Hono } from 'hono';
 import {
   HouseholdSchema,
+  INGREDIENT_BY_ID,
+  PantryCreateSchema,
+  PantryPatchSchema,
   PlanRequestSchema,
+  RatingInputSchema,
+  defaultExpiry,
   defaultHousehold,
   isThursdayIso,
   matchFlyerItem,
   matchIngredient,
+  newId,
+  ratingSignals,
   recentDinnerNames,
   addDaysIso,
   scoreDeals,
+  torontoDate,
   type Deal,
   type FlyerItem,
   type Household,
   type MatchedItem,
+  type PantryItem,
+  type Rating,
 } from '@provisions/shared';
 import type { ZodError } from 'zod';
 import flyerFixture from '../fixtures/flyer-sample.json';
 import historyFixture from '../fixtures/history-sample.json';
 import {
   currentFlyerItems,
+  deletePantryItem,
   insertFlyerItems,
+  insertPantryItem,
   insertPriceHistory,
+  loadPantry,
+  loadPantryItem,
   loadPlan,
+  loadRatings,
   plansBetween,
   priceHistory,
   savePlan,
+  updatePantryItem,
+  upsertRating,
   type HistoryInsert,
 } from './db';
 import { anthropicClient } from './planner/claude';
@@ -179,6 +196,9 @@ app.post(`${API}/plan`, async (c) => {
     const { household, matched, deals, neverBuy } = await loadDeals(c.env, request.weekOf);
     // Plans starting up to 21 days before the week can hold dinners in the 14-day window.
     const earlier = await plansBetween(c.env.DB, addDaysIso(request.weekOf, -21), request.weekOf);
+    const today = torontoDate();
+    const pantry = await loadPantry(c.env.DB);
+    const ratings = ratingSignals(await loadRatings(c.env.DB), household.people, today);
     const plan = await runPlanner({
       household,
       request,
@@ -186,6 +206,9 @@ app.post(`${API}/plan`, async (c) => {
       matched,
       neverBuy,
       recentDinnerNames: recentDinnerNames(earlier, request.weekOf),
+      pantry,
+      ratings,
+      today,
       client: anthropicClient(apiKey, c.env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
     });
     await savePlan(c.env.DB, plan);
@@ -193,6 +216,96 @@ app.post(`${API}/plan`, async (c) => {
   } catch (e) {
     return c.text(e instanceof Error ? e.message : 'Planner failed', 500);
   }
+});
+
+// ---- Pantry (milestone 3A) ----
+
+app.get(`${API}/pantry`, async (c) => {
+  return c.json(await loadPantry(c.env.DB));
+});
+
+// The unit comes from the catalogue. Expiry defaults from the ingredient's shelf life.
+app.post(`${API}/pantry`, async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const parsed = PantryCreateSchema.safeParse(body);
+  if (!parsed.success) return c.text(formatZod(parsed.error), 400);
+
+  const { ingredientId, qty } = parsed.data;
+  const catalog = INGREDIENT_BY_ID[ingredientId];
+  if (!catalog) return c.text(`Unknown ingredient: ${ingredientId}`, 400);
+
+  const addedOn = parsed.data.addedOn ?? torontoDate();
+  const item: PantryItem = {
+    id: newId(),
+    ingredientId,
+    qty,
+    unit: catalog.baseUnit,
+    addedOn,
+    expiresOn: parsed.data.expiresOn ?? defaultExpiry(ingredientId, addedOn),
+    source: 'manual',
+  };
+  await insertPantryItem(c.env.DB, item);
+  return c.json(item, 201);
+});
+
+app.patch(`${API}/pantry/:id`, async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const parsed = PantryPatchSchema.safeParse(body);
+  if (!parsed.success) return c.text(formatZod(parsed.error), 400);
+
+  const current = await loadPantryItem(c.env.DB, c.req.param('id'));
+  if (!current) return c.text('No pantry item with that id', 404);
+
+  const item: PantryItem = {
+    ...current,
+    qty: parsed.data.qty ?? current.qty,
+    expiresOn: parsed.data.expiresOn ?? current.expiresOn,
+  };
+  await updatePantryItem(c.env.DB, item);
+  return c.json(item);
+});
+
+app.delete(`${API}/pantry/:id`, async (c) => {
+  const removed = await deletePantryItem(c.env.DB, c.req.param('id'));
+  if (!removed) return c.text('No pantry item with that id', 404);
+  return c.json({ ok: true });
+});
+
+// ---- Meal ratings (milestone 3A) ----
+
+app.get(`${API}/ratings`, async (c) => {
+  return c.json(await loadRatings(c.env.DB));
+});
+
+// Upserts by meal name and person. The date is today on the Toronto calendar.
+app.post(`${API}/ratings`, async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const parsed = RatingInputSchema.safeParse(body);
+  if (!parsed.success) return c.text(formatZod(parsed.error), 400);
+
+  const household = await loadHousehold(c.env.DB);
+  if (!household.people.some((p) => p.id === parsed.data.personId)) {
+    return c.text(`Unknown person: ${parsed.data.personId}`, 400);
+  }
+
+  const rating: Rating = { id: newId(), date: torontoDate(), ...parsed.data };
+  await upsertRating(c.env.DB, rating);
+  return c.json(rating, 201);
 });
 
 app.get(`${API}/plan/:weekOf`, async (c) => {

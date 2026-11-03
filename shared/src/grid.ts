@@ -41,6 +41,7 @@ function fitHeadcount(eaters: string[], headcount: number): string[] {
  *   eatingOut drops the cell (fixed placements for it stay);
  *   headcount sets the eater count, adding guest-N ids or truncating the list.
  * - Cells with nobody eating are dropped.
+ * - A cell's maxMinutes is the override's maxMinutes when set, else the household's time cap for it.
  */
 export function expandWeek(household: Household, request: PlanRequest): ExpandedWeek {
   const activeFixed = household.fixedMeals.filter((m) => m.active);
@@ -72,8 +73,8 @@ export function expandWeek(household: Household, request: PlanRequest): Expanded
 
       let eaters = scheduled.filter((id) => !taken.has(id));
       if (override.headcount !== undefined) eaters = fitHeadcount(eaters, override.headcount);
-      // TODO(busy): Household has no busy tags yet, so maxMinutes stays undefined.
-      if (eaters.length > 0) cells.push({ day, slot, eaters });
+      const cap = override.maxMinutes ?? household.timeCaps[day]?.[slot];
+      if (eaters.length > 0) cells.push({ day, slot, eaters, ...(cap !== undefined ? { maxMinutes: cap } : {}) });
     }
   }
 

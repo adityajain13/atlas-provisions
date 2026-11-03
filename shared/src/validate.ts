@@ -5,6 +5,7 @@ import type { Household } from './index';
 import type { ListItem, MealPlan, PlannedMeal, RawMeal, SlotCell, ValidationIssue } from './plan';
 import type { MatchedItem } from './match';
 import { cheapest, collectOffers, packsFor, type Offer } from './offers';
+import { formatUseBy, subtractPantry, type PantryItem } from './pantry';
 import type { Deal } from './scoring';
 import { nutrientTotals, round2, unitLabel } from './units';
 
@@ -138,6 +139,9 @@ function assignStores(
  * Price-match hint: when an item's store is in priceMatchStores and a store outside the chosen
  * set sells it at least 10% cheaper per unit, the item carries that store as priceMatch.
  *
+ * Pantry: stock on hand is taken off each ingredient's quantity before packs are counted, so
+ * ingredients the pantry covers fully are not bought at all.
+ *
  * Sort: store (highest subtotal first, Unpriced last), then CATEGORY_ORDER, then name.
  */
 export function buildList(
@@ -148,6 +152,7 @@ export function buildList(
   stores: string[],
   maxStores: number,
   priceMatchStores: string[] = [],
+  pantry: PantryItem[] = [],
 ): ListItem[] {
   const storeSet = new Set(stores);
   const offers = collectOffers(deals, matched, (s) => storeSet.has(s));
@@ -162,6 +167,15 @@ export function buildList(
   };
   for (const m of meals) for (const ing of m.ingredients) add(ing.ingredientId, ing.qty, [m.id]);
   for (const n of fixed.needs) add(n.ingredientId, n.qty, n.usedIn);
+
+  if (pantry.length > 0) {
+    const { remaining } = subtractPantry(
+      [...qty].map(([ingredientId, q]) => ({ ingredientId, qty: q })),
+      pantry,
+    );
+    qty.clear();
+    for (const r of remaining) qty.set(r.ingredientId, r.qty);
+  }
 
   const needed = [...qty.keys()].filter((id) => (qty.get(id) ?? 0) > 0);
   const priced = needed.filter((id) => (offers.get(id)?.length ?? 0) > 0);
@@ -233,6 +247,8 @@ export interface ValidateContext {
   available: ReadonlySet<string>; // ingredient ids the planner was offered
   neverBuy: ReadonlySet<string>;
   recentDinnerNames: string[];
+  useFirst?: { ingredientId: string; expiresOn: string }[]; // pantry stock due soon, when use-it-up is on
+  neverMeals?: string[]; // meal names rated 'never'
 }
 
 function proteinOf(meal: PlannedMeal): string | undefined {
@@ -413,6 +429,39 @@ function checkBusy(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   return out;
 }
 
+/** With use-it-up on, every pantry item due soon should appear in a meal. */
+function checkUseItUp(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  if (!plan.request.useItUp || !ctx.useFirst || ctx.useFirst.length === 0) return [];
+  const used = new Set<string>();
+  for (const m of plan.meals) for (const ing of m.ingredients) used.add(ing.ingredientId);
+  for (const n of ctx.fixed.needs) used.add(n.ingredientId);
+  const out: ValidationIssue[] = [];
+  const reported = new Set<string>();
+  for (const item of ctx.useFirst) {
+    if (used.has(item.ingredientId) || reported.has(item.ingredientId)) continue;
+    reported.add(item.ingredientId);
+    out.push({
+      check: 'use-it-up',
+      severity: 'warning',
+      message: `Use ${ingName(item.ingredientId)} before ${formatUseBy(item.expiresOn)}: add it to a meal.`,
+    });
+  }
+  return out;
+}
+
+/** A meal rated 'never' must not come back, whatever name the planner gives it. */
+function checkNeverAgain(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  if (!ctx.neverMeals || ctx.neverMeals.length === 0) return [];
+  const never = new Set(ctx.neverMeals.map((n) => n.trim().toLowerCase()));
+  return plan.meals
+    .filter((m) => never.has(m.name.trim().toLowerCase()))
+    .map((m) => ({
+      check: 'never-again' as const,
+      severity: 'error' as const,
+      message: `"${m.name}" was marked never again by the household. Replace it with a different meal.`,
+    }));
+}
+
 const words = (s: string) => s.toLowerCase().split(/[^\p{L}]+/u).filter((w) => w.length >= 4);
 
 function nameMatches(mealName: string, craving: string): boolean {
@@ -545,5 +594,7 @@ export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[
     ...checkCravings(plan),
     ...checkVariety(plan, ctx),
     ...checkUnpriced(plan),
+    ...checkUseItUp(plan, ctx),
+    ...checkNeverAgain(plan, ctx),
   ];
 }

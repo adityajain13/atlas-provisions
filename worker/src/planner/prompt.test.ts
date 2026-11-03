@@ -67,6 +67,36 @@ describe('buildPayload', () => {
     expect(withRule.avoid).toEqual(['Chili']);
   });
 
+  it('offers pantry stock as pantry entries, which beat a deal for the same ingredient', () => {
+    const pantry = [
+      { id: 'p1', ingredientId: 'broccoli', qty: 0.4, unit: 'kg' as const, addedOn: '2026-11-10', expiresOn: '2026-11-13', source: 'manual' as const },
+      { id: 'p2', ingredientId: 'broccoli', qty: 0.2, unit: 'kg' as const, addedOn: '2026-11-11', expiresOn: '2026-11-14', source: 'manual' as const },
+    ];
+    const out = buildAvailable([deal('broccoli', 0.6), deal('spinach', 0.2)], noFixed, pantry);
+    expect(out.find((a) => a.id === 'broccoli')).toMatchObject({ source: 'pantry', score: 1, packQty: 0.6 });
+    expect(out.find((a) => a.id === 'spinach')).toMatchObject({ source: 'deal' });
+  });
+
+  it('passes pantry use-first ids, favourites and avoid to the payload', () => {
+    const { cells, fixed } = expandWeek(household, request);
+    const payload = buildPayload({
+      household,
+      request,
+      cells,
+      fixed,
+      fixedCost: noFixed,
+      available: [],
+      neverBuy: [],
+      recentDinnerNames: ['Chili'],
+      pantryUseFirst: ['spinach'],
+      favourites: ['Tacos'],
+      avoid: ['Fish', 'Chili'],
+    });
+    expect(payload.useFirst).toEqual(['spinach']);
+    expect(payload.favourites).toEqual(['Tacos']);
+    expect(payload.avoid).toEqual(['Fish', 'Chili']); // the 14-day rule is off here, so recent dinners are not added
+  });
+
   it('system prompt asks for the submit_plan tool and the no-prices rule', () => {
     expect(SYSTEM_PROMPT).toContain('submit_plan');
     expect(SYSTEM_PROMPT).toContain('Do not estimate prices');

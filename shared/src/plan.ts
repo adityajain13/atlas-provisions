@@ -9,7 +9,7 @@ export interface SlotCell {
   slot: Slot;
   eaters: string[]; // person ids, plus guest-1, guest-2 ... for extra headcount
   fixedMealId?: string;
-  maxMinutes?: number; // hard cap on active minutes. Not set yet: Household has no busy tags.
+  maxMinutes?: number; // hard cap on active minutes, from the household's time caps or a week override
 }
 
 export interface WeekOverride {
@@ -19,6 +19,7 @@ export interface WeekOverride {
   eatingOut?: boolean;
   spend?: number;
   skipFixed?: boolean;
+  maxMinutes?: number; // busy night for this week only; wins over the household time cap
 }
 
 export interface PlanRequest {
@@ -36,13 +37,22 @@ const WeekOverrideSchema = z.object({
   eatingOut: z.boolean().optional(),
   spend: z.number().min(0).max(1000).optional(),
   skipFixed: z.boolean().optional(),
+  maxMinutes: z.number().int().min(5, 'Time cap is at least 5 minutes').max(180).optional(),
 });
+
+/** True for a real calendar date in YYYY-MM-DD form. */
+export function isRealIsoDate(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+/** A real calendar date in YYYY-MM-DD form. */
+export const IsoDateSchema = z.string().refine(isRealIsoDate, 'Dates must be real YYYY-MM-DD dates');
 
 /** True for a real calendar date in YYYY-MM-DD form that falls on a Thursday. */
 export function isThursdayIso(s: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s && d.getUTCDay() === 4;
+  return isRealIsoDate(s) && new Date(`${s}T00:00:00Z`).getUTCDay() === 4;
 }
 
 export const PlanRequestSchema = z.object({
@@ -100,7 +110,9 @@ export interface ValidationIssue {
     | 'busy'
     | 'cravings'
     | 'variety'
-    | 'equipment';
+    | 'equipment'
+    | 'use-it-up'
+    | 'never-again';
   severity: 'error' | 'warning';
   message: string; // written as an instruction to the planner
 }

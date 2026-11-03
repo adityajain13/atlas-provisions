@@ -201,3 +201,72 @@ describe('runPlanner', () => {
     expect(plan.issues.some((i) => i.check === 'never-buy' && i.severity === 'error')).toBe(true);
   });
 });
+
+describe('runPlanner: pantry and ratings', () => {
+  it('offers pantry stock, takes it off the list, and asks for stock due soon to be used', async () => {
+    const h = household();
+    const req = request({ useItUp: true });
+    const cells = cellsOf(h, req);
+    const pantry = [
+      {
+        id: 'p1',
+        ingredientId: DEAL_ID,
+        qty: 1000,
+        unit: INGREDIENT_BY_ID[DEAL_ID]!.baseUnit,
+        addedOn: '2026-11-10',
+        expiresOn: '2026-11-13',
+        source: 'manual' as const,
+      },
+    ];
+    const { client, seen } = fakeClient([planFor(cells, DEAL_ID, DEAL_UNIT_QTY)]);
+
+    const plan = await runPlanner({
+      household: h,
+      request: req,
+      deals,
+      matched,
+      client,
+      recentDinnerNames: [],
+      neverBuy: [],
+      pantry,
+      today: '2026-11-12',
+    });
+
+    const payload = seen[0]!.payload as unknown as { available: { id: string; source: string; packQty: number }[]; useFirst: string[] };
+    expect(payload.available.find((a) => a.id === DEAL_ID)).toMatchObject({ source: 'pantry', packQty: 1000 });
+    expect(payload.useFirst).toContain(DEAL_ID);
+    expect(plan.list.find((i) => i.ingredientId === DEAL_ID)).toBeUndefined();
+    expect(plan.issues.filter((i) => i.check === 'use-it-up')).toEqual([]);
+  });
+
+  it('ignores pantry stock past its use-by date', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const pantry = [
+      { id: 'old', ingredientId: DEAL_ID, qty: 1000, unit: INGREDIENT_BY_ID[DEAL_ID]!.baseUnit, addedOn: '2026-10-01', expiresOn: '2026-10-08', source: 'manual' as const },
+    ];
+    const { client, seen } = fakeClient([planFor(cells, DEAL_ID, DEAL_UNIT_QTY)]);
+
+    await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [], pantry, today: '2026-11-12' });
+
+    const payload = seen[0]!.payload as unknown as { available: { source: string }[]; useFirst: string[] };
+    expect(payload.available.some((a) => a.source === 'pantry')).toBe(false);
+    expect(payload.useFirst).toEqual([]);
+  });
+
+  it('sends favourites and avoid to the planner, and flags a never-again meal', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const ratings = { favourites: ['Chili'], avoid: ['Fish tacos'], never: ['Meal thu dinner'] };
+    const { client, seen } = fakeClient([planFor(cells, DEAL_ID, DEAL_UNIT_QTY)]);
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [], ratings, today: '2026-11-12' });
+
+    const payload = seen[0]!.payload as unknown as { favourites: string[]; avoid: string[] };
+    expect(payload.favourites).toEqual(['Chili']);
+    expect(payload.avoid).toEqual(['Fish tacos', 'Meal thu dinner']);
+    expect(plan.issues.some((i) => i.check === 'never-again' && i.severity === 'error')).toBe(true);
+  });
+});
