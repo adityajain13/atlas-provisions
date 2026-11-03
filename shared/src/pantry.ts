@@ -5,7 +5,7 @@ import { IsoDateSchema, addDaysIso } from './plan';
 export const PANTRY_SOURCES = ['manual', 'receipt', 'plan-leftover'] as const;
 export const EXPIRY_WINDOW_DAYS = 3;
 const DEFAULT_SHELF_DAYS = 7; // for ingredients the catalogue does not know
-const MAX_QTY = 10000;
+export const MAX_QTY = 10000;
 
 export const PantryItemSchema = z.object({
   id: z.string().min(1),

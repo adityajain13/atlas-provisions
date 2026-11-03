@@ -6,6 +6,7 @@ import type {
   MealPlan,
   PantryItem,
   Rating,
+  ReceiptCommitRows,
 } from '@provisions/shared';
 
 interface FlyerRow {
@@ -256,4 +257,63 @@ export async function upsertRating(db: D1Database, rating: Rating): Promise<void
         rating.date,
       ),
   ]);
+}
+
+// ---- Receipts (milestone 3B) ----
+
+// D1 batches are kept small. A long receipt is written in chunks, so the chunks are not one
+// transaction across the whole receipt.
+const STATEMENTS_PER_BATCH = 50;
+
+/** Writes the rows a confirmed receipt produced: prices, confirmed matches and pantry items. */
+export async function commitReceiptRows(
+  db: D1Database,
+  rows: ReceiptCommitRows,
+  now: string,
+): Promise<{ prices: number; matches: number; pantryItems: number }> {
+  const statements: D1PreparedStatement[] = [];
+
+  for (const p of rows.prices) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT OR REPLACE INTO price_history (ingredient_id, store, date, price_per_unit, on_sale, source)
+           VALUES (?, ?, ?, ?, 0, 'receipt')`,
+        )
+        .bind(p.ingredientId, p.store, p.date, p.pricePerUnit),
+    );
+  }
+
+  for (const m of rows.matches) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO item_matches (raw_key, ingredient_id, pack_qty, confidence, confirmed, updated_at)
+           VALUES (?, ?, ?, 1, 1, ?)
+           ON CONFLICT(raw_key) DO UPDATE SET
+             ingredient_id = excluded.ingredient_id,
+             pack_qty = excluded.pack_qty,
+             confidence = 1,
+             confirmed = 1,
+             updated_at = excluded.updated_at`,
+        )
+        .bind(m.rawKey, m.ingredientId, m.packQty, now),
+    );
+  }
+
+  for (const item of rows.pantry) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO pantry_items (id, ingredient_id, qty, unit, added_on, expires_on, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(item.id, item.ingredientId, item.qty, item.unit, item.addedOn, item.expiresOn, item.source),
+    );
+  }
+
+  for (let i = 0; i < statements.length; i += STATEMENTS_PER_BATCH) {
+    await db.batch(statements.slice(i, i + STATEMENTS_PER_BATCH));
+  }
+  return { prices: rows.prices.length, matches: rows.matches.length, pantryItems: rows.pantry.length };
 }

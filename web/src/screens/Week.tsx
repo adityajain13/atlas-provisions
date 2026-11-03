@@ -4,6 +4,7 @@ import { flyerWeekOf, type Day, type MealPlan, type Rating, type RatingKind } fr
 import { errorMessage, getHousehold, getPlan, getRatings, saveRating } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
+import { PrepArticle } from '../components/PrepArticle';
 import { RefreshIcon } from '../components/Icons';
 import { SamplePill } from '../components/SamplePill';
 import { secondaryBtn } from '../components/ui';
@@ -42,6 +43,7 @@ export default function Week() {
   const [source, setSource] = useState<Source>({ status: 'loading' });
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [ratingError, setRatingError] = useState<string | null>(null);
+  const [prepDay, setPrepDay] = useState<Day | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -50,6 +52,7 @@ export default function Week() {
       .then(([plan, household, saved]) => {
         if (!alive) return;
         setNames(new Map((household?.people ?? []).map((p) => [p.id, p.name])));
+        setPrepDay(household?.prepDay ?? null);
         setRatings(saved);
         setSource(plan ? { status: 'plan', plan } : { status: 'sample', error: null });
       })
@@ -75,6 +78,9 @@ export default function Week() {
   const day = week.days.find((d) => d.key === selected) ?? week.days[0]!;
   const pct = week.budget > 0 ? Math.min(100, (week.spent / week.budget) * 100) : 0;
   const errors = plan?.issues.filter((i) => i.severity === 'error') ?? [];
+  const prep = plan?.prep && plan.prep.day === selected ? plan.prep : null;
+  const prepWarning =
+    plan && !plan.prep && prepDay === selected ? (plan.issues.find((i) => i.check === 'prep')?.message ?? null) : null;
 
   // Records the rating for every household member eating the meal, then reloads the ratings.
   async function rate(meal: Rateable, value: RatingKind) {
@@ -170,6 +176,8 @@ export default function Week() {
       </div>
 
       <div className="mt-6 space-y-6">
+        {plan && prep && <PrepArticle plan={plan} prep={prep} />}
+        {prepWarning && <p className="text-[13px] text-muted">{prepWarning}</p>}
         {day.meals.map((m) => (
           <article key={`${m.slot}-${m.name}`} className="border-t border-line pt-4">
             <div className="flex items-center justify-between">

@@ -6,12 +6,14 @@ import {
   PantryPatchSchema,
   PlanRequestSchema,
   RatingInputSchema,
+  ReceiptCommitSchema,
   defaultExpiry,
   defaultHousehold,
   isThursdayIso,
   matchFlyerItem,
   matchIngredient,
   newId,
+  planReceiptCommit,
   ratingSignals,
   recentDinnerNames,
   addDaysIso,
@@ -28,6 +30,7 @@ import type { ZodError } from 'zod';
 import flyerFixture from '../fixtures/flyer-sample.json';
 import historyFixture from '../fixtures/history-sample.json';
 import {
+  commitReceiptRows,
   currentFlyerItems,
   deletePantryItem,
   insertFlyerItems,
@@ -44,19 +47,25 @@ import {
   upsertRating,
   type HistoryInsert,
 } from './db';
-import { anthropicClient } from './planner/claude';
+import { anthropicClient, anthropicPrepClient } from './planner/claude';
+import { attachPrep } from './planner/prep';
 import { runPlanner } from './planner/run';
+import { MAX_RECEIPT_IMAGE_CHARS, parseReceiptImage } from './receipts';
 
 type Env = {
   DB: D1Database;
   ASSETS: Fetcher;
   ANTHROPIC_API_KEY?: string;
   PLANNER_MODEL?: string;
+  PREP_MODEL?: string;
+  RECEIPT_MODEL?: string;
+  EXTRACT_MODEL?: string;
   DEV?: string;
 };
 
 const API = '/provisions/api';
 const DEFAULT_PLANNER_MODEL = 'claude-sonnet-5-5';
+const DEFAULT_PREP_MODEL = 'claude-haiku-5-5';
 const app = new Hono<{ Bindings: Env }>();
 
 function formatZod(error: ZodError): string {
@@ -211,10 +220,41 @@ app.post(`${API}/plan`, async (c) => {
       today,
       client: anthropicClient(apiKey, c.env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
     });
-    await savePlan(c.env.DB, plan);
-    return c.json(plan);
+    // Batch prep is optional: attachPrep never throws, so the plan is saved either way.
+    const withPrep = await attachPrep(
+      plan,
+      household.prepDay,
+      anthropicPrepClient(apiKey, c.env.PREP_MODEL ?? DEFAULT_PREP_MODEL),
+    );
+    await savePlan(c.env.DB, withPrep);
+    return c.json(withPrep);
   } catch (e) {
     return c.text(e instanceof Error ? e.message : 'Planner failed', 500);
+  }
+});
+
+// Regenerates only the batch prep for a saved plan, for the household's current prep day.
+app.post(`${API}/plan/:weekOf/prep`, async (c) => {
+  const apiKey = c.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return c.text('Planner not configured: add the ANTHROPIC_API_KEY secret.', 503);
+  const weekOf = c.req.param('weekOf');
+  if (!isThursdayIso(weekOf)) return c.text('weekOf must be a Thursday (YYYY-MM-DD)', 400);
+
+  try {
+    const plan = await loadPlan(c.env.DB, weekOf);
+    if (!plan) return c.text('No plan for this week', 404);
+    const household = await loadHousehold(c.env.DB);
+    if (!household.prepDay) return c.text('Set a prep day in Household first', 400);
+
+    const updated = await attachPrep(
+      plan,
+      household.prepDay,
+      anthropicPrepClient(apiKey, c.env.PREP_MODEL ?? DEFAULT_PREP_MODEL),
+    );
+    await savePlan(c.env.DB, updated);
+    return c.json(updated);
+  } catch (e) {
+    return c.text(e instanceof Error ? e.message : 'Prep failed', 500);
   }
 });
 
@@ -314,6 +354,49 @@ app.get(`${API}/plan/:weekOf`, async (c) => {
   const plan = await loadPlan(c.env.DB, weekOf);
   if (!plan) return c.text('No plan for this week', 404);
   return c.json(plan);
+});
+
+// ---- Receipts (milestone 3B) ----
+
+// Reads a receipt photo (base64 JPEG) into structured lines. Nothing is saved until commit.
+// TODO(auth): the app has no sign-in yet. Add the session check to both receipt routes.
+app.post(`${API}/receipts/parse`, async (c) => {
+  if (!c.env.ANTHROPIC_API_KEY) {
+    return c.text('Receipt reader not configured: add the ANTHROPIC_API_KEY secret.', 503);
+  }
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const image = (body as { image?: unknown } | null)?.image;
+  if (typeof image !== 'string' || image.length === 0 || image.length > MAX_RECEIPT_IMAGE_CHARS) {
+    return c.text('Missing or oversized image', 400);
+  }
+
+  const result = await parseReceiptImage(image, c.env);
+  if (!result.ok) return c.text(result.message, result.status);
+  return c.json(result.receipt);
+});
+
+// Saves a confirmed receipt: prices for each line, confirmed matches, and pantry items.
+app.post(`${API}/receipts/commit`, async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const parsed = ReceiptCommitSchema.safeParse(body);
+  if (!parsed.success) return c.text(formatZod(parsed.error), 400);
+
+  const unknown = parsed.data.lines.find((l) => !INGREDIENT_BY_ID[l.ingredientId]);
+  if (unknown) return c.text(`Unknown ingredient: ${unknown.ingredientId}`, 400);
+
+  const rows = planReceiptCommit(parsed.data, torontoDate(), newId);
+  const counts = await commitReceiptRows(c.env.DB, rows, new Date().toISOString());
+  return c.json(counts, 201);
 });
 
 // Everything else: static assets, with SPA fallback for /provisions/* routes.

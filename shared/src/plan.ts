@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
 import type { Category, BaseUnit } from './catalog';
+import type { PrepPlan } from './prep';
 
 // ---- Request ----
 
@@ -112,7 +113,8 @@ export interface ValidationIssue {
     | 'variety'
     | 'equipment'
     | 'use-it-up'
-    | 'never-again';
+    | 'never-again'
+    | 'prep';
   severity: 'error' | 'warning';
   message: string; // written as an instruction to the planner
 }
@@ -148,6 +150,7 @@ export interface MealPlan {
   attempts: number;
   generatedAt: string;
   notes: string;
+  prep?: PrepPlan; // batch prep for the household's prep day, when one is set and generated
 }
 
 // ---- Dates ----
