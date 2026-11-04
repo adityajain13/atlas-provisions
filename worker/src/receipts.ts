@@ -1,6 +1,8 @@
 // Grocery receipt reading. Copied from the travel planner's worker/receipts.ts and adapted:
 // the category field is gone, and each line gets an optional printed size and item code.
 
+import { answerFrom, answerOnlyInstruction, retryMessages, textOf, type ContentBlock } from './toolAnswer';
+
 export const MAX_RECEIPT_IMAGE_CHARS = 6_000_000;
 
 export interface ReceiptEnv {
@@ -85,7 +87,13 @@ export async function parseReceiptImage(
   env: ReceiptEnv,
   fetchImpl: typeof fetch = (...args) => fetch(...args),
 ): Promise<ParseResult> {
-  const ask = async (model: string): Promise<{ out?: Record<string, unknown>; fail?: string }> => {
+  const userContent = [
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image } },
+    { type: 'text', text: `${PROMPT} ${answerOnlyInstruction(RECEIPT_TOOL.name)}` },
+  ];
+
+  // One request. tool_choice stays auto (forced tool use is rejected by claude-sonnet-5-5).
+  const post = async (model: string, messages: unknown[]): Promise<{ content?: ContentBlock[] } | { fail: string }> => {
     let res: Response;
     try {
       res = await fetchImpl(API_URL, {
@@ -100,16 +108,8 @@ export async function parseReceiptImage(
           model,
           max_tokens: 3000,
           tools: [RECEIPT_TOOL],
-          tool_choice: { type: 'tool', name: RECEIPT_TOOL.name },
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image } },
-                { type: 'text', text: PROMPT },
-              ],
-            },
-          ],
+          tool_choice: { type: 'auto' },
+          messages,
         }),
       });
     } catch (e) {
@@ -122,9 +122,24 @@ export async function parseReceiptImage(
       const message = /"message"\s*:\s*"([^"]+)"/.exec(detail)?.[1] ?? '';
       return { fail: `${res.status} ${message.slice(0, 120)}`.trim() };
     }
-    const data = (await res.json()) as { content?: { type: string; input?: Record<string, unknown> }[] };
-    const out = data.content?.find((c) => c.type === 'tool_use')?.input;
-    return out ? { out } : { fail: 'no tool answer' };
+    try {
+      const data = (await res.json()) as { content?: ContentBlock[] };
+      return { content: data.content };
+    } catch {
+      return { fail: 'invalid JSON' };
+    }
+  };
+
+  const ask = async (model: string): Promise<{ out?: Record<string, unknown>; fail?: string }> => {
+    const first = await post(model, [{ role: 'user', content: userContent }]);
+    if ('fail' in first) return { fail: first.fail };
+    let answer = answerFrom(first.content, RECEIPT_TOOL.name);
+    if (answer === undefined) {
+      const second = await post(model, retryMessages(userContent, textOf(first.content), RECEIPT_TOOL.name));
+      if ('fail' in second) return { fail: second.fail };
+      answer = answerFrom(second.content, RECEIPT_TOOL.name);
+    }
+    return answer ? { out: answer } : { fail: 'no tool answer' };
   };
 
   const models = [...new Set([env.RECEIPT_MODEL || 'claude-sonnet-5-5', env.EXTRACT_MODEL || 'claude-haiku-5-5'])];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchFlyerItem, type FlyerItem } from '@provisions/shared';
+import { expandFlyerItem, matchFlyerItem, type FlyerItem } from '@provisions/shared';
 import flyer from './fixtures/flyer-sample.json';
 
 const items = flyer as FlyerItem[];
@@ -8,7 +8,8 @@ const items = flyer as FlyerItem[];
 const NON_FOOD = ['Tide Pods 81 ct', 'Doritos Nacho Cheese'];
 
 describe('flyer fixture', () => {
-  const foodItems = items.filter((i) => !NON_FOOD.includes(i.rawName));
+  // Each line is expanded first, as the import does, so "A or B" lines count as their products.
+  const foodItems = items.filter((i) => !NON_FOOD.includes(i.rawName)).flatMap(expandFlyerItem);
   const matched = foodItems.filter((i) => matchFlyerItem(i) !== null);
 
   it('has about 80 items across the four stores, all from the fixture source', () => {
@@ -17,10 +18,10 @@ describe('flyer fixture', () => {
     for (const i of items) expect(i.source).toBe('fixture');
   });
 
-  it('matches at least 85% of the food items', () => {
+  it('matches at least 95% of the food items', () => {
     const rate = matched.length / foodItems.length;
     const unmatched = foodItems.filter((i) => matchFlyerItem(i) === null).map((i) => i.rawName);
-    expect(rate, `unmatched: ${unmatched.join(', ')}`).toBeGreaterThanOrEqual(0.85);
+    expect(rate, `unmatched: ${unmatched.join(', ')}`).toBeGreaterThanOrEqual(0.95);
   });
 
   it('does not match the known non-food items', () => {

@@ -1,6 +1,7 @@
 import type { RawPlan } from '@provisions/shared';
 import { SUBMIT_PLAN_TOOL } from './prompt';
 import { PREP_TOOL, type PrepClient } from './prep';
+import { answerFrom, answerOnlyInstruction, retryMessages, textOf, type ContentBlock } from '../toolAnswer';
 
 export interface PlannerClient {
   submitPlan(system: string, payload: unknown): Promise<RawPlan>;
@@ -11,7 +12,7 @@ const MAX_ERROR_CHARS = 500;
 
 interface MessageResponse {
   stop_reason?: string;
-  content?: { type: string; name?: string; input?: unknown }[];
+  content?: ContentBlock[];
 }
 
 export interface ToolDef {
@@ -21,8 +22,11 @@ export interface ToolDef {
 }
 
 /**
- * One Messages API call that must answer through `tool`. Returns the tool's input as sent, not
- * yet validated. `fetchImpl` is injectable so tests never reach the network.
+ * One Messages API call whose answer is the input of `tool`. The model is asked to answer only by
+ * calling the tool; tool_choice stays auto, because forced tool use is rejected by claude-sonnet-5-5.
+ * When the reply has no tool call, a JSON object in its text is used, and otherwise the model is asked
+ * once more. Returns the tool's input as sent, not yet validated. `fetchImpl` is injectable so tests
+ * never reach the network.
  */
 export async function callTool(
   apiKey: string,
@@ -33,40 +37,47 @@ export async function callTool(
   fetchImpl: typeof fetch = (...args) => fetch(...args),
   maxTokens = 8000,
 ): Promise<unknown> {
-  const res = await fetchImpl(API_URL, {
-    method: 'POST',
-    signal: AbortSignal.timeout(90_000),
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-      tools: [tool],
-      tool_choice: { type: 'tool', name: tool.name },
-      messages: [{ role: 'user', content: JSON.stringify(payload) }],
-    }),
-  });
+  const systemText = `${system}\n\n${answerOnlyInstruction(tool.name)}`;
+  const userText = JSON.stringify(payload);
 
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`Claude API returned ${res.status}: ${text.slice(0, MAX_ERROR_CHARS)}`);
-  }
+  const send = async (messages: unknown[]): Promise<MessageResponse> => {
+    const res = await fetchImpl(API_URL, {
+      method: 'POST',
+      signal: AbortSignal.timeout(90_000),
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        system: [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }],
+        tools: [tool],
+        tool_choice: { type: 'auto' },
+        messages,
+      }),
+    });
 
-  let body: MessageResponse;
-  try {
-    body = JSON.parse(text) as MessageResponse;
-  } catch {
-    throw new Error(`Claude API returned invalid JSON: ${text.slice(0, MAX_ERROR_CHARS)}`);
-  }
-  const block = body.content?.find((b) => b.type === 'tool_use' && b.name === tool.name);
-  if (!block) {
-    throw new Error(`Claude did not call ${tool.name} (stop reason: ${body.stop_reason ?? 'unknown'})`);
-  }
-  return block.input;
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`Claude API returned ${res.status}: ${text.slice(0, MAX_ERROR_CHARS)}`);
+    }
+    try {
+      return JSON.parse(text) as MessageResponse;
+    } catch {
+      throw new Error(`Claude API returned invalid JSON: ${text.slice(0, MAX_ERROR_CHARS)}`);
+    }
+  };
+
+  const first = await send([{ role: 'user', content: userText }]);
+  const answer = answerFrom(first.content, tool.name);
+  if (answer !== undefined) return answer;
+
+  const second = await send(retryMessages(userText, textOf(first.content), tool.name));
+  const retried = answerFrom(second.content, tool.name);
+  if (retried !== undefined) return retried;
+  throw new Error(`Claude did not call ${tool.name} (stop reason: ${second.stop_reason ?? 'unknown'})`);
 }
 
 /**

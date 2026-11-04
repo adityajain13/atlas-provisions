@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { INGREDIENTS } from './catalog';
-import { buildSearchTerms, isoDatePart, matchStoreName, normalizePostalCode, priceTextFrom } from './flipp';
+import {
+  buildSearchTerms,
+  collapseIssues,
+  fallbackSearchTerms,
+  isoDatePart,
+  matchStoreName,
+  normalizePostalCode,
+  priceTextFrom,
+  priceTextFromParts,
+} from './flipp';
 import { parsePrice } from './parse';
 
 describe('buildSearchTerms', () => {
@@ -129,5 +138,58 @@ describe('priceTextFrom', () => {
   it('returns null when no price can be read', () => {
     expect(priceTextFrom({ current_price: null, sale_story: 'Ask in store' })).toBeNull();
     expect(priceTextFrom({})).toBeNull();
+  });
+});
+
+describe('fallbackSearchTerms', () => {
+  const terms = fallbackSearchTerms();
+
+  it('has at most 30 unique terms, proteins first, then common produce', () => {
+    expect(terms.length).toBeLessThanOrEqual(30);
+    expect(new Set(terms).size).toBe(terms.length);
+    expect(terms[0]).toBe(buildSearchTerms(INGREDIENTS.filter((i) => i.category === 'meat').slice(0, 1))[0]);
+    expect(terms).toContain('broccoli');
+    expect(terms).toContain('carrot');
+    // Every term is a meat or seafood term before any produce term.
+    const firstProduce = terms.findIndex((t) => t === 'broccoli');
+    const meat = INGREDIENTS.filter((i) => i.category === 'meat' || i.category === 'seafood' || i.protein === 'egg' || i.protein === 'tofu');
+    const meatTerms = new Set(buildSearchTerms(meat));
+    for (let i = 0; i < firstProduce; i++) expect(meatTerms.has(terms[i]!)).toBe(true);
+  });
+
+  it('takes a smaller limit when asked', () => {
+    expect(fallbackSearchTerms(5)).toHaveLength(5);
+  });
+});
+
+describe('collapseIssues', () => {
+  it('keeps a single issue with its label', () => {
+    expect(collapseIssues([{ label: 'chicken', message: 'HTTP 503' }], 'searches')).toEqual(['chicken: HTTP 503']);
+  });
+
+  it('merges identical messages into one line with a count, in first-seen order', () => {
+    const msg = 'Too many subrequests by single Worker invocation';
+    const issues = [
+      { label: 'a', message: msg },
+      { label: 'b', message: 'HTTP 404' },
+      { label: 'c', message: msg },
+      { label: 'd', message: msg },
+    ];
+    expect(collapseIssues(issues, 'searches')).toEqual([`${msg} (3 searches)`, 'b: HTTP 404']);
+  });
+
+  it('gives a bare message when there is no label', () => {
+    expect(collapseIssues([{ message: 'Flyer list HTTP 500' }], 'requests')).toEqual(['Flyer list HTTP 500']);
+  });
+});
+
+describe('priceTextFromParts', () => {
+  it('builds text parsePrice reads, adding the slash to a bare unit', () => {
+    expect(priceTextFromParts('', '$4.39', 'kg')).toBe('$4.39/kg');
+    expect(priceTextFromParts('', '2/$5', '')).toBe('2/$5');
+  });
+
+  it('returns null when the result has no price', () => {
+    expect(priceTextFromParts('', 'call', '')).toBeNull();
   });
 });

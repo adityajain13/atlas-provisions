@@ -6,6 +6,17 @@ import { secondaryBtn } from './ui';
 
 const ERROR_TEXT = 'text-[#D98C7A]';
 
+/**
+ * The sentence under the refresh button. Flyers mode names the flyers and the raw item counts per store;
+ * search mode says the items came from a search.
+ */
+export function resultLine(r: IngestRunSummary): string {
+  if (r.mode === 'search') return `Found ${r.items} items by search. ${r.matched} matched to ingredients.`;
+  const perStore = r.storeCounts.map((s) => `${s.store}: ${s.count}`).join(', ');
+  const where = perStore ? ` (${perStore})` : '';
+  return `Found ${r.items} items in ${r.flyerCount} flyers${where}. ${r.matched} matched to ingredients.`;
+}
+
 /** "5 min ago", "3 h ago", "2 days ago". */
 export function timeAgo(iso: string, now = Date.now()): string {
   const mins = Math.round((now - Date.parse(iso)) / 60_000);
@@ -63,7 +74,7 @@ export function FlyerRefresh() {
     line = `${when} ${timeAgo(last.finishedAt)} · ${total} ${total === 1 ? 'price' : 'prices'}`;
   }
 
-  const errors = result?.errors.slice(0, 3) ?? [];
+  const errors = result?.errors ?? [];
 
   return (
     <div className="mt-6 border-t border-line2 pt-4">
@@ -79,12 +90,10 @@ export function FlyerRefresh() {
 
       {result && (
         <div className="mt-4 space-y-3">
-          <p className="text-[13px] text-paper">
-            Found {result.items} items from Flipp, {result.matched} matched to ingredients.
-          </p>
+          <p className="text-[13px] text-paper">{resultLine(result)}</p>
           {errors.length > 0 && (
             <div className="rounded-lg border border-edge px-4 py-3">
-              <p className="text-[14px] text-paper">Some searches failed</p>
+              <p className="text-[14px] text-paper">Some requests failed</p>
               <ul className={`mt-2 space-y-1.5 text-[13px] ${ERROR_TEXT}`}>
                 {errors.map((e) => (
                   <li key={e}>{e}</li>
