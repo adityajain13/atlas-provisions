@@ -56,6 +56,43 @@ describe('matchStoreName', () => {
     expect(matchStoreName('Food', stores)).toBeNull();
     expect(matchStoreName('', stores)).toBeNull();
   });
+
+  it('skips merchants that are not household stores, and very short names', () => {
+    expect(matchStoreName('Walmart', stores)).toBeNull();
+    expect(matchStoreName('Food', stores)).toBeNull();
+    expect(matchStoreName('', stores)).toBeNull();
+  });
+
+  it('matches a Flipp name alias and returns the store name', () => {
+    const rcss = { name: 'Real Canadian Superstore', flippNames: ['Superstore', 'RCSS'] };
+    expect(matchStoreName('Superstore', [rcss])).toBe('Real Canadian Superstore');
+    expect(matchStoreName('RCSS', [rcss])).toBe('Real Canadian Superstore');
+    expect(matchStoreName('Real Canadian Superstore #77', [rcss])).toBe('Real Canadian Superstore');
+  });
+
+  it('matches a custom store by a Flipp name that is not part of its own name', () => {
+    const grocer = { name: 'Corner Grocer', flippNames: ['Sunny Mart'] };
+    expect(matchStoreName('SUNNY MART #12', [grocer])).toBe('Corner Grocer');
+    expect(matchStoreName('Corner Grocer', [grocer])).toBe('Corner Grocer');
+    expect(matchStoreName('Sunny Mart Bakery Downtown', [grocer])).toBe('Corner Grocer');
+  });
+
+  it('never matches a store that is not in the list, even if it had a Flipp name', () => {
+    expect(matchStoreName('Sunny Mart', [])).toBeNull();
+    expect(matchStoreName('Sunny Mart', [{ name: 'FreshCo' }])).toBeNull();
+  });
+
+  it('matches a short alias only when it is the whole merchant name', () => {
+    const rcss = { name: 'Real Canadian Superstore', flippNames: ['RCSS'] };
+    expect(matchStoreName('RCSS', [rcss])).toBe('Real Canadian Superstore');
+    expect(matchStoreName('RCSS Sudbury', [rcss])).toBeNull();
+  });
+
+  it('prefers an exact match over a substring one', () => {
+    const big = { name: 'Loblaws', flippNames: ['Loblaws City Market'] };
+    const small = { name: 'City Market', flippNames: [] };
+    expect(matchStoreName('Loblaws City Market', [big, small])).toBe('Loblaws');
+  });
 });
 
 describe('isoDatePart', () => {

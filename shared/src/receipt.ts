@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { INGREDIENT_BY_ID, type BaseUnit } from './catalog';
 import { matchIngredient, normalizeRawName } from './match';
 import { parseSize, toBaseQty } from './parse';
+import type { StoreMatchInput } from './flipp';
 import { defaultExpiry, MAX_QTY, type PantryItem } from './pantry';
 import { IsoDateSchema } from './plan';
 
@@ -88,20 +89,25 @@ const squash = (s: string) =>
 
 /**
  * The enabled store a receipt belongs to: case-insensitive, ignoring spaces and punctuation, and
- * a substring match either way ("NO FRILLS #3411" → "No Frills"). The longest store name wins.
+ * a substring match either way ("NO FRILLS #3411" → "No Frills"). A store's flippNames count as
+ * names too. The longest matching name wins, and the store's own name is returned.
  */
-export function detectStore(merchant: string | undefined, stores: string[]): string | null {
+export function detectStore(merchant: string | undefined, stores: StoreMatchInput[]): string | null {
   if (!merchant) return null;
   const m = squash(merchant);
   if (m.length < 2) return null;
   let best: string | null = null;
   let bestLen = 0;
   for (const store of stores) {
-    const n = squash(store);
-    if (n.length < 2) continue;
-    if ((m.includes(n) || n.includes(m)) && n.length > bestLen) {
-      best = store;
-      bestLen = n.length;
+    const name = typeof store === 'string' ? store : store.name;
+    const aliases = typeof store === 'string' ? [] : (store.flippNames ?? []);
+    for (const candidate of [name, ...aliases]) {
+      const n = squash(candidate);
+      if (n.length < 2) continue;
+      if ((m.includes(n) || n.includes(m)) && n.length > bestLen) {
+        best = name;
+        bestLen = n.length;
+      }
     }
   }
   return best;
@@ -127,7 +133,7 @@ export function isLowConfidence(line: Pick<MatchedReceiptLine, 'confidence'>): b
  * - Quantity comes from the size printed on the line (or the name / original text). With no size
  *   it is 1 base unit, or the printed count for 'each' items.
  */
-export function matchReceipt(parsed: ParsedReceipt, stores: string[]): ReceiptMatch {
+export function matchReceipt(parsed: ParsedReceipt, stores: StoreMatchInput[]): ReceiptMatch {
   const kept: { line: ParsedReceiptLine; price: number }[] = [];
   for (const item of parsed.items ?? []) {
     if (!item || typeof item.price !== 'number' || !Number.isFinite(item.price)) continue;

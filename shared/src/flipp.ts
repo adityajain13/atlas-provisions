@@ -39,19 +39,37 @@ export function storeKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
+/** A household store for matching: its name, or the store with the Flipp names it is also sold under. */
+export type StoreMatchInput = string | { name: string; flippNames?: string[] };
+
 /**
- * The household store a Flipp merchant name belongs to, or null. A match is either key containing the
- * other. Keys shorter than 5 characters never match, so a merchant "Food" does not claim "Food Basics".
+ * The household store a merchant name belongs to, or null. Each store's name and its flippNames are
+ * candidates. A candidate matches when its key equals the merchant key, or one key contains the other.
+ * Keys shorter than 5 characters only match exactly, so a merchant "Food" does not claim "Food Basics",
+ * while a merchant "RCSS" still matches an alias "RCSS". An exact match beats a substring match, and a
+ * longer key beats a shorter one. Returns the store's name, never the alias.
  */
-export function matchStoreName(merchant: string, stores: string[]): string | null {
+export function matchStoreName(merchant: string, stores: StoreMatchInput[]): string | null {
   const m = storeKey(merchant);
-  if (m.length < 5) return null;
+  if (m.length === 0) return null;
+  let best: { name: string; exact: boolean; length: number } | null = null;
   for (const store of stores) {
-    const s = storeKey(store);
-    if (s.length < 5) continue;
-    if (m === s || m.includes(s) || s.includes(m)) return store;
+    const name = typeof store === 'string' ? store : store.name;
+    const aliases = typeof store === 'string' ? [] : (store.flippNames ?? []);
+    for (const candidate of [name, ...aliases]) {
+      const key = storeKey(candidate);
+      if (key.length === 0) continue;
+      const exact = m === key;
+      if (!exact && (m.length < 5 || key.length < 5)) continue;
+      if (!exact && !(m.includes(key) || key.includes(m))) continue;
+      const better =
+        best === null ||
+        (exact && !best.exact) ||
+        (exact === best.exact && key.length > best.length);
+      if (better) best = { name, exact, length: key.length };
+    }
   }
-  return null;
+  return best?.name ?? null;
 }
 
 /** The YYYY-MM-DD part of an ISO datetime, or null. */

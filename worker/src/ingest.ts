@@ -37,7 +37,9 @@ export async function runIngest(
 ): Promise<IngestRunSummary> {
   const household = await loadHousehold(env.DB);
   if (!household.postalCode) return notRun('Add a postal code in Household first.');
-  const stores = household.stores.filter((s) => s.enabled).map((s) => s.name);
+  const stores = household.stores
+    .filter((s) => s.enabled)
+    .map((s) => ({ name: s.name, flippNames: s.flippNames }));
   if (stores.length === 0) return notRun('Turn on at least one store in Household first.');
 
   const startedAt = new Date().toISOString();

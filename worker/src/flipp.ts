@@ -5,6 +5,7 @@ import {
   matchStoreName,
   priceTextFrom,
   type FlyerItem,
+  type StoreMatchInput,
 } from '@provisions/shared';
 
 export const FLIPP_SEARCH_URL = 'https://backflipp.wishabi.com/flipp/items/search';
@@ -12,8 +13,8 @@ const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 export interface FlippOptions {
-  /** Household store names to keep. Items from other merchants are skipped. */
-  stores: string[];
+  /** Household stores to keep, by name and Flipp names. Items from other merchants are skipped. */
+  stores: StoreMatchInput[];
   concurrency?: number; // default 4
   spacingMs?: number; // default 250, between request starts
   timeoutMs?: number; // default 10 000
@@ -39,7 +40,7 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
 
 /** A Flipp item as a FlyerItem, or null when it cannot be used (no store, name, price or dates). */
-export function toFlyerItem(raw: FlippRawItem, stores: string[]): FlyerItem | null {
+export function toFlyerItem(raw: FlippRawItem, stores: StoreMatchInput[]): FlyerItem | null {
   const key = raw.flyer_item_id ?? raw.id;
   const keyText = typeof key === 'string' || typeof key === 'number' ? String(key) : null;
   const merchant = str(raw.merchant_name);

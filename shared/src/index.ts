@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
+import { STORE_GROUPS, STORE_PRESETS, slugifyName } from './stores';
 export { DAYS, SLOTS, DAY_LONG, isWeeknight, type Day, type Slot } from './calendar';
+export * from './stores';
 
 export const UNITS = ['g', 'kg', 'ml', 'l', 'each'] as const;
 export type Unit = (typeof UNITS)[number];
@@ -92,6 +94,10 @@ export const StoreSchema = z.object({
   name: z.string().min(1).max(40),
   enabled: z.boolean(),
   priceMatches: z.boolean(),
+  // Optional, so households stored before presets still parse.
+  group: z.enum(STORE_GROUPS).optional(),
+  // Extra merchant names Flipp uses for this store (e.g. "RCSS" for Real Canadian Superstore).
+  flippNames: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
 });
 export type Store = z.infer<typeof StoreSchema>;
 
@@ -124,12 +130,7 @@ export const HouseholdSchema = z.object({
 });
 export type Household = z.infer<typeof HouseholdSchema>;
 
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
+const DEFAULT_STORE_IDS = ['no-frills', 'freshco', 'food-basics', 'walmart'];
 
 export function defaultHousehold(): Household {
   return {
@@ -137,18 +138,26 @@ export function defaultHousehold(): Household {
     schedule: {},
     fixedMeals: [],
     equipment: DEFAULT_EQUIPMENT.map((name) => ({
-      id: slugify(name),
+      id: slugifyName(name),
       name,
       owned: false,
       builtin: true,
     })),
     varietyRules: Object.fromEntries(VARIETY_RULES.map((r) => [r.key, false])),
-    stores: [
-      { id: 'no-frills', name: 'No Frills', enabled: false, priceMatches: true },
-      { id: 'freshco', name: 'FreshCo', enabled: false, priceMatches: false },
-      { id: 'food-basics', name: 'Food Basics', enabled: false, priceMatches: false },
-      { id: 'walmart', name: 'Walmart', enabled: false, priceMatches: true },
-    ],
+    stores: DEFAULT_STORE_IDS.flatMap((id) => {
+      const preset = STORE_PRESETS.find((p) => p.id === id);
+      if (!preset) return [];
+      return [
+        {
+          id: preset.id,
+          name: preset.name,
+          enabled: false,
+          priceMatches: preset.priceMatches,
+          group: preset.group,
+          ...(preset.flippNames ? { flippNames: [...preset.flippNames] } : {}),
+        },
+      ];
+    }),
     maxStores: 2,
     defaultBudget: 150,
     itemRules: [],
