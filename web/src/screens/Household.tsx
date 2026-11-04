@@ -3,6 +3,7 @@ import {
   ALLERGEN_PRESETS,
   DAYS,
   DAY_LONG,
+  DISPLAY_DAYS,
   HouseholdSchema,
   SLOTS,
   UNITS,
@@ -19,6 +20,7 @@ import {
 import { errorMessage, getHousehold, saveHousehold } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
+import { useConfirm } from '../components/ConfirmDialog';
 import { Section } from '../components/Section';
 import {
   addBtn,
@@ -30,7 +32,7 @@ import {
   removeIconBtn,
   secondaryBtn,
 } from '../components/ui';
-import { DAY_LETTER, DAY_SHORT, SLOT_LABEL, SLOT_LETTER, formatDays } from '../lib/labels';
+import { DAY_SHORT, SLOT_LABEL, formatDays } from '../lib/labels';
 import { useSession } from '../session';
 
 type Update = (fn: (prev: Household) => Household) => void;
@@ -207,6 +209,7 @@ function readableCount(n: number): string {
 // ---------- People ----------
 
 function PeopleSection({ h, update }: { h: Household; update: Update }) {
+  const confirm = useConfirm();
   const [openId, setOpenId] = useState<string | null>(null);
 
   function addPerson() {
@@ -219,8 +222,16 @@ function PeopleSection({ h, update }: { h: Household; update: Update }) {
     setOpenId(id);
   }
 
-  function removePerson(p: Person) {
-    if (!window.confirm(`Remove ${p.name}?`)) return;
+  async function removePerson(p: Person) {
+    if (
+      !(await confirm({
+        title: `Remove ${p.name}?`,
+        message: 'Their schedule, allergies and fixed-meal assignments are removed too.',
+        confirmLabel: 'Remove',
+        danger: true,
+      }))
+    )
+      return;
     setOpenId(null);
     update((prev) => {
       const schedule = { ...prev.schedule };
@@ -372,9 +383,7 @@ function PersonEditor({ person, update, onRemove }: { person: Person; update: Up
 
       <button
         type="button"
-        onClick={() => {
-          if (window.confirm(`Remove ${person.name}?`)) onRemove();
-        }}
+        onClick={onRemove}
         className={secondaryBtn}
       >
         Remove person
@@ -392,26 +401,26 @@ function ScheduleSection({ h, update }: { h: Household; update: Update }) {
       {h.people.map((p) => (
         <div key={p.id} className="mb-6">
           <p className="mb-2 text-[14px] text-paper">{p.name}</p>
-          <div className="grid grid-cols-[28px_repeat(7,minmax(0,1fr))] gap-1.5">
+          <div className="grid grid-cols-[76px_repeat(7,minmax(0,1fr))] gap-1.5">
             <span />
-            {DAYS.map((d) => (
+            {DISPLAY_DAYS.map((d) => (
               <span key={d} className="text-center text-[11px] text-muted" aria-hidden="true">
-                {DAY_LETTER[d]}
+                {DAY_SHORT[d]}
               </span>
             ))}
             {SLOTS.map((slot) => (
               <Fragment key={slot}>
-                <span className="flex items-center text-[11px] text-muted" aria-hidden="true">
-                  {SLOT_LETTER[slot]}
+                <span className="flex items-center text-[12px] text-muted" aria-hidden="true">
+                  {SLOT_LABEL[slot]}
                 </span>
-                {DAYS.map((day) => {
+                {DISPLAY_DAYS.map((day) => {
                   const on = isEating(h, p.id, day, slot);
                   return (
                     <button
                       key={day}
                       type="button"
                       aria-pressed={on}
-                      aria-label={`${p.name}, ${SLOT_LABEL[slot]}, ${DAY_SHORT[day]}`}
+                      aria-label={`${p.name}, ${DAY_LONG[day]} ${SLOT_LABEL[slot].toLowerCase()}`}
                       onClick={() =>
                         update((prev) => setEating(prev, p.id, day, slot, !isEating(prev, p.id, day, slot)))
                       }
@@ -448,7 +457,7 @@ function PrepSection({ h, update }: { h: Household; update: Update }) {
           }
         >
           <option value="none">None</option>
-          {DAYS.map((d) => (
+          {DISPLAY_DAYS.map((d) => (
             <option key={d} value={d}>
               {DAY_LONG[d]}
             </option>
@@ -466,25 +475,25 @@ function TimeCaps({ h, update }: { h: Household; update: Update }) {
       <p className="mt-1 text-[13px] text-muted">
         Busy nights: meals in capped slots stay under that many minutes.
       </p>
-      <div className="mt-4 grid grid-cols-[28px_repeat(7,minmax(0,1fr))] gap-1.5">
+      <div className="mt-4 grid grid-cols-[76px_repeat(7,minmax(0,1fr))] gap-1.5">
         <span />
-        {DAYS.map((d) => (
+        {DISPLAY_DAYS.map((d) => (
           <span key={d} className="text-center text-[11px] text-muted" aria-hidden="true">
-            {DAY_LETTER[d]}
+            {DAY_SHORT[d]}
           </span>
         ))}
         {SLOTS.map((slot) => (
           <Fragment key={slot}>
-            <span className="flex items-center text-[11px] text-muted" aria-hidden="true">
-              {SLOT_LETTER[slot]}
+            <span className="flex items-center text-[12px] text-muted" aria-hidden="true">
+              {SLOT_LABEL[slot]}
             </span>
-            {DAYS.map((day) => {
+            {DISPLAY_DAYS.map((day) => {
               const cap = h.timeCaps[day]?.[slot];
               return (
                 <button
                   key={day}
                   type="button"
-                  aria-label={`${SLOT_LABEL[slot]} ${DAY_SHORT[day]} time cap: ${cap ? `${cap} minutes` : 'none'}`}
+                  aria-label={`${DAY_LONG[day]} ${SLOT_LABEL[slot].toLowerCase()}, ${cap ? `${cap} minute cap` : 'no cap'}`}
                   onClick={() => update((prev) => setTimeCap(prev, day, slot, nextCap(prev.timeCaps[day]?.[slot])))}
                   className={`flex h-11 items-center justify-center rounded-md border text-[12px] ${
                     cap ? 'border-herb text-herbLight' : 'border-edge text-muted'
@@ -586,6 +595,7 @@ function FixedMealEditor({
   update: Update;
   onRemove: () => void;
 }) {
+  const confirm = useConfirm();
   function patchMeal(p: Partial<FixedMeal>) {
     update((prev) => ({
       ...prev,
@@ -650,7 +660,7 @@ function FixedMealEditor({
       <div>
         <span className={eyebrow}>Days</span>
         <div className="mt-2 flex gap-1.5">
-          {(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as Day[]).map((d) => {
+          {DISPLAY_DAYS.map((d) => {
             const on = meal.days.includes(d);
             return (
               <button
@@ -752,8 +762,16 @@ function FixedMealEditor({
 
       <button
         type="button"
-        onClick={() => {
-          if (window.confirm(`Delete ${meal.name}?`)) onRemove();
+        onClick={async () => {
+          if (
+            await confirm({
+              title: `Delete ${meal.name}?`,
+              message: 'It stops appearing in future plans. Meals already planned for a week are not changed.',
+              confirmLabel: 'Delete',
+              danger: true,
+            })
+          )
+            onRemove();
         }}
         className={secondaryBtn}
       >

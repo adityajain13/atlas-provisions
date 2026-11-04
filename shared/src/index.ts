@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
-export { DAYS, SLOTS, DAY_LONG, isWeeknight, type Day, type Slot } from './calendar';
+export { DAYS, DISPLAY_DAYS, SLOTS, DAY_LONG, isWeeknight, type Day, type Slot } from './calendar';
 
 export const UNITS = ['g', 'kg', 'ml', 'l', 'each'] as const;
 export type Unit = (typeof UNITS)[number];
