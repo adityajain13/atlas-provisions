@@ -33,9 +33,12 @@ import {
   commitReceiptRows,
   currentFlyerItems,
   deletePantryItem,
+  flyerCountsForDate,
   insertFlyerItems,
   insertPantryItem,
   insertPriceHistory,
+  latestIngestRun,
+  loadHousehold,
   loadPantry,
   loadPantryItem,
   loadPlan,
@@ -48,6 +51,7 @@ import {
   type HistoryInsert,
 } from './db';
 import { anthropicClient, anthropicPrepClient } from './planner/claude';
+import { runIngest } from './ingest';
 import { attachPrep } from './planner/prep';
 import { runPlanner } from './planner/run';
 import { MAX_RECEIPT_IMAGE_CHARS, parseReceiptImage } from './receipts';
@@ -66,7 +70,7 @@ type Env = AuthEnv & {
 const API = '/provisions/api';
 const DEFAULT_PLANNER_MODEL = 'claude-sonnet-5-5';
 const DEFAULT_PREP_MODEL = 'claude-haiku-5-5';
-const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env }>();
 
 // Sign-in is required for every API route except health and /auth/* (checked in the middleware).
 app.use(`${API}/*`, requireSession);
@@ -76,14 +80,6 @@ function formatZod(error: ZodError): string {
   return error.issues
     .map((i) => `${i.path.join('.') || 'body'}: ${i.message}`)
     .join('; ');
-}
-
-async function loadHousehold(db: D1Database): Promise<Household> {
-  const row = await db.prepare('SELECT data FROM household WHERE id = 1').first<{ data: string }>();
-  if (!row) return defaultHousehold();
-  const parsed = HouseholdSchema.safeParse(JSON.parse(row.data));
-  if (!parsed.success) throw new Error(`Stored household is invalid: ${formatZod(parsed.error)}`);
-  return parsed.data;
 }
 
 /**
@@ -258,6 +254,24 @@ app.post(`${API}/plan/:weekOf/prep`, async (c) => {
   }
 });
 
+// ---- Flyer import (milestone 4) ----
+
+// Searches Flipp now. Takes up to a minute or so.
+app.post(`${API}/flyers/refresh`, async (c) => {
+  try {
+    return c.json(await runIngest(c.env));
+  } catch (e) {
+    return c.text(e instanceof Error ? e.message : 'Flyer refresh failed', 500);
+  }
+});
+
+// The latest run (without its sample) and the prices valid today, per store.
+app.get(`${API}/flyers/status`, async (c) => {
+  const lastRun = await latestIngestRun(c.env.DB);
+  const currentItems = await flyerCountsForDate(c.env.DB, torontoDate());
+  return c.json({ lastRun, currentItems });
+});
+
 // ---- Pantry (milestone 3A) ----
 
 app.get(`${API}/pantry`, async (c) => {
@@ -414,4 +428,10 @@ app.all('*', async (c) => {
   return res;
 });
 
-export default app;
+// The Sunday cron (wrangler.jsonc) refreshes the flyers. Fetch serves the Hono app as before.
+export default {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) => app.fetch(request, env, ctx),
+  scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runIngest(env));
+  },
+};

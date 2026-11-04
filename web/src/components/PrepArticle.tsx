@@ -63,6 +63,7 @@ export function PrepArticle({ plan, prep, framed = false }: { plan: MealPlan; pr
   return (
     <article className={framed ? 'rounded-lg border border-line2 p-5' : 'border-t border-line pt-4'}>
       <h3 className="font-display font-semibold tracking-[-0.01em] text-paper text-[20px] leading-[1.25]">Prep &middot; {prep.totalMinutes} min</h3>
+      <p className="mt-1 text-[12px] text-muted">Saved on this device. Ticks don&apos;t sync between devices.</p>
       {prep.steps.length === 0 ? (
         <p className="mt-3 text-[13px] text-muted">Nothing to prep ahead this week.</p>
       ) : (

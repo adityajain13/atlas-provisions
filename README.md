@@ -13,6 +13,8 @@ Atlas Provisions plans a household's week of home-cooked meals around local groc
 - Tracks the pantry, with use-by dates, and can prefer ingredients that are about to expire ("use it up").
 - Scans receipts with Claude vision (the same reader as Atlas Journeys) to record prices and add food to the pantry.
 - Takes ratings on meals, so liked meals can come back and disliked ones are skipped.
+- Imports flyer prices from Flipp for the catalogue's ingredients, near the household's postal code, every Sunday and on demand (see below).
+- Shows a save indicator at the top of each screen: Saving, Saved, or Not saved with a retry. The shopping list ticks and the prep checklist are kept in this browser only.
 - Signs in with an email code for an allow-list of addresses.
 
 ## Screens
@@ -39,7 +41,7 @@ Atlas Provisions plans a household's week of home-cooked meals around local groc
 
 ## How it works
 
-1. **Ingest.** Flyer items are read into a common shape: store, name, price, size, and valid dates. The Flipp flyer import is not built yet, so sample fixtures in `worker/fixtures/` stand in for real flyers.
+1. **Ingest.** Flyer items are read into a common shape: store, name, price, size, and valid dates. Flipp supplies them (see Flyer import below). Sample fixtures in `worker/fixtures/` stand in for flyers in local development.
 2. **Normalize.** Each flyer name is matched to an ingredient in the catalogue by its aliases and size is converted to the ingredient's unit (kg, L or each). A Claude fallback for names the matcher cannot place is planned; the interface exists and is not wired up.
 3. **Score.** A plan week is saved under its Sunday's date and priced from the flyers valid that day, since shopping happens on Sunday. Each ingredient keeps its cheapest unit price per store, measured against recent price history. Never-buy items are dropped, always-buy items are added, and the top 8 per category go to the planner.
 4. **Plan.** One Claude call returns the meals for each slot and the batch-prep list for the prep day. Quantities are in each ingredient's unit, and the code, not the model, computes the cost.
@@ -80,6 +82,19 @@ Worker secrets (Cloudflare dashboard: Workers & Pages > atlas-provisions > Setti
 
 `MAIL_FROM` and `PLANNER_MODEL` are variables in `wrangler.jsonc`.
 
+## Flyer import
+
+Flyer prices come from Flipp, the flyer site. Flipp's public web app uses an unofficial JSON search endpoint, which is not a supported API, so the import is written defensively: any missing field is skipped, and a failed search is recorded instead of stopping the run. If Flipp changes its response, the run reports errors and the matched count drops to zero; the latest run's errors and a sample of raw items are kept in the `ingest_runs` table.
+
+- Set the postal code in Household (Stores section). Flyers are searched near it. Only enabled stores are kept.
+- Search terms come from the catalogue: one per ingredient, its shortest usable alias, at most 150.
+- The Worker runs the import every Sunday at 11:00 UTC (6 to 7 am in Toronto), from the cron trigger in `wrangler.jsonc`.
+- The Household Stores section has a Flyers row with the last update and a Refresh flyers button, which runs the import on demand and reports what it found.
+- Requests go out at most four at a time, spaced 250 ms apart, with a 10 second timeout, and a 429 or 5xx is retried once.
+- This is for personal use. Flipp's terms of use are not reviewed here.
+
+Status and a manual run are available at `GET /provisions/api/flyers/status` and `POST /provisions/api/flyers/refresh`.
+
 ## Local development
 
 ```sh
@@ -102,22 +117,21 @@ Open the Vite URL it prints, at the /provisions/ path.
 shared/         catalogue, matching, scoring, planning, validation, list (shared types and tests)
 worker/
   src/          Hono app, auth, D1 access, planner (prompt, run, claude, prep), receipts
-  migrations/   D1 schema, 0001 to 0004
+  migrations/   D1 schema, 0001 to 0005
   fixtures/     sample flyers and price history
 web/
   src/screens/  Week, List, Plan, Pantry, Household, Login
-  src/components/, src/lib/, src/mocks/
+  src/components/, src/lib/
 .github/workflows/deploy.yml
 wrangler.jsonc
 ```
 
 ## Tests
 
-`npm test` runs vitest over `shared/`, `worker/` and the web view helpers in `web/src/lib/`. The current run has 335 tests in 25 files. `npm run typecheck` checks the web and Worker projects.
+`npm test` runs vitest over `shared/`, `worker/` and the web view helpers in `web/src/lib/`. The current run has 366 tests in 28 files. `npm run typecheck` checks the web and Worker projects.
 
 ## Roadmap
 
-- Flipp flyer import, with a weekly cron to refresh deals.
 - A Claude fallback for flyer lines the alias matcher cannot place.
 - Use the confirmed item matches from receipts when reading new receipts.
 - More protein variety in the shortlist. Scoring keeps 8 items per category, which can leave out chicken and beef for a whole week.

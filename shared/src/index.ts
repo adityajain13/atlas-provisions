@@ -116,6 +116,11 @@ export const HouseholdSchema = z.object({
   timeCaps: z.record(z.record(z.number().int().min(5).max(180))).default({}),
   // Day to batch-prep for (Sunday to Saturday), or null for none. Stored households without it get Sunday.
   prepDay: z.enum(DAYS).nullable().default('sun'),
+  // Canadian postal code, stored uppercase with no space. Flipp flyers are searched near it.
+  postalCode: z
+    .string()
+    .regex(/^[A-Z]\d[A-Z]\d[A-Z]\d$/, 'Postal code looks like M5V2T6')
+    .optional(),
 });
 export type Household = z.infer<typeof HouseholdSchema>;
 
@@ -180,3 +185,4 @@ export * from './pantry';
 export * from './ratings';
 export * from './prep';
 export * from './receipt';
+export * from './flipp';

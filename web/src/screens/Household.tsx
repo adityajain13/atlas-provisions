@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import {
   ALLERGEN_PRESETS,
   DAYS,
@@ -8,6 +8,7 @@ import {
   UNITS,
   VARIETY_RULES,
   newId,
+  normalizePostalCode,
   type Day,
   type FixedMeal,
   type Household,
@@ -17,6 +18,8 @@ import {
   type Unit,
 } from '@provisions/shared';
 import { errorMessage, getHousehold, saveHousehold } from '../api';
+import { FlyerRefresh } from '../components/FlyerRefresh';
+import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -35,7 +38,6 @@ import { DAY_SHORT, SLOT_LABEL, formatDays } from '../lib/labels';
 import { useSession } from '../session';
 
 type Update = (fn: (prev: Household) => Household) => void;
-type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string };
 
 const ERROR_TEXT = 'text-[#D98C7A]';
 
@@ -44,10 +46,13 @@ const ERROR_TEXT = 'text-[#D98C7A]';
 export default function HouseholdScreen() {
   const [h, setH] = useState<Household | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [save, setSave] = useState<SaveState>({ kind: 'idle' });
+  const { track, setPending, setFailure, setFlush } = useSaveStatus();
+  useSaveScope('sync', h !== null);
   // Only user edits trigger a save. Loading the document does not.
   const edited = useRef(false);
-  const seq = useRef(0);
+  const latest = useRef<Household | null>(null);
+  const pending = useRef<Household | null>(null);
+  const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let alive = true;
@@ -63,29 +68,41 @@ export default function HouseholdScreen() {
     };
   }, []);
 
+  // Sends the pending edit now. Also used by the leave guard and on unmount, so an edit is not lost.
+  const saveNow = useCallback(() => {
+    window.clearTimeout(timer.current);
+    const data = pending.current;
+    if (!data) return;
+    pending.current = null;
+    const retry = () => saveHousehold(HouseholdSchema.parse(latest.current));
+    void track(saveHousehold(data), retry).catch(() => {});
+  }, [track]);
+
+  useEffect(() => {
+    setFlush(saveNow);
+    return () => {
+      setFlush(null);
+      saveNow();
+    };
+  }, [saveNow, setFlush]);
+
+  // Every edit shows Saving at once, then sends after a short pause.
   useEffect(() => {
     if (!h || !edited.current) return;
-    const mine = ++seq.current;
-
+    latest.current = h;
     const parsed = HouseholdSchema.safeParse(h);
     if (!parsed.success) {
+      window.clearTimeout(timer.current);
+      pending.current = null;
       const first = parsed.error.issues[0];
-      setSave({ kind: 'error', message: first ? first.message : 'Check the fields' });
+      setFailure(first ? first.message : 'Check the fields');
       return;
     }
-
-    setSave({ kind: 'saving' });
-    const timer = window.setTimeout(() => {
-      saveHousehold(parsed.data)
-        .then(() => {
-          if (mine === seq.current) setSave({ kind: 'saved' });
-        })
-        .catch((e: unknown) => {
-          if (mine === seq.current) setSave({ kind: 'error', message: errorMessage(e) });
-        });
-    }, 600);
-    return () => window.clearTimeout(timer);
-  }, [h]);
+    pending.current = parsed.data;
+    setPending();
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(saveNow, 600);
+  }, [h, saveNow, setPending, setFailure]);
 
   const update = useCallback<Update>((fn) => {
     edited.current = true;
@@ -94,10 +111,10 @@ export default function HouseholdScreen() {
 
   return (
     <Page>
-      <Header title="Household" />
-      <StatusLine save={save} loading={!h && !loadError} />
+      <Header title="Household" status={<SaveStatus />} />
 
       {loadError && <p className={`mt-6 text-[14px] ${ERROR_TEXT}`}>Could not load: {loadError}</p>}
+      {!h && !loadError && <p className="mt-10 text-[14px] text-muted">Loading&hellip;</p>}
 
       {h && (
         <div className="lg:mt-10 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-12">
@@ -132,23 +149,6 @@ function SessionRow() {
       <button type="button" onClick={() => void signOut()} className="text-herb">
         Sign out
       </button>
-    </p>
-  );
-}
-
-function StatusLine({ save, loading }: { save: SaveState; loading: boolean }) {
-  let text: ReactNode = '';
-  let tone = 'text-muted';
-  if (loading) text = 'Loading…';
-  else if (save.kind === 'saving') text = 'Saving…';
-  else if (save.kind === 'saved') text = 'Saved';
-  else if (save.kind === 'error') {
-    text = `Not saved: ${save.message}`;
-    tone = ERROR_TEXT;
-  }
-  return (
-    <p className={`mt-2 min-h-[20px] text-[13px] ${tone}`} aria-live="polite">
-      {text}
     </p>
   );
 }
@@ -917,7 +917,8 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
 
   return (
     <Section title="Stores">
-      <ul>
+      <PostalCodeField h={h} update={update} />
+      <ul className="mt-6">
         {h.stores.map((s) => (
           <li key={s.id}>
             <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-4 border-b border-line2">
@@ -940,6 +941,8 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
           </li>
         ))}
       </ul>
+
+      <FlyerRefresh />
 
       <div className="mt-5 flex items-center justify-between">
         <span className="text-[15px] text-paper">Max stores per trip</span>
@@ -966,6 +969,42 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
         </div>
       </div>
     </Section>
+  );
+}
+
+/** Postal code for finding flyers. Only a complete code is saved; the stored form is uppercase, no space. */
+function PostalCodeField({ h, update }: { h: Household; update: Update }) {
+  const [text, setText] = useState(h.postalCode ?? '');
+  const invalid = text.trim() !== '' && normalizePostalCode(text) === null;
+
+  function onChange(value: string) {
+    setText(value);
+    const code = normalizePostalCode(value);
+    if (code) {
+      update((prev) => (prev.postalCode === code ? prev : { ...prev, postalCode: code }));
+    } else if (value.trim() === '') {
+      update((prev) => {
+        const next = { ...prev };
+        delete next.postalCode;
+        return next;
+      });
+    }
+  }
+
+  return (
+    <label className="block">
+      <span className={eyebrow}>Postal code</span>
+      <input
+        className={`${fieldCls} mt-2`}
+        value={text}
+        maxLength={7}
+        autoComplete="postal-code"
+        aria-invalid={invalid}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <span className="mt-2 block text-[12px] text-muted">Used to find flyers near you.</span>
+      {invalid && <span className={`mt-1 block text-[12px] ${ERROR_TEXT}`}>Enter a Canadian postal code, like M5V 2T6.</span>}
+    </label>
   );
 }
 

@@ -15,6 +15,7 @@ import {
 import { errorMessage, generatePlan, getHousehold } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
+import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { Section } from '../components/Section';
 import { addBtn, chipBase, chipTone, ctaBtn, eyebrow, fieldCls, removeIconBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
@@ -30,6 +31,9 @@ export default function Plan() {
   const [useItUp, setUseItUp] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const { track } = useSaveStatus();
+  // Inputs are not saved until the plan is generated, so the pill says so.
+  useSaveScope('plan', household !== null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -92,13 +96,14 @@ export default function Plan() {
     setGenerating(true);
     setGenerateError(null);
     try {
-      await generatePlan({
+      const request = {
         weekOf: planWeekOf(new Date()),
         budget: budgetNumber,
         cravings,
         overrides: buildOverrides(),
         useItUp,
-      });
+      };
+      await track(generatePlan(request), () => generatePlan(request));
       navigate('/');
     } catch (e) {
       setGenerateError(errorMessage(e));
@@ -122,7 +127,7 @@ export default function Plan() {
 
   return (
     <Page>
-      <Header title="Plan this week" />
+      <Header title="Plan this week" status={<SaveStatus />} />
 
       {/* Phone: one column in this order. Desktop: budget, cravings and options on the left, who's eating on the right. */}
       <div className="lg:mt-12 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] lg:items-start lg:gap-x-12 lg:gap-y-12">

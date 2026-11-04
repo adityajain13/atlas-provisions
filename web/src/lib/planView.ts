@@ -9,11 +9,72 @@ import {
   type PlannedMeal,
   type Slot,
 } from '@provisions/shared';
-import type { MockDay, MockItem, MockMeal, MockTag, MockWeek, Category, Rateable } from '../mocks/week';
 import { headlineName } from './headline';
 import { DAY_SHORT } from './labels';
 
 // Turn a saved MealPlan into the shapes the Week and List screens already draw.
+
+// ---- View shapes the Week and List screens draw ----
+
+export type ViewTag = { kind: 'craving' | 'deal' | 'leftover'; text: string };
+
+// A planned meal the household can rate. Only meals from a saved plan have one.
+export type Rateable = {
+  name: string;
+  ingredientIds: string[];
+  personIds: string[]; // real household members eating it
+};
+
+export type ViewMeal = {
+  slot: Slot;
+  who: string;
+  name: string;
+  detail: string;
+  cost: number | null;
+  fixed?: boolean;
+  tags: ViewTag[];
+  rateable?: Rateable;
+};
+
+export type ViewDay = {
+  key: Day;
+  dayLabel: string;
+  dateNum: number;
+  headline: string;
+  meals: ViewMeal[];
+};
+
+export type ViewWeek = {
+  weekOf: string;
+  label: string;
+  budget: number;
+  spent: number;
+  stores: string[];
+  days: ViewDay[];
+};
+
+/** List sections, in the order the shopping list shows them. */
+export const LIST_CATEGORY_ORDER = [
+  'produce',
+  'bakery',
+  'meat & seafood',
+  'deli',
+  'dairy & eggs',
+  'frozen',
+  'pantry',
+  'household',
+] as const;
+export type ListCategory = (typeof LIST_CATEGORY_ORDER)[number];
+
+export type ViewItem = {
+  id: string;
+  store: string;
+  category: ListCategory;
+  name: string;
+  qty: string;
+  price: number;
+  note?: { kind: 'match' | 'used'; text: string };
+};
 
 const SLOT_ORDER: Record<Slot, number> = { breakfast: 0, lunch: 1, dinner: 2 };
 
@@ -76,8 +137,8 @@ function craving(meal: PlannedMeal, cravings: string[]): string | undefined {
   return cravings.find((c) => name.includes(c.toLowerCase()));
 }
 
-function tagsOf(meal: PlannedMeal, cravings: string[]): MockTag[] {
-  const tags: MockTag[] = [];
+function tagsOf(meal: PlannedMeal, cravings: string[]): ViewTag[] {
+  const tags: ViewTag[] = [];
   if (meal.tags.includes('craving')) {
     const c = craving(meal, cravings);
     tags.push({ kind: 'craving', text: c ? `Craving: ${c.toLowerCase()}` : 'Craving' });
@@ -105,10 +166,10 @@ function detailOf(meal: PlannedMeal): string {
   return `${names.slice(0, 4).join(', ')}, and ${names.length - 4} more`;
 }
 
-export function planToWeek(plan: MealPlan, people: Map<string, string>): MockWeek {
+export function planToWeek(plan: MealPlan, people: Map<string, string>): ViewWeek {
   const prices = unitPrices(plan.list);
-  const days: MockDay[] = DAYS.map((key, i) => {
-    const planned: { slot: Slot; meal: MockMeal }[] = plan.meals
+  const days: ViewDay[] = DAYS.map((key, i) => {
+    const planned: { slot: Slot; meal: ViewMeal }[] = plan.meals
       .filter((m) => m.day === key)
       .map((m) => ({
         slot: m.slot,
@@ -122,7 +183,7 @@ export function planToWeek(plan: MealPlan, people: Map<string, string>): MockWee
           ...rateableOf(m, people),
         },
       }));
-    const fixed: { slot: Slot; meal: MockMeal }[] = plan.fixedMeals
+    const fixed: { slot: Slot; meal: ViewMeal }[] = plan.fixedMeals
       .filter((f) => f.day === key)
       .map((f) => ({
         slot: f.slot,
@@ -159,7 +220,7 @@ export function planToWeek(plan: MealPlan, people: Map<string, string>): MockWee
   };
 }
 
-const LIST_CATEGORY: Record<string, Category> = {
+const LIST_CATEGORY: Record<string, ListCategory> = {
   produce: 'produce',
   bakery: 'bakery',
   meat: 'meat & seafood',
@@ -194,8 +255,8 @@ function usedNote(plan: MealPlan, item: ListItem): string | undefined {
   return labels.length > 3 ? `Used in ${shown}, and ${labels.length - 3} more` : `Used in ${shown}`;
 }
 
-export function planToList(plan: MealPlan): { weekOf: string; stores: string[]; items: MockItem[] } {
-  const items: MockItem[] = plan.list.map((item) => {
+export function planToList(plan: MealPlan): { weekOf: string; stores: string[]; items: ViewItem[] } {
+  const items: ViewItem[] = plan.list.map((item) => {
     const base = INGREDIENT_BY_ID[item.ingredientId]?.baseUnit ?? 'each';
     const size = formatSize(item.packQty, base);
     // Unpriced items have no packs, so their quantity is what the plan needs.

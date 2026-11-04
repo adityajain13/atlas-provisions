@@ -9,7 +9,7 @@ export interface FlyerItem {
   sizeText?: string;
   validFrom: string;
   validTo: string;
-  source: 'flyer' | 'site' | 'receipt' | 'fixture';
+  source: 'flyer' | 'site' | 'receipt' | 'fixture' | 'flipp';
 }
 
 export interface MatchedItem extends FlyerItem {

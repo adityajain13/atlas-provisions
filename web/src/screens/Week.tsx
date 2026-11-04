@@ -17,11 +17,11 @@ import { Page } from '../components/Page';
 import { PrepArticle } from '../components/PrepArticle';
 import MealDetail, { RATING_OPTIONS, TAG_TONE } from '../components/MealDetail';
 import { RefreshIcon } from '../components/Icons';
-import { SamplePill } from '../components/SamplePill';
+import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
+import { NoPlan } from '../components/NoPlan';
 import { secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
-import { defaultDay, planToWeek } from '../lib/planView';
-import { MOCK_WEEK, type MockMeal, type MockWeek, type Rateable } from '../mocks/week';
+import { defaultDay, planToWeek, type Rateable, type ViewMeal, type ViewWeek } from '../lib/planView';
 
 const RING = 'outline-none focus-visible:ring-2 focus-visible:ring-herb';
 
@@ -36,7 +36,7 @@ function ratingFor(ratings: Rating[], meal: Rateable): RatingKind | null {
   return first && values.every((v) => v === first) ? first : null;
 }
 
-type Source = { status: 'loading' } | { status: 'plan'; plan: MealPlan } | { status: 'sample'; error: string | null };
+type Source = { status: 'loading' } | { status: 'plan'; plan: MealPlan } | { status: 'none' } | { status: 'error'; error: string };
 
 /** ISO date `n` days after `iso`. */
 function isoPlus(iso: string, n: number): string {
@@ -46,13 +46,14 @@ function isoPlus(iso: string, n: number): string {
 }
 
 /** The saved plan's meal behind a drawn one, for its ingredients and steps. */
-function plannedFor(plan: MealPlan | null, day: Day, meal: MockMeal): PlannedMeal | undefined {
+function plannedFor(plan: MealPlan | null, day: Day, meal: ViewMeal): PlannedMeal | undefined {
   return plan?.meals.find((m) => m.day === day && m.slot === meal.slot && m.name === meal.name);
 }
 
 export default function Week() {
   // Null until the reader picks a day: then the default (today, or Sunday) applies.
   const [picked, setPicked] = useState<Day | null>(null);
+  const { track } = useSaveStatus();
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [source, setSource] = useState<Source>({ status: 'loading' });
   const [ratings, setRatings] = useState<Rating[]>([]);
@@ -61,8 +62,9 @@ export default function Week() {
   const [prepBusy, setPrepBusy] = useState(false);
   const [prepError, setPrepError] = useState<string | null>(null);
   // Desktop only: the meal open in the side panel.
-  const [openMeal, setOpenMeal] = useState<{ day: Day; meal: MockMeal } | null>(null);
+  const [openMeal, setOpenMeal] = useState<{ day: Day; meal: ViewMeal } | null>(null);
   const closeMeal = useCallback(() => setOpenMeal(null), []);
+  useSaveScope('sync', source.status === 'plan');
 
   useEffect(() => {
     let alive = true;
@@ -73,10 +75,10 @@ export default function Week() {
         setNames(new Map((household?.people ?? []).map((p) => [p.id, p.name])));
         setPrepDay(household?.prepDay ?? null);
         setRatings(saved);
-        setSource(plan ? { status: 'plan', plan } : { status: 'sample', error: null });
+        setSource(plan ? { status: 'plan', plan } : { status: 'none' });
       })
       .catch((e: unknown) => {
-        if (alive) setSource({ status: 'sample', error: errorMessage(e) });
+        if (alive) setSource({ status: 'error', error: errorMessage(e) });
       });
     return () => {
       alive = false;
@@ -92,8 +94,21 @@ export default function Week() {
     );
   }
 
-  const plan = source.status === 'plan' ? source.plan : null;
-  const week = plan ? planToWeek(plan, names) : MOCK_WEEK;
+  if (source.status !== 'plan') {
+    return (
+      <Page>
+        <Header title="Your week" />
+        {source.status === 'error' ? (
+          <p className="mt-10 text-[14px] text-muted">Could not load this week&apos;s plan: {source.error}</p>
+        ) : (
+          <NoPlan />
+        )}
+      </Page>
+    );
+  }
+
+  const plan: MealPlan = source.plan;
+  const week = planToWeek(plan, names);
   const todayIso = torontoDate();
   const selected = picked ?? defaultDay(week.weekOf, todayIso);
   const day = week.days.find((d) => d.key === selected) ?? week.days[0]!;
@@ -108,8 +123,9 @@ export default function Week() {
     if (!plan) return;
     setPrepBusy(true);
     setPrepError(null);
+    const weekOf = plan.weekOf;
     try {
-      setSource({ status: 'plan', plan: await regeneratePrep(plan.weekOf) });
+      setSource({ status: 'plan', plan: await track(regeneratePrep(weekOf), () => regeneratePrep(weekOf)) });
     } catch (e) {
       setPrepError(errorMessage(e));
     } finally {
@@ -120,12 +136,14 @@ export default function Week() {
   // Records the rating for every household member eating the meal, then reloads the ratings.
   async function rate(meal: Rateable, value: RatingKind) {
     setRatingError(null);
-    try {
-      await Promise.all(
+    const save = () =>
+      Promise.all(
         meal.personIds.map((personId) =>
           saveRating({ mealName: meal.name, personId, rating: value, ingredientIds: meal.ingredientIds }),
         ),
       );
+    try {
+      await track(save(), save);
       setRatings(await getRatings());
     } catch (e) {
       setRatingError(errorMessage(e));
@@ -158,12 +176,8 @@ export default function Week() {
       <div className="lg:hidden">
         <Header
           size="lg"
-          subtitle={
-            <>
-              Week of {week.label}
-              {!plan && <SamplePill />}
-            </>
-          }
+          subtitle={<>Week of {week.label}</>}
+          status={<SaveStatus />}
           action={
             <Link
               to="/plan"
@@ -182,10 +196,6 @@ export default function Week() {
             </>
           }
         />
-
-        {source.status === 'sample' && source.error && (
-          <p className="mt-6 text-[13px] text-muted">Could not load this week's plan: {source.error}</p>
-        )}
 
         {errors.length > 0 && (
           <div className="mt-6 rounded-lg border border-edge px-4 py-3">
@@ -289,13 +299,17 @@ export default function Week() {
           <div className="min-w-0">
             <p className="text-[13px] text-muted">
               Week of {week.label}
-              {!plan && <SamplePill />}
             </p>
-            <h1 className="mt-2 font-display text-[44px] font-semibold leading-[1.05] tracking-[-0.02em] text-paper">
-              {day.dayLabel},
-              <br />
-              {day.headline}
-            </h1>
+            <div className="lg:flex lg:items-baseline lg:gap-4">
+              <h1 className="mt-2 font-display text-[44px] font-semibold leading-[1.05] tracking-[-0.02em] text-paper">
+                {day.dayLabel},
+                <br />
+                {day.headline}
+              </h1>
+              <div className="mt-3 lg:mt-0 lg:translate-y-[-6px]">
+                <SaveStatus />
+              </div>
+            </div>
           </div>
           <div className="flex items-end gap-4 xl:shrink-0">
             <BudgetBlock week={week} pct={pct} className="min-w-0 flex-1 xl:w-[300px] xl:flex-none" />
@@ -308,10 +322,6 @@ export default function Week() {
             </Link>
           </div>
         </div>
-
-        {source.status === 'sample' && source.error && (
-          <p className="mt-6 text-[13px] text-muted">Could not load this week's plan: {source.error}</p>
-        )}
 
         {errors.length > 0 && (
           <div className="mt-6 rounded-lg border border-edge px-4 py-3">
@@ -409,7 +419,7 @@ export default function Week() {
   );
 }
 
-function BudgetBlock({ week, pct, className = '' }: { week: MockWeek; pct: number; className?: string }) {
+function BudgetBlock({ week, pct, className = '' }: { week: ViewWeek; pct: number; className?: string }) {
   return (
     <div className={`border-y border-line py-4 ${className}`}>
       <div className="flex items-end justify-between gap-3">
@@ -426,7 +436,7 @@ function BudgetBlock({ week, pct, className = '' }: { week: MockWeek; pct: numbe
   );
 }
 
-function MealCell({ meal, onOpen }: { meal: MockMeal; onOpen: () => void }) {
+function MealCell({ meal, onOpen }: { meal: ViewMeal; onOpen: () => void }) {
   const meta = [meal.who, meal.fixed ? 'Fixed' : meal.cost !== null ? `$${meal.cost.toFixed(2)}` : null]
     .filter(Boolean)
     .join(' · ');

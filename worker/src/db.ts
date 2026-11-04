@@ -1,4 +1,9 @@
 // Thin D1 access. Not unit tested: the logic lives in shared/ and is tested there.
+import {
+  HouseholdSchema,
+  defaultHousehold,
+  type Household,
+} from '@provisions/shared';
 import type {
   FlyerItem,
   HistoryPoint,
@@ -116,7 +121,7 @@ export async function recordPrices(db: D1Database, matched: MatchedItem[], date:
   );
   await db.batch(
     matched.map((m) =>
-      stmt.bind(m.ingredientId, m.store, date, m.pricePerUnit, m.source === 'flyer' || m.source === 'fixture' ? 1 : 0, m.source),
+      stmt.bind(m.ingredientId, m.store, date, m.pricePerUnit, m.source === 'flyer' || m.source === 'fixture' || m.source === 'flipp' ? 1 : 0, m.source),
     ),
   );
   return matched.length;
@@ -318,4 +323,102 @@ export async function commitReceiptRows(
     await db.batch(statements.slice(i, i + STATEMENTS_PER_BATCH));
   }
   return { prices: rows.prices.length, matches: rows.matches.length, pantryItems: rows.pantry.length };
+}
+
+// ---- Household and flyer imports (milestone 4) ----
+
+/** The stored household, or the default when none is saved. Throws when the stored document is invalid. */
+export async function loadHousehold(db: D1Database): Promise<Household> {
+  const row = await db.prepare('SELECT data FROM household WHERE id = 1').first<{ data: string }>();
+  if (!row) return defaultHousehold();
+  const parsed = HouseholdSchema.safeParse(JSON.parse(row.data));
+  if (!parsed.success) {
+    const detail = parsed.error.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ');
+    throw new Error(`Stored household is invalid: ${detail}`);
+  }
+  return parsed.data;
+}
+
+export interface IngestRunRow {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  ok: boolean;
+  terms: number;
+  items: number;
+  stored: number;
+  matched: number;
+  errors: string[];
+  sample: unknown[];
+}
+
+export async function insertIngestRun(db: D1Database, run: IngestRunRow): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO ingest_runs (id, started_at, finished_at, ok, terms, items, stored, matched, errors, sample)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      run.id,
+      run.startedAt,
+      run.finishedAt,
+      run.ok ? 1 : 0,
+      run.terms,
+      run.items,
+      run.stored,
+      run.matched,
+      JSON.stringify(run.errors.slice(0, 20)),
+      JSON.stringify(run.sample.slice(0, 3)),
+    )
+    .run();
+}
+
+interface IngestRunDbRow {
+  id: string;
+  started_at: string;
+  finished_at: string;
+  ok: number;
+  terms: number;
+  items: number;
+  stored: number;
+  matched: number;
+  errors: string;
+}
+
+/** The latest run, without its debugging sample. */
+export async function latestIngestRun(db: D1Database): Promise<Omit<IngestRunRow, 'sample'> | null> {
+  const row = await db
+    .prepare(
+      'SELECT id, started_at, finished_at, ok, terms, items, stored, matched, errors FROM ingest_runs ORDER BY started_at DESC LIMIT 1',
+    )
+    .first<IngestRunDbRow>();
+  if (!row) return null;
+  let errors: string[] = [];
+  try {
+    errors = JSON.parse(row.errors) as string[];
+  } catch {
+    errors = [];
+  }
+  return {
+    id: row.id,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    ok: row.ok === 1,
+    terms: row.terms,
+    items: row.items,
+    stored: row.stored,
+    matched: row.matched,
+    errors,
+  };
+}
+
+/** Flyer items valid on `date`, counted per store. */
+export async function flyerCountsForDate(db: D1Database, date: string): Promise<{ store: string; count: number }[]> {
+  const { results } = await db
+    .prepare(
+      'SELECT store, COUNT(*) AS n FROM flyer_items WHERE valid_from <= ? AND valid_to >= ? GROUP BY store ORDER BY store',
+    )
+    .bind(date, date)
+    .all<{ store: string; n: number }>();
+  return results.map((r) => ({ store: r.store, count: r.n }));
 }

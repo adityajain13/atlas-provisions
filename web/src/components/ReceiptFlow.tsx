@@ -14,6 +14,7 @@ import { commitReceipt, errorMessage, getHousehold, parseReceipt, type ReceiptCo
 import { photoToJpeg } from '../lib/receipt';
 import { IngredientPicker } from './IngredientPicker';
 import { ctaBtn, eyebrow, fieldCls, linkBtn, secondaryBtn } from './ui';
+import { useSaveStatus } from './SaveStatus';
 
 const ERROR_TEXT = 'text-[#D98C7A]';
 
@@ -43,6 +44,7 @@ const money = (n: number) => `$${n.toFixed(2)}`;
  * and prices are written by the worker. Calls onSaved so the pantry list can reload.
  */
 export function ReceiptFlow({ onSaved }: { onSaved: () => void }) {
+  const { track } = useSaveStatus();
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [photo, setPhoto] = useState<string | null>(null);
   const [storeOptions, setStoreOptions] = useState<string[]>([]);
@@ -160,7 +162,7 @@ export function ReceiptFlow({ onSaved }: { onSaved: () => void }) {
       }),
     };
     try {
-      const result = await commitReceipt(input);
+      const result = await track(commitReceipt(input), () => commitReceipt(input));
       setPhase({ kind: 'saved', result });
       onSaved();
     } catch (e) {
@@ -214,7 +216,7 @@ export function ReceiptFlow({ onSaved }: { onSaved: () => void }) {
       {phase.kind === 'saved' && (
         <div className="rounded-lg border border-edge px-4 py-3">
           <p className="text-[14px] text-paper">
-            Saved: {phase.result.prices} prices, {phase.result.pantryItems} pantry items
+            Recorded {phase.result.prices} prices and {phase.result.pantryItems} pantry items.
           </p>
           <button type="button" className={`${linkBtn} mt-1`} onClick={startAgain}>
             Scan another receipt
@@ -272,7 +274,7 @@ export function ReceiptFlow({ onSaved }: { onSaved: () => void }) {
 
           {saveError && <p className={`mt-4 text-[13px] ${ERROR_TEXT}`}>Could not save: {saveError}</p>}
           <button type="button" disabled={!canSave} onClick={save} className={`${ctaBtn} mt-4`}>
-            {saving ? 'Saving…' : 'Save'}
+            Save
           </button>
           {!qtyOk && included.length > 0 && <p className="mt-2 text-[13px] text-muted">Every included line needs a quantity above zero.</p>}
         </div>

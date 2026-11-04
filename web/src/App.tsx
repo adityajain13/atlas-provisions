@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import TabBar from './components/TabBar';
 import { ConfirmProvider } from './components/ConfirmDialog';
+import { SaveStatusProvider } from './components/SaveStatus';
 import AppShell from './components/AppShell';
 import Week from './screens/Week';
 import List from './screens/List';
@@ -14,7 +15,9 @@ export default function App() {
   return (
     <SessionProvider>
       <ConfirmProvider>
-        <AppRoutes />
+        <SaveStatusProvider>
+          <AppRoutes />
+        </SaveStatusProvider>
       </ConfirmProvider>
     </SessionProvider>
   );
