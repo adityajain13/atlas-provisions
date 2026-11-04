@@ -3,17 +3,25 @@ import {
   DAY_LONG,
   INGREDIENT_BY_ID,
   type BaseUnit,
+  type Day,
   type ListItem,
   type MealPlan,
   type PlannedMeal,
   type Slot,
 } from '@provisions/shared';
 import type { MockDay, MockItem, MockMeal, MockTag, MockWeek, Category, Rateable } from '../mocks/week';
+import { headlineName } from './headline';
 import { DAY_SHORT } from './labels';
 
 // Turn a saved MealPlan into the shapes the Week and List screens already draw.
 
 const SLOT_ORDER: Record<Slot, number> = { breakfast: 0, lunch: 1, dinner: 2 };
+
+/** The Week screen's opening day: today when it falls in the plan's week (Thu to Wed), else Thursday. */
+export function defaultDay(weekOf: string, todayIso: string): Day {
+  const offset = DAYS.findIndex((_, i) => addDays(weekOf, i) === todayIso);
+  return offset >= 0 ? DAYS[offset]! : DAYS[0];
+}
 
 function addDays(iso: string, n: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
@@ -136,7 +144,7 @@ export function planToWeek(plan: MealPlan, people: Map<string, string>): MockWee
       key,
       dayLabel: DAY_LONG[key],
       dateNum: Number(addDays(plan.weekOf, i).slice(8)),
-      headline: dinner ? `${dinner.name.toLowerCase()}.` : 'nothing planned.',
+      headline: dinner ? `${headlineName(dinner.name)}.` : 'nothing planned.',
       meals,
     };
   });
@@ -190,7 +198,15 @@ export function planToList(plan: MealPlan): { weekOf: string; stores: string[]; 
   const items: MockItem[] = plan.list.map((item) => {
     const base = INGREDIENT_BY_ID[item.ingredientId]?.baseUnit ?? 'each';
     const size = formatSize(item.packQty, base);
-    const qty = item.packs > 1 ? `${item.packs} × ${size}` : size;
+    // Unpriced items have no packs, so their quantity is what the plan needs.
+    const qty =
+      item.store === 'Unpriced'
+        ? item.needed
+          ? formatSize(item.needed, base)
+          : ''
+        : item.packs > 1
+          ? `${item.packs} × ${size}`
+          : size;
     const note = item.priceMatch
       ? {
           kind: 'match' as const,
@@ -205,13 +221,13 @@ export function planToList(plan: MealPlan): { weekOf: string; stores: string[]; 
       store: item.store,
       category: LIST_CATEGORY[item.category] ?? 'pantry',
       name: item.name,
-      qty: item.store === 'Unpriced' ? '' : qty,
+      qty,
       price: item.total,
       ...(note ? { note } : {}),
     };
   });
 
-  const stores = [...plan.stores];
-  if (items.some((i) => i.store === 'Unpriced')) stores.push('Unpriced');
+  // Store columns are real stores only. Unpriced items are rendered in their own section.
+  const stores = plan.stores.filter((s) => s !== 'Unpriced');
   return { weekOf: plan.weekOf, stores, items };
 }

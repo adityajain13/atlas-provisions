@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MealPlan, PrepPlan } from '@provisions/shared';
 import { DAY_SHORT } from '../lib/labels';
+
+// Two copies of the checklist can be mounted (phone and desktop layouts). They stay in step through this event.
+const CHANGED = 'provisions:prep-changed';
 
 // Which prep steps are ticked is kept per visitor, per week. Storage can be blocked or full, so every
 // access is guarded and the checklist still works for the visit when it is.
@@ -23,6 +26,11 @@ function saveDone(weekOf: string, done: Set<string>): void {
   } catch {
     // Not saved. The ticks still show for this visit.
   }
+  try {
+    window.dispatchEvent(new CustomEvent(CHANGED, { detail: { weekOf, done: [...done] } }));
+  } catch {
+    // No event support. The other copy catches up on its next load.
+  }
 }
 
 /** "Thu dinner" for a planned meal id, or null when the plan has no such meal. */
@@ -32,8 +40,17 @@ function mealLabel(plan: MealPlan, id: string): string | null {
 }
 
 /** The batch-prep checklist for the household's prep day, shown above the day's meals. */
-export function PrepArticle({ plan, prep }: { plan: MealPlan; prep: PrepPlan }) {
+export function PrepArticle({ plan, prep, framed = false }: { plan: MealPlan; prep: PrepPlan; framed?: boolean }) {
   const [done, setDone] = useState(() => loadDone(plan.weekOf));
+
+  useEffect(() => {
+    const sync = (e: Event) => {
+      const detail = (e as CustomEvent<{ weekOf: string; done: string[] }>).detail;
+      if (detail?.weekOf === plan.weekOf) setDone(new Set(detail.done));
+    };
+    window.addEventListener(CHANGED, sync);
+    return () => window.removeEventListener(CHANGED, sync);
+  }, [plan.weekOf]);
 
   function toggle(id: string) {
     const next = new Set(done);
@@ -44,7 +61,7 @@ export function PrepArticle({ plan, prep }: { plan: MealPlan; prep: PrepPlan }) 
   }
 
   return (
-    <article className="border-t border-line pt-4">
+    <article className={framed ? 'rounded-lg border border-line2 p-5' : 'border-t border-line pt-4'}>
       <h3 className="font-display text-[20px] font-normal leading-[1.25] text-paper">Prep &middot; {prep.totalMinutes} min</h3>
       {prep.steps.length === 0 ? (
         <p className="mt-3 text-[13px] text-muted">Nothing to prep ahead this week.</p>

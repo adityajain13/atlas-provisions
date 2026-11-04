@@ -99,17 +99,21 @@ export default function HouseholdScreen() {
       {loadError && <p className={`mt-6 text-[14px] ${ERROR_TEXT}`}>Could not load: {loadError}</p>}
 
       {h && (
-        <>
-          <PeopleSection h={h} update={update} />
-          <ScheduleSection h={h} update={update} />
-          <PrepSection h={h} update={update} />
-          <FixedMealsSection h={h} update={update} />
-          <AllergiesSection h={h} />
-          <EquipmentSection h={h} update={update} />
-          <VarietySection h={h} update={update} />
-          <StoresSection h={h} update={update} />
-          <ItemRulesSection h={h} update={update} />
-        </>
+        <div className="lg:mt-10 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-12">
+          <div className="lg:flex lg:flex-col lg:gap-12">
+            <PeopleSection h={h} update={update} />
+            <ScheduleSection h={h} update={update} />
+            <PrepSection h={h} update={update} />
+            <FixedMealsSection h={h} update={update} />
+          </div>
+          <div className="lg:flex lg:flex-col lg:gap-12">
+            <AllergiesSection h={h} />
+            <EquipmentSection h={h} update={update} />
+            <VarietySection h={h} update={update} />
+            <StoresSection h={h} update={update} />
+            <ItemRulesSection h={h} update={update} />
+          </div>
+        </div>
       )}
 
       <SessionRow />
@@ -122,7 +126,7 @@ function SessionRow() {
   const { state, signOut } = useSession();
   if (state.status !== 'in') return null;
   return (
-    <p className="mt-10 border-t border-line pt-4 text-[13px] text-muted">
+    <p className="mt-10 border-t border-line pt-4 text-[13px] text-muted lg:hidden">
       Signed in as {state.email} ·{' '}
       <button type="button" onClick={() => void signOut()} className="text-herb">
         Sign out
@@ -805,7 +809,7 @@ function EquipmentSection({ h, update }: { h: Household; update: Update }) {
 
   return (
     <Section title="Equipment">
-      <ul className="grid grid-cols-2 gap-x-4">
+      <ul className="grid grid-cols-2 gap-x-4 lg:grid-cols-3">
         {h.equipment.map((e) => (
           <li key={e.id} className="flex min-h-[48px] items-center justify-between gap-1 border-b border-line2">
             <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-2">

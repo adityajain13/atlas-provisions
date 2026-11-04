@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import TabBar from './components/TabBar';
+import AppShell from './components/AppShell';
 import Week from './screens/Week';
 import List from './screens/List';
 import Plan from './screens/Plan';
@@ -26,7 +27,7 @@ function AppRoutes() {
   if (pathname === '/login') {
     if (state.status === 'in') return <Navigate to={safeNext(new URLSearchParams(search).get('next'))} replace />;
     return (
-      <div className="min-h-screen bg-ink font-sans text-paper">
+      <div className="min-h-screen bg-ink font-sans text-paper lg:flex lg:items-center lg:justify-center">
         <Login />
       </div>
     );
@@ -38,14 +39,16 @@ function AppRoutes() {
 
   return (
     <div className="min-h-screen bg-ink font-sans text-paper">
-      <Routes>
-        <Route path="/" element={<Week />} />
-        <Route path="/list" element={<List />} />
-        <Route path="/plan" element={<Plan />} />
-        <Route path="/household" element={<HouseholdScreen />} />
-        <Route path="/pantry" element={<Pantry />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<Week />} />
+          <Route path="/list" element={<List />} />
+          <Route path="/plan" element={<Plan />} />
+          <Route path="/household" element={<HouseholdScreen />} />
+          <Route path="/pantry" element={<Pantry />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AppShell>
       <TabBar />
     </div>
   );

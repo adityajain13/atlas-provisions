@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultHousehold, expandWeek, INGREDIENT_BY_ID, type Deal, type FixedCost, type PlanRequest, type Household } from '@provisions/shared';
-import { buildAvailable, buildPayload, SUBMIT_PLAN_TOOL, SYSTEM_PROMPT } from './prompt';
+import { buildAvailable, buildPayload, eachMeansFor, SUBMIT_PLAN_TOOL, SYSTEM_PROMPT } from './prompt';
 
 const noFixed: FixedCost = { cost: 0, listItems: [], macrosByPerson: {}, leftovers: [], needs: [], issues: [] };
 
@@ -28,6 +28,31 @@ describe('buildAvailable', () => {
     const fixed: FixedCost = { ...noFixed, leftovers: [{ ingredientId: 'greek-yogurt', qty: 0.4 }] };
     const out = buildAvailable([], fixed);
     expect(out).toEqual([expect.objectContaining({ id: 'greek-yogurt', source: 'fixed-leftover', packQty: 0.4 })]);
+  });
+});
+
+describe('each quantities', () => {
+  it('says what one unit of an each item is, from the catalogue weight', () => {
+    const out = buildAvailable([deal('white-bread', 0.5), deal('broccoli', 0.5), deal('eggs-large', 0.4)], noFixed);
+    expect(out.find((a) => a.id === 'white-bread')?.eachMeans).toBe('1 = one loaf as sold (~675 g)');
+    expect(out.find((a) => a.id === 'eggs-large')?.eachMeans).toBe('1 = one dozen carton as sold (~700 g)');
+    expect(out.find((a) => a.id === 'broccoli')?.eachMeans).toBeUndefined();
+  });
+
+  it('falls back to the generic meaning for an each item with no weight', () => {
+    expect(eachMeansFor({ baseUnit: 'each' })).toBe('1 = one item as sold (a loaf, a bunch, a dozen eggs carton, one pepper)');
+    expect(eachMeansFor({ baseUnit: 'kg', eachWeightKg: 1 })).toBeUndefined();
+  });
+
+  it('passes eachMeans through the payload, and the system prompt forbids counting slices', () => {
+    const household: Household = { ...defaultHousehold() };
+    const request: PlanRequest = { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [], useItUp: true };
+    const { cells, fixed } = expandWeek(household, request);
+    const available = buildAvailable([deal('white-bread', 0.5)], noFixed);
+    const payload = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available, neverBuy: [], recentDinnerNames: [] });
+    expect(payload.available.find((a) => a.id === 'white-bread')?.eachMeans).toBe('1 = one loaf as sold (~675 g)');
+    expect(SYSTEM_PROMPT).toContain('never slices or servings');
+    expect(SYSTEM_PROMPT).toContain('two people having toast all week is 1 loaf, not 7');
   });
 });
 
