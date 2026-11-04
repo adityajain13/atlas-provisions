@@ -1,6 +1,21 @@
 // Flipp search against a fake fetch. No network.
 import { describe, expect, it } from 'vitest';
-import { FLIPP_SEARCH_URL, fetchFlippItems, toFlyerItem, type FlippRawItem } from './flipp';
+import {
+  FLIPP_FLYERS_URL,
+  FLIPP_SEARCH_URL,
+  createBudget,
+  createFlippClient,
+  fetchFlyerItems,
+  fetchFlyerList,
+  fetchFlippItems,
+  flyerItemPriceText,
+  selectFlyers,
+  toFlyerInfo,
+  toFlyerItem,
+  toFlyerItemFromFlyer,
+  type FlippRawItem,
+  type FlyerInfo,
+} from './flipp';
 
 const STORES = ['No Frills', 'FreshCo'];
 const noSleep = async () => {};
@@ -168,5 +183,178 @@ describe('fetchFlippItems', () => {
     const fetchImpl = (async () => bodies[i++]!) as unknown as typeof fetch;
     const result = await fetchFlippItems('M5V2T6', ['a', 'b'], fetchImpl, { stores: STORES, sleep: noSleep, spacingMs: 0, concurrency: 1 });
     expect(result.errors).toEqual(['a: response was not JSON', 'b: response had no items array']);
+  });
+});
+
+const TODAY = '2026-11-03';
+const flyer = (over: Partial<FlyerInfo>): FlyerInfo => ({
+  id: '1',
+  merchant: 'NOFRILLS',
+  name: 'Weekly',
+  validFrom: '2026-10-29',
+  validTo: '2026-11-11',
+  categories: ['groceries'],
+  ...over,
+});
+
+describe('selectFlyers', () => {
+  it('keeps flyers of household stores that are still valid, grocery flyers first, at most 3 per store', () => {
+    const flyers = [
+      flyer({ id: 'a', categories: ['health'] }),
+      flyer({ id: 'b', categories: ['Groceries'] }),
+      flyer({ id: 'c', categories: ['groceries'] }),
+      flyer({ id: 'd', categories: ['groceries'] }),
+      flyer({ id: 'e', merchant: 'Walmart', categories: ['groceries'] }),
+      flyer({ id: 'f', validTo: '2026-10-30' }),
+      flyer({ id: 'g', validTo: null }),
+    ];
+    const picked = selectFlyers(flyers, ['No Frills'], TODAY);
+    expect(picked.map((p) => p.flyer.id)).toEqual(['b', 'c', 'd']);
+    expect(new Set(picked.map((p) => p.store))).toEqual(new Set(['No Frills']));
+  });
+
+  it('matches merchants through the Flipp names of a store', () => {
+    const picked = selectFlyers([flyer({ id: 'x', merchant: 'RCSS' })], [{ name: 'Real Canadian Superstore', flippNames: ['RCSS'] }], TODAY);
+    expect(picked).toEqual([{ flyer: expect.objectContaining({ id: 'x' }), store: 'Real Canadian Superstore' }]);
+  });
+});
+
+describe('toFlyerInfo', () => {
+  it('reads a flyer with string categories, or a merchant object', () => {
+    expect(toFlyerInfo({ id: 9, merchant: 'FreshCo', name: 'Deals', valid_from: '2026-10-29T05:00:00Z', valid_to: '2026-11-11T05:00:00Z', categories: 'Groceries' })).toEqual({
+      id: '9',
+      merchant: 'FreshCo',
+      name: 'Deals',
+      validFrom: '2026-10-29',
+      validTo: '2026-11-11',
+      categories: ['groceries'],
+    });
+    expect(toFlyerInfo({ id: 'z', merchant: { name: 'No Frills' } })?.merchant).toBe('No Frills');
+    expect(toFlyerInfo({ merchant: 'No id' })).toBeNull();
+  });
+});
+
+describe('flyerItemPriceText', () => {
+  it('uses current_price with its units when it is a number', () => {
+    expect(flyerItemPriceText({ current_price: 4.39, post_price_text: '/kg' })).toBe('$4.39/kg');
+  });
+
+  it('uses the printed price string, such as "2/$5" or "4.99" with a unit', () => {
+    expect(flyerItemPriceText({ price: '2/$5' })).toBe('2/$5');
+    expect(flyerItemPriceText({ price: '4.99', post_price_text: 'lb' })).toBe('$4.99/lb');
+  });
+
+  it('falls back to the sale text', () => {
+    expect(flyerItemPriceText({ sale_story: '$3.49' })).toBe('$3.49');
+  });
+
+  it('returns null when there is no price', () => {
+    expect(flyerItemPriceText({ name: 'Nothing' })).toBeNull();
+  });
+});
+
+describe('toFlyerItemFromFlyer', () => {
+  it('maps a flyer item to the flyer store, taking dates from the flyer when the item has none', () => {
+    const item = toFlyerItemFromFlyer(
+      { id: 77, name: 'PC Pork Combo Chops', price: '4.99', post_price_text: '/kg', description: '1.5 kg' },
+      'No Frills',
+      { validFrom: '2026-10-29', validTo: '2026-11-11' },
+    );
+    expect(item).toEqual({
+      id: 'flipp:77',
+      store: 'No Frills',
+      rawName: 'PC Pork Combo Chops',
+      priceText: '$4.99/kg',
+      sizeText: '1.5 kg',
+      validFrom: '2026-10-29',
+      validTo: '2026-11-11',
+      source: 'flipp',
+    });
+  });
+
+  it('reads the brand with the name when the name does not already have it', () => {
+    const flyerDates = { validFrom: '2026-10-29', validTo: '2026-11-11' };
+    expect(toFlyerItemFromFlyer({ id: 5, name: 'Drumstick', brand: 'Nestle', price: '3.00' }, 'No Frills', flyerDates)?.rawName).toBe('Nestle Drumstick');
+    expect(toFlyerItemFromFlyer({ id: 6, name: 'PC Spaghetti', brand: 'PC', price: '3.00' }, 'No Frills', flyerDates)?.rawName).toBe('PC Spaghetti');
+  });
+
+  it('skips an item with no name or no price', () => {
+    const flyerDates = { validFrom: '2026-10-29', validTo: '2026-11-11' };
+    expect(toFlyerItemFromFlyer({ id: 1, price: '2.00' }, 'No Frills', flyerDates)).toBeNull();
+    expect(toFlyerItemFromFlyer({ id: 2, name: 'Thing' }, 'No Frills', flyerDates)).toBeNull();
+  });
+});
+
+describe('fetchFlyerList', () => {
+  it('requests the flyer list for the postal code and reads the flyers array', async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      calls.push(String(url));
+      return json({ flyers: [flyer({ id: 'f1' })].map((f) => ({ id: f.id, merchant: f.merchant, valid_to: f.validTo })) });
+    }) as unknown as typeof fetch;
+    const client = createFlippClient(fetchImpl, { sleep: noSleep, spacingMs: 0 });
+    const out = await fetchFlyerList('M5V2T6', client);
+    expect(calls).toEqual([`${FLIPP_FLYERS_URL}?locale=en-ca&postal_code=M5V2T6`]);
+    expect(out).toEqual({ ok: true, flyers: [expect.objectContaining({ id: 'f1', merchant: 'NOFRILLS' })] });
+  });
+
+  it('reports a failed list without throwing', async () => {
+    const fetchImpl = (async () => new Response('down', { status: 500 })) as unknown as typeof fetch;
+    const client = createFlippClient(fetchImpl, { sleep: noSleep, spacingMs: 0, retryDelayMs: 0 });
+    expect(await fetchFlyerList('M5V2T6', client)).toEqual({ ok: false, message: 'flyer list HTTP 500' });
+  });
+});
+
+describe('fetchFlyerItems', () => {
+  it('tries flyer_items first, then the flyer itself, until one returns items', async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      urls.push(String(url));
+      if (url.includes('/flyer_items')) return json({ flyer_items: [] });
+      return json({ items: [chicken] });
+    }) as unknown as typeof fetch;
+    const client = createFlippClient(fetchImpl, { sleep: noSleep, spacingMs: 0 });
+    const out = await fetchFlyerItems('42', client);
+    expect(urls).toEqual([
+      `${FLIPP_FLYERS_URL}/42/flyer_items?locale=en-ca`,
+      `${FLIPP_FLYERS_URL}/42?locale=en-ca`,
+    ]);
+    expect(out.items).toHaveLength(1);
+  });
+
+  it('takes a root array of items', async () => {
+    const fetchImpl = (async () => json([chicken])) as unknown as typeof fetch;
+    const client = createFlippClient(fetchImpl, { sleep: noSleep, spacingMs: 0 });
+    expect((await fetchFlyerItems('42', client)).items).toHaveLength(1);
+  });
+});
+
+describe('request budget', () => {
+  it('refuses requests past the limit and never sends them', async () => {
+    const budget = createBudget(2);
+    let sent = 0;
+    const fetchImpl = (async () => {
+      sent++;
+      return json({ items: [] });
+    }) as unknown as typeof fetch;
+    const client = createFlippClient(fetchImpl, { sleep: noSleep, spacingMs: 0, budget });
+    expect((await client.get('https://x.test/a')).ok).toBe(true);
+    expect((await client.get('https://x.test/b')).ok).toBe(true);
+    const third = await client.get('https://x.test/c');
+    expect(third.ok).toBe(false);
+    expect(sent).toBe(2);
+    expect(budget.used).toBe(2);
+    expect(budget.exhausted).toBe(true);
+  });
+
+  it('counts a retried request as a second request', async () => {
+    const budget = createBudget(10);
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return calls === 1 ? new Response('slow', { status: 429 }) : json({ items: [] });
+    }) as unknown as typeof fetch;
+    await fetchFlippItems('M5V2T6', ['a'], fetchImpl, { stores: STORES, sleep: noSleep, spacingMs: 0, budget });
+    expect(budget.used).toBe(2);
   });
 });

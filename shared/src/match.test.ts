@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchFlyerItem, matchIngredient, normalizeRawName, type FlyerItem } from './match';
+import { expandFlyerItem, foldToken, matchFlyerItem, matchIngredient, normalizeRawName, splitProductName, type FlyerItem } from './match';
 
 const base = {
   id: 'x',
@@ -28,9 +28,22 @@ describe('normalizeRawName', () => {
     expect(normalizeRawName('Soy Sauce 12 x 355 mL')).toBe('soy sauce');
   });
 
-  it('keeps unicode letters and collapses punctuation', () => {
-    expect(normalizeRawName('Jalapeño Peppers!!')).toBe('jalapeño peppers');
+  it('removes accents and collapses punctuation', () => {
+    expect(normalizeRawName('Jalapeño Peppers!!')).toBe('jalapeno peppers');
     expect(normalizeRawName('  Bananas,   Bunch  ')).toBe('bananas bunch');
+  });
+
+  it('drops trademark signs, apostrophes and the store brand prefixes flyers print', () => {
+    expect(normalizeRawName("FARMER'S MARKET™ CARROTS")).toBe('carrots');
+    expect(normalizeRawName('PC® WHOLE WHITE MUSHROOMS')).toBe('whole white mushrooms');
+    expect(normalizeRawName("President's Choice Chicken Stock")).toBe('chicken stock');
+    expect(normalizeRawName('Selection Sweet Potatoes')).toBe('sweet potatoes');
+  });
+
+  it('drops piece counts and size ranges', () => {
+    expect(normalizeRawName("HAAGEN-DAZS, 400-450 mL, BARS 3/4's")).toBe('haagen-dazs bars');
+    expect(normalizeRawName('NESTLÉ DRUMSTICK, 4\'s')).toBe('nestle drumstick');
+    expect(normalizeRawName('Tide Pods 12 pk')).toBe('tide pods');
   });
 });
 
@@ -110,5 +123,111 @@ describe('matchFlyerItem', () => {
   it('returns null for unmatched or unpriced items', () => {
     expect(matchFlyerItem(item('Tide Pods 81 ct', { priceText: '$14.99' }))).toBeNull();
     expect(matchFlyerItem(item('Chicken Thighs', { priceText: 'call' }))).toBeNull();
+  });
+});
+
+describe('foldToken', () => {
+  it.each([
+    ['tomatoes', 'tomato'],
+    ['potatoes', 'potato'],
+    ['berries', 'berry'],
+    ['leaves', 'leaf'],
+    ['chops', 'chop'],
+    ['cucumbers', 'cucumber'],
+    ['chickpeas', 'chickpea'],
+    ['glass', 'glass'],
+    ['tomato', 'tomato'],
+    ['eggs', 'egg'],
+  ])('folds %s to %s', (word, singular) => {
+    expect(foldToken(word)).toBe(singular);
+  });
+});
+
+describe('matching flyer wording', () => {
+  it('matches plural and word-order variants', () => {
+    expect(matchIngredient('PORK COMBO CHOPS')?.ingredientId).toBe('pork-chops');
+    expect(matchIngredient('ENGLISH CUCUMBERS')?.ingredientId).toBe('english-cucumber');
+    expect(matchIngredient('Fresh Tomatoes 1 kg')?.ingredientId).toBe('roma-tomatoes');
+    expect(matchIngredient('Yellow Onions 3 lb')?.ingredientId).toBe('yellow-onion');
+    expect(matchIngredient('Bone-In Chicken Thighs')?.ingredientId).toBe('chicken-thigh-bone-in');
+  });
+
+  it('keeps the more specific alias when several match', () => {
+    expect(matchIngredient('ENGLISH CUCUMBERS OR SWEET POTATOES')?.ingredientId).toBe('english-cucumber');
+    expect(matchIngredient('Sweet Potatoes 1 kg')?.ingredientId).toBe('sweet-potatoes');
+    expect(matchIngredient('Pure Maple Syrup 540 mL')?.ingredientId).toBe('maple-syrup');
+    expect(matchIngredient('White Mushrooms 227 g')?.ingredientId).toBe('white-mushrooms');
+  });
+
+  it('does not match ice cream that shares a word with an ingredient', () => {
+    expect(matchIngredient("NESTLÉ DRUMSTICK, 4's")).toBeNull();
+    expect(matchIngredient('HAAGEN-DAZS, 400-450 mL, BARS 3/4s')).toBeNull();
+  });
+});
+
+describe('splitProductName', () => {
+  it('leaves one product alone', () => {
+    expect(splitProductName('PORK COMBO CHOPS')).toEqual(['PORK COMBO CHOPS']);
+    expect(splitProductName('Mac & Cheese Dinner')).toEqual(['Mac', 'Cheese Dinner']);
+  });
+
+  it('splits "or" lines into products', () => {
+    expect(splitProductName('BROCCOLI CROWNS or BUNCH SPINACH')).toEqual(['BROCCOLI CROWNS', 'BUNCH SPINACH']);
+    expect(splitProductName('ENGLISH CUCUMBERS OR SWEET POTATOES')).toEqual(['ENGLISH CUCUMBERS', 'SWEET POTATOES']);
+    expect(splitProductName("FARMER'S MARKET™ CARROTS OR YELLOW ONIONS OR PC® WHOLE WHITE MUSHROOMS")).toEqual([
+      "FARMER'S MARKET™ CARROTS",
+      'YELLOW ONIONS',
+      'PC® WHOLE WHITE MUSHROOMS',
+    ]);
+  });
+
+  it('does not split on sizes or counts', () => {
+    expect(splitProductName('1.5 kg / 2 lb')).toEqual(['1.5 kg / 2 lb']);
+    expect(splitProductName("HAAGEN-DAZS, 400-450 mL, BARS 3/4's")).toEqual(["HAAGEN-DAZS, 400-450 mL, BARS 3/4's"]);
+  });
+
+  it('splits a comma list only when every part is an ingredient', () => {
+    expect(splitProductName('Carrots, Yellow Onions')).toEqual(['Carrots', 'Yellow Onions']);
+    expect(splitProductName('Chicken Thighs, boneless, skin on')).toEqual(['Chicken Thighs, boneless, skin on']);
+  });
+});
+
+describe('expandFlyerItem', () => {
+  const base: FlyerItem = {
+    id: 'flipp:9',
+    store: 'No Frills',
+    rawName: 'x',
+    priceText: '2/$5',
+    validFrom: '2026-11-12',
+    validTo: '2026-11-18',
+    source: 'flipp',
+  };
+
+  it('returns a single product unchanged', () => {
+    expect(expandFlyerItem({ ...base, rawName: 'PORK COMBO CHOPS' })).toEqual([{ ...base, rawName: 'PORK COMBO CHOPS' }]);
+  });
+
+  it('gives each split product the same price, size and dates, with numbered ids', () => {
+    const parts = expandFlyerItem({ ...base, rawName: 'BROCCOLI CROWNS or BUNCH SPINACH', sizeText: '1 lb' });
+    expect(parts.map((p) => p.id)).toEqual(['flipp:9#1', 'flipp:9#2']);
+    expect(parts.map((p) => p.rawName)).toEqual(['BROCCOLI CROWNS', 'BUNCH SPINACH']);
+    for (const p of parts) {
+      expect(p).toMatchObject({ store: 'No Frills', priceText: '2/$5', sizeText: '1 lb', validFrom: '2026-11-12', validTo: '2026-11-18' });
+    }
+  });
+
+  it('matches each split product to its own ingredient', () => {
+    const [broccoli, spinach] = expandFlyerItem({ ...base, rawName: 'BROCCOLI CROWNS or BUNCH SPINACH', priceText: '2.99/kg' })
+      .map((p) => matchFlyerItem(p));
+    expect(broccoli?.ingredientId).toBe('broccoli');
+    expect(spinach?.ingredientId).toBe('spinach');
+    expect(broccoli?.pricePerUnit).toBeCloseTo(2.99);
+    expect(spinach?.pricePerUnit).toBeCloseTo(2.99);
+  });
+
+  it('leaves the ice cream line unmatched after splitting', () => {
+    const parts = expandFlyerItem({ ...base, rawName: "HAAGEN-DAZS, 400-450 mL, BARS 3/4's or NESTLÉ DRUMSTICK, 4's" });
+    expect(parts).toHaveLength(2);
+    for (const p of parts) expect(matchFlyerItem(p)).toBeNull();
   });
 });

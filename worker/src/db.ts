@@ -2,7 +2,10 @@
 import {
   HouseholdSchema,
   defaultHousehold,
+  type FlyerUsed,
   type Household,
+  type IngestMode,
+  type IngestStatus,
 } from '@provisions/shared';
 import type {
   FlyerItem,
@@ -344,8 +347,11 @@ export interface IngestRunRow {
   startedAt: string;
   finishedAt: string;
   ok: boolean;
+  mode: IngestMode;
   terms: number;
+  flyers: FlyerUsed[];
   items: number;
+  kept: number;
   stored: number;
   matched: number;
   errors: string[];
@@ -355,16 +361,19 @@ export interface IngestRunRow {
 export async function insertIngestRun(db: D1Database, run: IngestRunRow): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO ingest_runs (id, started_at, finished_at, ok, terms, items, stored, matched, errors, sample)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ingest_runs (id, started_at, finished_at, ok, mode, terms, flyers, items, kept, stored, matched, errors, sample)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       run.id,
       run.startedAt,
       run.finishedAt,
       run.ok ? 1 : 0,
+      run.mode,
       run.terms,
+      JSON.stringify(run.flyers.slice(0, 50)),
       run.items,
+      run.kept,
       run.stored,
       run.matched,
       JSON.stringify(run.errors.slice(0, 20)),
@@ -378,38 +387,60 @@ interface IngestRunDbRow {
   started_at: string;
   finished_at: string;
   ok: number;
+  mode: string;
   terms: number;
+  flyers: string;
   items: number;
+  kept: number;
   stored: number;
   matched: number;
   errors: string;
+  sample?: string;
 }
 
-/** The latest run, without its debugging sample. */
-export async function latestIngestRun(db: D1Database): Promise<Omit<IngestRunRow, 'sample'> | null> {
+function parseJsonArray(text: string | undefined): unknown[] {
+  if (!text) return [];
+  try {
+    const v = JSON.parse(text) as unknown;
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The latest run. Without `debug` it has no sample and no flyer list. With `debug` it has both, for
+ * pasting when the feed's shape looks different from what the import expects.
+ */
+export async function latestIngestRun(
+  db: D1Database,
+  opts: { debug?: boolean } = {},
+): Promise<NonNullable<IngestStatus['lastRun']> | null> {
+  const columns = 'id, started_at, finished_at, ok, mode, terms, flyers, items, kept, stored, matched, errors';
   const row = await db
-    .prepare(
-      'SELECT id, started_at, finished_at, ok, terms, items, stored, matched, errors FROM ingest_runs ORDER BY started_at DESC LIMIT 1',
-    )
+    .prepare(`SELECT ${columns}${opts.debug ? ', sample' : ''} FROM ingest_runs ORDER BY started_at DESC LIMIT 1`)
     .first<IngestRunDbRow>();
   if (!row) return null;
-  let errors: string[] = [];
-  try {
-    errors = JSON.parse(row.errors) as string[];
-  } catch {
-    errors = [];
-  }
-  return {
+  const flyers = parseJsonArray(row.flyers) as FlyerUsed[];
+  const out: NonNullable<IngestStatus['lastRun']> = {
     id: row.id,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     ok: row.ok === 1,
+    mode: row.mode === 'flyers' ? 'flyers' : 'search',
     terms: row.terms,
+    flyerCount: flyers.length,
     items: row.items,
+    kept: row.kept,
     stored: row.stored,
     matched: row.matched,
-    errors,
+    errors: parseJsonArray(row.errors) as string[],
   };
+  if (opts.debug) {
+    out.sample = parseJsonArray(row.sample);
+    out.flyers = flyers;
+  }
+  return out;
 }
 
 /** Flyer items valid on `date`, counted per store. */

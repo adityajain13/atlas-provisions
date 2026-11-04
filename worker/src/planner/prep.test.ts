@@ -137,7 +137,7 @@ describe('anthropicPrepClient', () => {
     const init = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit;
     const body = JSON.parse(init.body as string);
     expect(body.model).toBe('haiku-test');
-    expect(body.tool_choice).toEqual({ type: 'tool', name: 'submit_prep' });
+    expect(body.tool_choice).toEqual({ type: 'auto' });
     expect(body.max_tokens).toBe(4000);
   });
 });

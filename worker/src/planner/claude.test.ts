@@ -29,9 +29,15 @@ describe('anthropicClient', () => {
     const body = JSON.parse(init.body as string);
     expect(body.model).toBe('test-model');
     expect(body.max_tokens).toBe(16000);
-    expect(body.system).toEqual([{ type: 'text', text: 'SYSTEM', cache_control: { type: 'ephemeral' } }]);
+    expect(body.system).toEqual([
+      {
+        type: 'text',
+        text: 'SYSTEM\n\nAnswer only by calling the submit_plan tool, exactly once. Do not reply with text.',
+        cache_control: { type: 'ephemeral' },
+      },
+    ]);
     expect(body.tools).toEqual([SUBMIT_PLAN_TOOL]);
-    expect(body.tool_choice).toEqual({ type: 'tool', name: 'submit_plan' });
+    expect(body.tool_choice).toEqual({ type: 'auto' });
     expect(JSON.parse(body.messages[0].content)).toEqual({ weekOf: '2026-11-15' });
   });
 
@@ -69,3 +75,53 @@ describe('anthropicClient', () => {
     expect(await client.submitPlan('s', {})).not.toHaveProperty('prep');
   });
 });
+
+function textReply(text: string, stop = 'end_turn') {
+  return JSON.stringify({ stop_reason: stop, content: [{ type: 'text', text }] });
+}
+
+const bodyOf = (call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string);
+
+describe('anthropicClient without a forced tool call', () => {
+  it('uses a JSON object in the text reply when there is no tool call', async () => {
+    const fetchImpl = vi.fn(async () => new Response(textReply(`Here you go:\n\`\`\`json\n${JSON.stringify(PLAN_INPUT)}\n\`\`\``), { status: 200 }));
+    const client = anthropicClient('k', 'm', fetchImpl as unknown as typeof fetch);
+    expect(await client.submitPlan('s', {})).toEqual(PLAN_INPUT);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks once more with an extra user turn when the text has no JSON, then uses the tool call', async () => {
+    const replies = [
+      new Response(textReply('I will plan the week now.'), { status: 200 }),
+      new Response(toolUse(PLAN_INPUT), { status: 200 }),
+    ];
+    const fetchImpl = vi.fn(async () => replies.shift()!);
+    const client = anthropicClient('k', 'm', fetchImpl as unknown as typeof fetch);
+
+    expect(await client.submitPlan('s', { weekOf: '2026-11-15' })).toEqual(PLAN_INPUT);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    const retry = bodyOf(fetchImpl.mock.calls[1] as unknown[]);
+    expect(retry.messages).toEqual([
+      { role: 'user', content: JSON.stringify({ weekOf: '2026-11-15' }) },
+      { role: 'assistant', content: 'I will plan the week now.' },
+      { role: 'user', content: 'Call submit_plan now with your answer.' },
+    ]);
+    expect(retry.tool_choice).toEqual({ type: 'auto' });
+  });
+
+  it('throws the descriptive error when the retry also has no tool call', async () => {
+    const fetchImpl = vi.fn(async () => new Response(textReply('no', 'max_tokens'), { status: 200 }));
+    const client = anthropicClient('k', 'm', fetchImpl as unknown as typeof fetch);
+    await expect(client.submitPlan('s', {})).rejects.toThrow('did not call submit_plan (stop reason: max_tokens)');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry when the API itself fails', async () => {
+    const fetchImpl = vi.fn(async () => new Response('busy', { status: 529 }));
+    const client = anthropicClient('k', 'm', fetchImpl as unknown as typeof fetch);
+    await expect(client.submitPlan('s', {})).rejects.toThrow('Claude API returned 529: busy');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+

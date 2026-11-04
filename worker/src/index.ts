@@ -265,9 +265,9 @@ app.post(`${API}/flyers/refresh`, async (c) => {
   }
 });
 
-// The latest run (without its sample) and the prices valid today, per store.
+// The latest run and the prices valid today, per store. ?debug=1 adds the run's sample and flyers.
 app.get(`${API}/flyers/status`, async (c) => {
-  const lastRun = await latestIngestRun(c.env.DB);
+  const lastRun = await latestIngestRun(c.env.DB, { debug: c.req.query('debug') === '1' });
   const currentItems = await flyerCountsForDate(c.env.DB, torontoDate());
   return c.json({ lastRun, currentItems });
 });

@@ -86,11 +86,14 @@ Worker secrets (Cloudflare dashboard: Workers & Pages > atlas-provisions > Setti
 
 Flyer prices come from Flipp, the flyer site. Flipp's public web app uses an unofficial JSON search endpoint, which is not a supported API, so the import is written defensively: any missing field is skipped, and a failed search is recorded instead of stopping the run. If Flipp changes its response, the run reports errors and the matched count drops to zero; the latest run's errors and a sample of raw items are kept in the `ingest_runs` table.
 
-- Set the postal code in Household (Stores section). Flyers are searched near it. Only enabled stores are kept.
-- Search terms come from the catalogue: one per ingredient, its shortest usable alias, at most 150.
+- Set the postal code in Household (Stores section). Flyers are read for that postal code. Only enabled stores are kept.
+- The import reads the flyer list, keeps the flyers of enabled stores that are still valid (grocery flyers first, at most three per store), and reads each flyer's items. Flyer lines such as "A or B" are split into their products, each with the line's price.
+- If that gives nothing, it falls back to a search by name, with at most 30 terms: meat, seafood, eggs and tofu first, then common produce.
+- All requests in one run share a budget of 45, under Cloudflare's free-plan limit of 50 subrequests per run. Requests past it are not sent, and the run notes that it stopped early.
+- Each run records its mode, the flyers it used, the raw item count, and a sample of three raw items. `GET /provisions/api/flyers/status?debug=1` returns the sample and the flyers of the latest run.
 - The Worker runs the import every Sunday at 11:00 UTC (6 to 7 am in Toronto), from the cron trigger in `wrangler.jsonc`.
 - The Household Stores section has a Flyers row with the last update and a Refresh flyers button, which runs the import on demand and reports what it found.
-- Requests go out at most four at a time, spaced 250 ms apart, with a 10 second timeout, and a 429 or 5xx is retried once.
+- Requests go out at most four at a time, spaced 250 ms apart, with a 10 second timeout, and a 429 or 5xx is retried once (each retry counts against the budget).
 - This is for personal use. Flipp's terms of use are not reviewed here.
 
 Status and a manual run are available at `GET /provisions/api/flyers/status` and `POST /provisions/api/flyers/refresh`.

@@ -28,7 +28,8 @@ describe('parseReceiptImage', () => {
     expect(calls).toHaveBeenCalledTimes(1);
     expect(modelOf(calls.mock.calls[0]!)).toBe('claude-sonnet-5-5');
     const body = JSON.parse((calls.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body.tool_choice).toEqual({ type: 'tool', name: 'record_receipt' });
+    expect(body.tool_choice).toEqual({ type: 'auto' });
+    expect(body.messages[0].content[1].text).toContain('Answer only by calling the record_receipt tool, exactly once.');
     expect(body.messages[0].content[0].source.media_type).toBe('image/jpeg');
     expect(body.tools[0].input_schema.properties.category).toBeUndefined();
     expect(body.tools[0].input_schema.properties.items.items.properties).toHaveProperty('size');
@@ -87,10 +88,35 @@ describe('parseReceiptImage', () => {
     expect(out).toMatchObject({ ok: false, status: 502 });
   });
 
-  it('treats a reply with no tool call as no answer', async () => {
+  it('treats a reply with no tool call as no answer, after one retry per model', async () => {
     const empty = () => new Response(JSON.stringify({ content: [{ type: 'text', text: 'hi' }] }), { status: 200 });
-    const { fetchImpl } = scripted([empty, empty]);
+    const { fetchImpl, calls } = scripted([empty, empty, empty, empty]);
     const out = await parseReceiptImage('BASE64', { ANTHROPIC_API_KEY: 'k' }, fetchImpl);
     expect(out).toMatchObject({ ok: false, status: 502 });
+    expect(calls).toHaveBeenCalledTimes(4);
+  });
+
+  it('uses a JSON object in the text reply', async () => {
+    const text = () => new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(RECEIPT) }] }), { status: 200 });
+    const { fetchImpl, calls } = scripted([text]);
+    const out = await parseReceiptImage('BASE64', { ANTHROPIC_API_KEY: 'k' }, fetchImpl);
+    expect(out).toEqual({ ok: true, receipt: RECEIPT });
+    expect(calls).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks the same model again with the image and an extra user turn when the first reply has no answer', async () => {
+    const text = () => new Response(JSON.stringify({ content: [{ type: 'text', text: 'Reading it now.' }] }), { status: 200 });
+    const { fetchImpl, calls } = scripted([text, () => toolReply(RECEIPT)]);
+    const out = await parseReceiptImage('BASE64', { ANTHROPIC_API_KEY: 'k' }, fetchImpl);
+
+    expect(out).toEqual({ ok: true, receipt: RECEIPT });
+    expect(calls).toHaveBeenCalledTimes(2);
+    expect(modelOf(calls.mock.calls[1]!)).toBe('claude-sonnet-5-5');
+    const retry = JSON.parse((calls.mock.calls[1]![1] as RequestInit).body as string);
+    expect(retry.messages).toHaveLength(3);
+    expect(retry.messages[0].content[0].type).toBe('image');
+    expect(retry.messages[1]).toEqual({ role: 'assistant', content: 'Reading it now.' });
+    expect(retry.messages[2]).toEqual({ role: 'user', content: 'Call record_receipt now with your answer.' });
+    expect(retry.tool_choice).toEqual({ type: 'auto' });
   });
 });
