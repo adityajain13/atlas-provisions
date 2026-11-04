@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { IngestRunSummary, IngestStatus } from '@provisions/shared';
 import { errorMessage, getFlyerStatus, refreshFlyers } from '../api';
+import { Disclosure } from './Disclosure';
 import { useSaveStatus } from './SaveStatus';
 import { secondaryBtn } from './ui';
 
@@ -36,6 +37,7 @@ export function FlyerRefresh() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<IngestRunSummary | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [unmatchedOpen, setUnmatchedOpen] = useState(false);
 
   const load = useCallback(() => {
     getFlyerStatus()
@@ -102,16 +104,18 @@ export function FlyerRefresh() {
             </div>
           )}
           {result.unmatchedSample.length > 0 && (
-            <details className="text-[13px] text-muted">
-              <summary className="cursor-pointer py-1 text-muted hover:text-paper">
-                Unmatched ({result.unmatchedSample.length} shown)
-              </summary>
-              <ul className="mt-2 space-y-1">
+            <Disclosure
+              variant="compact"
+              open={unmatchedOpen}
+              onToggle={() => setUnmatchedOpen((v) => !v)}
+              title={`Unmatched (${result.unmatchedSample.length} shown)`}
+            >
+              <ul className="space-y-1 text-[13px] text-muted">
                 {result.unmatchedSample.map((name) => (
                   <li key={name}>{name}</li>
                 ))}
               </ul>
-            </details>
+            </Disclosure>
           )}
         </div>
       )}
