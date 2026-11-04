@@ -19,7 +19,7 @@ import MealDetail, { RATING_OPTIONS, TAG_TONE } from '../components/MealDetail';
 import { RefreshIcon } from '../components/Icons';
 import { SamplePill } from '../components/SamplePill';
 import { secondaryBtn } from '../components/ui';
-import { DAY_SHORT, SLOT_LABEL, SLOT_LETTER } from '../lib/labels';
+import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
 import { defaultDay, planToWeek } from '../lib/planView';
 import { MOCK_WEEK, type MockMeal, type MockWeek, type Rateable } from '../mocks/week';
 
@@ -326,7 +326,7 @@ export default function Week() {
 
         <div className={`mt-8 ${hasDeskSide ? '2xl:grid 2xl:grid-cols-[minmax(0,1fr)_320px] 2xl:items-start 2xl:gap-10' : ''}`}>
           <div className="min-w-0">
-            <div className="grid grid-cols-[40px_repeat(7,minmax(0,1fr))] gap-2 xl:grid-cols-[88px_repeat(7,minmax(0,1fr))]">
+            <div className="grid grid-cols-[96px_repeat(7,minmax(0,1fr))] gap-2">
               <span aria-hidden="true" />
               {week.days.map((d, i) => {
                 const active = d.key === selected;
@@ -354,10 +354,7 @@ export default function Week() {
 
               {SLOTS.map((slot) => (
                 <Fragment key={slot}>
-                  <span className="pt-4 text-[11px] uppercase tracking-[0.14em] text-muted">
-                    <span className="xl:hidden">{SLOT_LETTER[slot]}</span>
-                    <span className="hidden xl:inline">{SLOT_LABEL[slot]}</span>
-                  </span>
+                  <span className="pt-4 text-[12px] text-muted">{SLOT_LABEL[slot]}</span>
                   {week.days.map((d) => {
                     const meals = d.meals.filter((m) => m.slot === slot);
                     if (meals.length === 0) {

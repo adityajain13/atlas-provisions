@@ -2,9 +2,12 @@ import { Fragment, useEffect, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   DAYS,
+  DAY_LONG,
   SLOTS,
+  addDaysIso,
   flyerWeekOf,
   type Day,
+  type FixedMeal,
   type Household,
   type Slot,
   type WeekOverride,
@@ -14,7 +17,7 @@ import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { Section } from '../components/Section';
 import { addBtn, chipBase, chipTone, ctaBtn, eyebrow, fieldCls, removeIconBtn } from '../components/ui';
-import { DAY_LETTER, DAY_SHORT, SLOT_LETTER, SLOT_LABEL } from '../lib/labels';
+import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
 
 export default function Plan() {
   const [household, setHousehold] = useState<Household | null>(null);
@@ -38,14 +41,20 @@ export default function Plan() {
   const people = household?.people ?? [];
   const maxCount = people.length + 2;
   const budgetValue = budget ?? (household ? String(household.defaultBudget) : '');
+  // The flyer week this grid is for: Thursday first, so each column carries its date.
+  const weekOf = flyerWeekOf(new Date());
 
   function defaultCount(day: Day, slot: Slot): number {
     if (!household) return 0;
     return people.filter((p) => household.schedule[p.id]?.[day]?.[slot] === true).length;
   }
 
+  function fixedMealAt(day: Day, slot: Slot): FixedMeal | undefined {
+    return household?.fixedMeals.find((m) => m.active && m.slot === slot && m.days.includes(day));
+  }
+
   function isFixed(day: Day, slot: Slot): boolean {
-    return !!household?.fixedMeals.some((m) => m.active && m.slot === slot && m.days.includes(day));
+    return fixedMealAt(day, slot) !== undefined;
   }
 
   // 0, 1, 2 ... up to people + 2, then back to the default (no override).
@@ -173,29 +182,32 @@ export default function Plan() {
         {loadError && <p className="text-[14px] text-[#D98C7A]">Could not load household: {loadError}</p>}
         {!household && !loadError && <p className="text-[14px] text-muted">Loading&hellip;</p>}
         {household && (
-          <div className="grid grid-cols-[28px_repeat(7,minmax(0,1fr))] gap-1.5">
+          <div className="grid grid-cols-[76px_repeat(7,minmax(0,1fr))] gap-1.5">
             <span />
-            {DAYS.map((d) => (
-              <span key={d} className="text-center text-[11px] text-muted" aria-hidden="true">
-                {DAY_LETTER[d]}
+            {DAYS.map((d, i) => (
+              <span key={d} className="flex flex-col items-center text-[11px] leading-tight text-muted" aria-hidden="true">
+                <span>{DAY_SHORT[d]}</span>
+                <span className="text-[12px] text-paper">{Number(addDaysIso(weekOf, i).slice(8))}</span>
               </span>
             ))}
             {SLOTS.map((slot) => (
               <Fragment key={slot}>
-                <span className="flex items-center text-[11px] text-muted" aria-hidden="true">
-                  {SLOT_LETTER[slot]}
+                <span className="flex items-center text-[12px] text-muted" aria-hidden="true">
+                  {SLOT_LABEL[slot]}
                 </span>
                 {DAYS.map((day) => {
                   const key = `${slot}-${day}`;
-                  const label = `${SLOT_LABEL[slot]} ${DAY_SHORT[day]}`;
-                  if (isFixed(day, slot)) {
+                  const fixed = fixedMealAt(day, slot);
+                  const dayName = `${DAY_LONG[day]} ${SLOT_LABEL[slot].toLowerCase()}`;
+                  if (fixed) {
                     return (
                       <span
                         key={key}
-                        aria-label={`${label}: fixed meal`}
-                        className="flex h-11 items-center justify-center rounded-md border border-edge text-[11px] text-muted lg:h-12"
+                        aria-label={`Fixed meal: ${fixed.name}`}
+                        title={`Fixed meal: ${fixed.name}`}
+                        className="flex h-11 items-center justify-center overflow-hidden rounded-md border border-edge text-[11px] text-muted lg:h-12"
                       >
-                        Fix
+                        Fixed
                       </span>
                     );
                   }
@@ -204,14 +216,13 @@ export default function Plan() {
                   const value = override ?? def;
                   const changed = override !== undefined && override !== def;
                   const cap = household.timeCaps[day]?.[slot];
+                  const eating = value === 0 ? 'out' : `${value} ${value === 1 ? 'person' : 'people'}`;
                   return (
                     <button
                       key={key}
                       type="button"
                       onClick={() => cycle(key)}
-                      aria-label={`${value === 0 ? `${label}: out` : `${label}: ${value} eating`}${
-                        cap ? `, ${cap} minute cap` : ''
-                      }`}
+                      aria-label={`${dayName}, ${eating}${cap ? `, ${cap} minute cap` : ''}`}
                       className={`flex h-11 flex-col items-center justify-center rounded-md border text-[15px] lg:h-12 ${
                         changed ? 'border-herb text-herbLight' : 'border-edge text-paper'
                       }`}
