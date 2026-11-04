@@ -1,6 +1,6 @@
 // Runs the real Worker app with an in-memory D1 stub and a stub mailer. No network.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import app from './index';
+import { app } from './index';
 import { sha256 } from './authCore';
 import { EmailMessage } from './testing/cloudflare-email';
 

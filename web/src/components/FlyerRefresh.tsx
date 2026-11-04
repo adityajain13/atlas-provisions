@@ -1,0 +1,113 @@
+import { useCallback, useEffect, useState } from 'react';
+import type { IngestRunSummary, IngestStatus } from '@provisions/shared';
+import { errorMessage, getFlyerStatus, refreshFlyers } from '../api';
+import { useSaveStatus } from './SaveStatus';
+import { secondaryBtn } from './ui';
+
+const ERROR_TEXT = 'text-[#D98C7A]';
+
+/** "5 min ago", "3 h ago", "2 days ago". */
+export function timeAgo(iso: string, now = Date.now()): string {
+  const mins = Math.round((now - Date.parse(iso)) / 60_000);
+  if (!Number.isFinite(mins) || mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? '1 day ago' : `${days} days ago`;
+}
+
+/** The Flyers row in Household's Stores section: last update, a refresh button, and the result of the last run. */
+export function FlyerRefresh() {
+  const { track } = useSaveStatus();
+  const [status, setStatus] = useState<IngestStatus | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<IngestRunSummary | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    getFlyerStatus()
+      .then((s) => {
+        setStatus(s);
+        setStatusError(null);
+      })
+      .catch((e: unknown) => setStatusError(errorMessage(e)));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function refresh() {
+    setRunning(true);
+    setRunError(null);
+    setResult(null);
+    try {
+      setResult(await track(refreshFlyers(), refreshFlyers));
+    } catch (e) {
+      setRunError(errorMessage(e));
+    } finally {
+      setRunning(false);
+      load();
+    }
+  }
+
+  const total = status?.currentItems.reduce((n, r) => n + r.count, 0) ?? 0;
+  const last = status?.lastRun ?? null;
+  let line = 'Loading…';
+  if (statusError) line = 'Could not load flyer status';
+  else if (status && !last) line = 'Never';
+  else if (last) {
+    const when = last.ok ? 'Last updated' : 'Last refresh had errors';
+    line = `${when} ${timeAgo(last.finishedAt)} · ${total} ${total === 1 ? 'price' : 'prices'}`;
+  }
+
+  const errors = result?.errors.slice(0, 3) ?? [];
+
+  return (
+    <div className="mt-6 border-t border-line2 pt-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <span className="block text-[15px] text-paper">Flyers</span>
+          <span className="block text-[12px] text-muted">{line}</span>
+        </div>
+        <button type="button" onClick={refresh} disabled={running} className={`${secondaryBtn} shrink-0 disabled:opacity-40`}>
+          {running ? 'Refreshing… up to a minute' : 'Refresh flyers'}
+        </button>
+      </div>
+
+      {result && (
+        <div className="mt-4 space-y-3">
+          <p className="text-[13px] text-paper">
+            Found {result.items} items from Flipp, {result.matched} matched to ingredients.
+          </p>
+          {errors.length > 0 && (
+            <div className="rounded-lg border border-edge px-4 py-3">
+              <p className="text-[14px] text-paper">Some searches failed</p>
+              <ul className={`mt-2 space-y-1.5 text-[13px] ${ERROR_TEXT}`}>
+                {errors.map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.unmatchedSample.length > 0 && (
+            <details className="text-[13px] text-muted">
+              <summary className="cursor-pointer py-1 text-muted hover:text-paper">
+                Unmatched ({result.unmatchedSample.length} shown)
+              </summary>
+              <ul className="mt-2 space-y-1">
+                {result.unmatchedSample.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+
+      {runError && <p className={`mt-3 text-[13px] ${ERROR_TEXT}`}>Could not refresh flyers: {runError}</p>}
+    </div>
+  );
+}

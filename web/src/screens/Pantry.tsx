@@ -12,6 +12,7 @@ import {
 } from '@provisions/shared';
 import { addPantryItem, errorMessage, getPantry, removePantryItem, updatePantryItem } from '../api';
 import { Header } from '../components/Header';
+import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { Page } from '../components/Page';
 import { IngredientPicker } from '../components/IngredientPicker';
 import { ReceiptFlow } from '../components/ReceiptFlow';
@@ -35,6 +36,9 @@ export default function Pantry() {
   const [items, setItems] = useState<PantryItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const { track } = useSaveStatus();
+  useSaveScope('sync', items !== null);
+
   const reload = useCallback(() => {
     getPantry()
       .then(setItems)
@@ -52,7 +56,7 @@ export default function Pantry() {
   async function changeQty(item: PantryItem, qty: number) {
     setError(null);
     try {
-      const updated = await updatePantryItem(item.id, { qty });
+      const updated = await track(updatePantryItem(item.id, { qty }), () => updatePantryItem(item.id, { qty }));
       setItems((prev) => prev && prev.map((i) => (i.id === updated.id ? updated : i)));
     } catch (e) {
       setError(errorMessage(e));
@@ -62,7 +66,7 @@ export default function Pantry() {
   async function remove(item: PantryItem) {
     setError(null);
     try {
-      await removePantryItem(item.id);
+      await track(removePantryItem(item.id), () => removePantryItem(item.id));
       setItems((prev) => prev && prev.filter((i) => i.id !== item.id));
     } catch (e) {
       setError(errorMessage(e));
@@ -124,7 +128,7 @@ export default function Pantry() {
     <Page>
       <div className="lg:flex lg:items-start lg:justify-between lg:gap-10">
         <div className="min-w-0 lg:flex-1">
-          <Header title="Pantry" subtitle={subtitle} />
+          <Header title="Pantry" subtitle={subtitle} status={<SaveStatus />} />
         </div>
         <div className="mt-6 lg:mt-0 lg:w-[380px] lg:shrink-0">
           <ReceiptFlow onSaved={reload} />
@@ -171,6 +175,7 @@ export default function Pantry() {
 }
 
 function AddForm({ onAdded }: { onAdded: (item: PantryItem) => void }) {
+  const { track } = useSaveStatus();
   const [picked, setPicked] = useState<CatalogIngredient | null>(null);
   const [qty, setQty] = useState('1');
   const [saving, setSaving] = useState(false);
@@ -184,7 +189,8 @@ function AddForm({ onAdded }: { onAdded: (item: PantryItem) => void }) {
     setSaving(true);
     setAddError(null);
     try {
-      const item = await addPantryItem({ ingredientId: picked.id, qty: amount });
+      const input = { ingredientId: picked.id, qty: amount };
+      const item = await track(addPantryItem(input), () => addPantryItem(input));
       onAdded(item);
       setPicked(null);
       setQty('1');
@@ -218,7 +224,7 @@ function AddForm({ onAdded }: { onAdded: (item: PantryItem) => void }) {
             />
             <span className="w-12 text-[14px] text-muted">{unitLabel(picked.baseUnit)}</span>
             <button type="button" disabled={!valid || saving} onClick={add} className={addBtn}>
-              {saving ? 'Adding…' : 'Add'}
+              Add
             </button>
           </div>
         </div>

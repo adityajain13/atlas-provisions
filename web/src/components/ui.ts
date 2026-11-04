@@ -8,6 +8,9 @@ export const chipBase = 'inline-flex h-11 items-center rounded-full border text-
 export const ctaBtn =
   'h-[52px] w-full rounded-lg bg-herb text-[16px] font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40';
 
+export const primaryBtn =
+  'inline-flex h-11 items-center justify-center rounded-lg bg-herb px-5 text-[14px] font-medium text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herbLight';
+
 export const addBtn = 'h-11 shrink-0 rounded-lg bg-herb px-4 text-[14px] font-medium text-ink';
 
 export const secondaryBtn =

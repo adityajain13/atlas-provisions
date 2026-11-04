@@ -1,5 +1,7 @@
 import {
   HouseholdSchema,
+  type IngestRunSummary,
+  type IngestStatus,
   PantryItemSchema,
   RatingSchema,
   type Household,
@@ -197,4 +199,16 @@ export async function commitReceipt(input: ReceiptCommit): Promise<ReceiptCommit
     }),
     (raw) => raw as ReceiptCommitResult,
   );
+}
+
+// ---- Flyer import (milestone 4) ----
+
+/** The latest flyer run and the prices valid today, per store. */
+export async function getFlyerStatus(): Promise<IngestStatus> {
+  return json(await authFetch(`${BASE}/flyers/status`), (raw) => raw as IngestStatus);
+}
+
+/** Searches Flipp now. Takes up to a minute. */
+export async function refreshFlyers(): Promise<IngestRunSummary> {
+  return json(await authFetch(`${BASE}/flyers/refresh`, { method: 'POST' }), (raw) => raw as IngestRunSummary);
 }

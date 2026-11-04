@@ -1,7 +1,7 @@
 // POST /plan against the real Worker app, with an in-memory D1 stub and a stubbed fetch. No network.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, type Household, type PlanRequest } from '@provisions/shared';
-import app from './index';
+import { app } from './index';
 
 const H = '/provisions/api';
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';

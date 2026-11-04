@@ -8,7 +8,7 @@ import {
   type PlannedMeal,
   type RatingKind,
 } from '@provisions/shared';
-import type { MockMeal, MockTag } from '../mocks/week';
+import type { ViewMeal, ViewTag } from '../lib/planView';
 import { SLOT_LABEL } from '../lib/labels';
 
 export const RATING_OPTIONS: { value: RatingKind; label: string }[] = [
@@ -17,7 +17,7 @@ export const RATING_OPTIONS: { value: RatingKind; label: string }[] = [
   { value: 'never', label: 'Never' },
 ];
 
-export const TAG_TONE: Record<MockTag['kind'], string> = {
+export const TAG_TONE: Record<ViewTag['kind'], string> = {
   craving: 'border-herb text-herbLight',
   deal: 'border-[#3A3631] text-[#C9C3B8]',
   leftover: 'border-edge text-muted',
@@ -25,7 +25,7 @@ export const TAG_TONE: Record<MockTag['kind'], string> = {
 
 type Props = {
   day: Day;
-  meal: MockMeal;
+  meal: ViewMeal;
   // The saved plan's meal, for its ingredients and steps. Absent for sample data and fixed meals.
   planned: PlannedMeal | undefined;
   rating: RatingKind | null;
