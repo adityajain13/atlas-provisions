@@ -220,6 +220,7 @@ export function buildList(
       packPrice: 0,
       total: 0,
       usedIn: [...(usedIn.get(id) ?? [])],
+      needed: Number((qty.get(id) ?? 0).toFixed(3)),
     });
   }
 

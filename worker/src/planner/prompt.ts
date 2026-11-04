@@ -25,6 +25,7 @@ export const SYSTEM_PROMPT = [
   'Use only methods possible with `equipment`.',
   'Respect `varietyRules` that are true. Avoid `avoid` meals; you may reuse `favourites`.',
   'Quantities are in each ingredient\'s `unit`, as the total for that meal. Do not estimate prices; code computes cost.',
+  'For `each` ingredients, qty counts packages or pieces as sold (see eachMeans), never slices or servings: two people having toast all week is 1 loaf, not 7.',
   'If `feedback` is present, the previous plan broke these checks. Fix every error listed there and keep what already worked.',
   'Batch prep: when `prepDay` is set, also return `prep` for that day: cook ahead what keeps (grains, proteins, sauces), wash and chop, marinate, with active minutes and how to store each step.',
   'Only prep what keeps until it is eaten: respect each ingredient\'s `shelfLifeDays`. Link each prep step to the meal ids it serves in `forMeals`. Keep prep under 90 minutes total when possible.',
@@ -109,6 +110,15 @@ export interface AvailableItem {
   allergens: string[];
   vegetarian: boolean;
   shelfLifeDays: number;
+  eachMeans?: string; // for `each` items: what one unit of qty is, as sold
+}
+
+/** What one `each` unit means for this ingredient, from its catalogue weight. */
+export function eachMeansFor(ing: { baseUnit: string; eachWeightKg?: number; eachLabel?: string }): string | undefined {
+  if (ing.baseUnit !== 'each') return undefined;
+  if (ing.eachWeightKg === undefined) return '1 = one item as sold (a loaf, a bunch, a dozen eggs carton, one pepper)';
+  const grams = Math.round(ing.eachWeightKg * 1000);
+  return `1 = ${ing.eachLabel ?? 'one item'} as sold (~${grams} g)`;
 }
 
 /**
@@ -119,58 +129,47 @@ export interface AvailableItem {
  */
 export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryItem[] = []): AvailableItem[] {
   const byId = new Map<string, AvailableItem>();
-  for (const d of deals) {
-    const ing = INGREDIENT_BY_ID[d.ingredientId];
-    if (!ing) continue;
-    const source = d.staple ? 'staple' : 'deal';
-    const prev = byId.get(d.ingredientId);
-    if (prev && prev.score >= d.score) continue;
-    byId.set(d.ingredientId, {
+  const entry = (
+    ingredientId: string,
+    packQty: number,
+    score: number,
+    source: AvailableItem['source'],
+  ): AvailableItem | null => {
+    const ing = INGREDIENT_BY_ID[ingredientId];
+    if (!ing) return null;
+    const eachMeans = eachMeansFor(ing);
+    return {
       id: ing.id,
       name: ing.name,
       unit: ing.baseUnit,
-      packQty: d.packQty,
-      score: Number(d.score.toFixed(3)),
+      packQty,
+      score,
       source,
       allergens: ing.allergens,
       vegetarian: ing.vegetarian,
       shelfLifeDays: ing.shelfLifeDays,
-    });
+      ...(eachMeans ? { eachMeans } : {}),
+    };
+  };
+  for (const d of deals) {
+    const source = d.staple ? 'staple' : 'deal';
+    const prev = byId.get(d.ingredientId);
+    if (prev && prev.score >= d.score) continue;
+    const item = entry(d.ingredientId, d.packQty, Number(d.score.toFixed(3)), source);
+    if (item) byId.set(d.ingredientId, item);
   }
   const stock = new Map<string, number>();
   for (const item of pantry) stock.set(item.ingredientId, (stock.get(item.ingredientId) ?? 0) + item.qty);
   for (const [ingredientId, qty] of stock) {
-    const ing = INGREDIENT_BY_ID[ingredientId];
-    if (!ing) continue;
     const prev = byId.get(ingredientId);
     if (prev && prev.score >= 1) continue;
-    byId.set(ingredientId, {
-      id: ing.id,
-      name: ing.name,
-      unit: ing.baseUnit,
-      packQty: Number(qty.toFixed(3)),
-      score: 1,
-      source: 'pantry',
-      allergens: ing.allergens,
-      vegetarian: ing.vegetarian,
-      shelfLifeDays: ing.shelfLifeDays,
-    });
+    const item = entry(ingredientId, Number(qty.toFixed(3)), 1, 'pantry');
+    if (item) byId.set(ingredientId, item);
   }
   for (const l of fixed.leftovers) {
     if (byId.has(l.ingredientId)) continue;
-    const ing = INGREDIENT_BY_ID[l.ingredientId];
-    if (!ing) continue;
-    byId.set(l.ingredientId, {
-      id: ing.id,
-      name: ing.name,
-      unit: ing.baseUnit,
-      packQty: Number(l.qty.toFixed(3)),
-      score: 0,
-      source: 'fixed-leftover',
-      allergens: ing.allergens,
-      vegetarian: ing.vegetarian,
-      shelfLifeDays: ing.shelfLifeDays,
-    });
+    const item = entry(l.ingredientId, Number(l.qty.toFixed(3)), 0, 'fixed-leftover');
+    if (item) byId.set(l.ingredientId, item);
   }
   return [...byId.values()];
 }

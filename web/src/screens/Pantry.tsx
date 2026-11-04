@@ -76,7 +76,12 @@ export default function Pantry() {
     const lower = round2(item.qty - step);
     const expired = item.expiresOn < today;
     return (
-      <li key={`${highlight ? 'soon' : 'all'}-${item.id}`} className="flex items-center gap-2 border-b border-line2 py-2.5">
+      <li
+        key={`${highlight ? 'soon' : 'all'}-${item.id}`}
+        className={`flex items-center gap-2 border-b border-line2 py-2.5${
+          highlight ? ' lg:rounded-lg lg:border lg:border-line2 lg:bg-field lg:px-3' : ''
+        }`}
+      >
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] text-paper">{name}</p>
           <p className="text-[13px] text-muted">
@@ -117,41 +122,50 @@ export default function Pantry() {
 
   return (
     <Page>
-      <Header title="Pantry" subtitle={subtitle} />
-
-      <div className="mt-6">
-        <ReceiptFlow onSaved={reload} />
+      <div className="lg:flex lg:items-start lg:justify-between lg:gap-10">
+        <div className="min-w-0 lg:flex-1">
+          <Header title="Pantry" subtitle={subtitle} />
+        </div>
+        <div className="mt-6 lg:mt-0 lg:w-[380px] lg:shrink-0">
+          <ReceiptFlow onSaved={reload} />
+        </div>
       </div>
 
       {error && <p className={`mt-4 text-[13px] ${ERROR_TEXT}`}>Could not update the pantry: {error}</p>}
       {items === null && !error && <p className="mt-10 text-[14px] text-muted">Loading&hellip;</p>}
 
-      {items && soon.length > 0 && (
-        <Section title="Expiring soon" caption="Within three days, or already past its date.">
-          <ul>{soon.map((i) => row(i, true))}</ul>
-        </Section>
-      )}
-
-      {items &&
-        CATEGORY_ORDER.map((cat) => {
-          const rows = sorted.filter((i) => categoryOf(i) === cat);
-          if (rows.length === 0) return null;
-          return (
-            <Section key={cat} title={categoryLabel(cat)}>
-              <ul>{rows.map((i) => row(i, false))}</ul>
+      <div className="lg:mt-10 lg:flex lg:flex-col lg:gap-12 xl:grid xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start xl:gap-12">
+        <div className="min-w-0 lg:flex lg:flex-col lg:gap-12">
+          {items && soon.length > 0 && (
+            <Section title="Expiring soon" caption="Within three days, or already past its date.">
+              <ul className="lg:grid lg:grid-cols-2 lg:gap-3">{soon.map((i) => row(i, true))}</ul>
             </Section>
-          );
-        })}
+          )}
 
-      {items && items.length === 0 && (
-        <p className="mt-10 text-[14px] text-muted">Nothing in the pantry yet. Add what you have below.</p>
-      )}
+          {items &&
+            CATEGORY_ORDER.map((cat) => {
+              const rows = sorted.filter((i) => categoryOf(i) === cat);
+              if (rows.length === 0) return null;
+              return (
+                <Section key={cat} title={categoryLabel(cat)}>
+                  <ul className="lg:grid lg:grid-cols-2 lg:gap-x-8">{rows.map((i) => row(i, false))}</ul>
+                </Section>
+              );
+            })}
 
-      {items && (
-        <AddForm
-          onAdded={(item) => setItems((prev) => [...(prev ?? []), item])}
-        />
-      )}
+          {items && items.length === 0 && (
+            <p className="mt-10 text-[14px] text-muted lg:mt-0">Nothing in the pantry yet. Add what you have below.</p>
+          )}
+        </div>
+
+        {items && (
+          <div className="min-w-0 xl:sticky xl:top-10">
+            <AddForm
+              onAdded={(item) => setItems((prev) => [...(prev ?? []), item])}
+            />
+          </div>
+        )}
+      </div>
     </Page>
   );
 }

@@ -78,6 +78,9 @@ function ListBody({ view, plan, error }: { view: View; plan: boolean; error: str
   }, [checked, storageKey]);
 
   const items = view.items;
+  // Only real stores get a column. Items no store sells are listed separately, without a price.
+  const stores = view.stores.filter((s) => s !== 'Unpriced');
+  const unpriced = items.filter((i) => i.store === 'Unpriced');
   const total = items.reduce((sum, i) => sum + i.price, 0);
 
   function toggle(id: string) {
@@ -94,7 +97,7 @@ function ListBody({ view, plan, error }: { view: View; plan: boolean; error: str
       <Header
         subtitle={
           <>
-            {`${view.stores.length} stores · ${items.length} items · $${total.toFixed(2)}`}
+            {`${stores.length} stores · ${items.length} items · $${total.toFixed(2)}`}
             {!plan && <SamplePill />}
           </>
         }
@@ -104,11 +107,12 @@ function ListBody({ view, plan, error }: { view: View; plan: boolean; error: str
       {error && <p className="mt-6 text-[13px] text-muted">Could not load this week's plan: {error}</p>}
       {plan && items.length === 0 && <p className="mt-10 text-[14px] text-muted">Nothing to buy.</p>}
 
-      {view.stores.map((store) => {
+      <div className="lg:mt-12 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8 lg:gap-y-12 xl:grid-cols-3">
+      {stores.map((store) => {
         const storeItems = items.filter((i) => i.store === store);
         const subtotal = storeItems.reduce((sum, i) => sum + i.price, 0);
         return (
-          <section key={store} className="mt-10 border-t border-line pt-4">
+          <section key={store} className="mt-10 border-t border-line pt-4 lg:mt-0">
             <div className="flex items-baseline justify-between gap-4">
               <h2 className="font-display text-[24px] font-normal text-paper">{store}</h2>
               <span className="text-[14px] text-muted">${subtotal.toFixed(2)}</span>
@@ -121,45 +125,9 @@ function ListBody({ view, plan, error }: { view: View; plan: boolean; error: str
                 <div key={category} className="mt-6">
                   <p className={eyebrow}>{category}</p>
                   <ul className="mt-2">
-                    {rows.map((item) => {
-                      const done = checked.has(item.id);
-                      return (
-                        <li key={item.id}>
-                          <label className="flex min-h-[56px] items-center gap-3 border-b border-line2 py-2">
-                            <input
-                              type="checkbox"
-                              className="h-5 w-5 shrink-0"
-                              checked={done}
-                              onChange={() => toggle(item.id)}
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span
-                                className={`block text-[15px] ${
-                                  done ? 'text-faint line-through' : 'text-paper'
-                                }`}
-                              >
-                                {item.name}
-                                {item.qty && <span className="ml-2 text-[13px] text-muted">{item.qty}</span>}
-                              </span>
-                              {item.note && (
-                                <span
-                                  className={`block text-[12px] ${
-                                    item.note.kind === 'match' ? 'text-herbLight' : 'text-muted'
-                                  }`}
-                                >
-                                  {item.note.text}
-                                </span>
-                              )}
-                            </span>
-                            <span
-                              className={`shrink-0 text-[14px] ${done ? 'text-faint' : 'text-paper'}`}
-                            >
-                              ${item.price.toFixed(2)}
-                            </span>
-                          </label>
-                        </li>
-                      );
-                    })}
+                    {rows.map((item) => (
+                      <ListRow key={item.id} item={item} done={checked.has(item.id)} onToggle={() => toggle(item.id)} showPrice />
+                    ))}
                   </ul>
                 </div>
               );
@@ -167,6 +135,53 @@ function ListBody({ view, plan, error }: { view: View; plan: boolean; error: str
           </section>
         );
       })}
+      </div>
+
+      {unpriced.length > 0 && (
+        <section className="mt-12 border-t border-line pt-4">
+          <h2 className="font-display text-[20px] font-normal text-paper">Not in this week&apos;s flyers</h2>
+          <p className="mt-1 text-[13px] text-muted">{"Buy anywhere; prices weren't in this week's flyers."}</p>
+          <ul className="mt-4">
+            {unpriced.map((item) => (
+              <ListRow key={item.id} item={item} done={checked.has(item.id)} onToggle={() => toggle(item.id)} showPrice={false} />
+            ))}
+          </ul>
+        </section>
+      )}
     </Page>
+  );
+}
+
+function ListRow({
+  item,
+  done,
+  onToggle,
+  showPrice,
+}: {
+  item: MockItem;
+  done: boolean;
+  onToggle: () => void;
+  showPrice: boolean;
+}) {
+  return (
+    <li>
+      <label className="flex min-h-[56px] items-center gap-3 border-b border-line2 py-2">
+        <input type="checkbox" className="h-5 w-5 shrink-0" checked={done} onChange={onToggle} />
+        <span className="min-w-0 flex-1">
+          <span className={`block text-[15px] ${done ? 'text-faint line-through' : 'text-paper'}`}>
+            {item.name}
+            {item.qty && <span className="ml-2 text-[13px] text-muted">{item.qty}</span>}
+          </span>
+          {item.note && (
+            <span className={`block text-[12px] ${item.note.kind === 'match' ? 'text-herbLight' : 'text-muted'}`}>
+              {item.note.text}
+            </span>
+          )}
+        </span>
+        {showPrice && (
+          <span className={`shrink-0 text-[14px] ${done ? 'text-faint' : 'text-paper'}`}>${item.price.toFixed(2)}</span>
+        )}
+      </label>
+    </li>
   );
 }

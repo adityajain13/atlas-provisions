@@ -471,7 +471,7 @@ describe('buildList: store choice', () => {
 
   it('marks an ingredient with no enabled store as Unpriced', () => {
     const list = buildList(oneMeal([{ id: 'broccoli', qty: 1 }]), NO_FIXED, [], [], ['A'], 1);
-    expect(list[0]).toMatchObject({ store: 'Unpriced', total: 0 });
+    expect(list[0]).toMatchObject({ store: 'Unpriced', total: 0, needed: 1 });
   });
 
   it('sorts by store subtotal, then category order, then name', () => {

@@ -115,7 +115,9 @@ export default function Plan() {
     <Page>
       <Header title="Plan this week" />
 
-      <Section title="Budget">
+      {/* Phone: one column in this order. Desktop: budget, cravings and options on the left, who's eating on the right. */}
+      <div className="lg:mt-12 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] lg:items-start lg:gap-x-12 lg:gap-y-12">
+      <Section title="Budget" className="lg:col-start-1 lg:row-start-1">
         <label className="block">
           <div className="flex items-baseline gap-1 border-b border-line pb-2">
             <span className="font-display text-[32px] text-muted">$</span>
@@ -132,7 +134,7 @@ export default function Plan() {
         </label>
       </Section>
 
-      <Section title="Cravings">
+      <Section title="Cravings" className="lg:col-start-1 lg:row-start-2">
         <div className="flex flex-wrap gap-2">
           {cravings.map((c) => (
             <span key={c} className={`${chipBase} gap-1 border-herb pl-4 pr-1 text-herbLight`}>
@@ -166,6 +168,7 @@ export default function Plan() {
       <Section
         title="Who's eating"
         caption="Outlined in green: changed from your default this week."
+        className="lg:col-start-2 lg:row-span-3 lg:row-start-1"
       >
         {loadError && <p className="text-[14px] text-[#D98C7A]">Could not load household: {loadError}</p>}
         {!household && !loadError && <p className="text-[14px] text-muted">Loading&hellip;</p>}
@@ -190,7 +193,7 @@ export default function Plan() {
                       <span
                         key={key}
                         aria-label={`${label}: fixed meal`}
-                        className="flex h-11 items-center justify-center rounded-md border border-edge text-[11px] text-muted"
+                        className="flex h-11 items-center justify-center rounded-md border border-edge text-[11px] text-muted lg:h-12"
                       >
                         Fix
                       </span>
@@ -209,7 +212,7 @@ export default function Plan() {
                       aria-label={`${value === 0 ? `${label}: out` : `${label}: ${value} eating`}${
                         cap ? `, ${cap} minute cap` : ''
                       }`}
-                      className={`flex h-11 flex-col items-center justify-center rounded-md border text-[15px] ${
+                      className={`flex h-11 flex-col items-center justify-center rounded-md border text-[15px] lg:h-12 ${
                         changed ? 'border-herb text-herbLight' : 'border-edge text-paper'
                       }`}
                     >
@@ -224,7 +227,7 @@ export default function Plan() {
         )}
       </Section>
 
-      <Section title="Options">
+      <Section title="Options" className="lg:col-start-1 lg:row-start-3">
         <label className="flex min-h-[48px] cursor-pointer items-center justify-between border-b border-line2">
           <span className="text-[15px] text-paper">Use it up</span>
           <input
@@ -243,12 +246,14 @@ export default function Plan() {
         </Link>
       </Section>
 
-      <div className="mt-10">
+      </div>
+
+      <div className="mt-10 lg:mt-12 lg:flex lg:flex-col lg:items-end">
         <button
           type="button"
           disabled={generating || household === null}
           onClick={generate}
-          className={ctaBtn}
+          className={`${ctaBtn} lg:w-auto lg:min-w-[240px]`}
         >
           {generating ? 'Planning… this takes up to a minute' : 'Generate plan'}
         </button>

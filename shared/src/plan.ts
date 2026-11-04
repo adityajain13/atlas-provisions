@@ -97,6 +97,7 @@ export interface ListItem {
   total: number;
   usedIn: string[]; // planned meal ids and fixed placement ids
   priceMatch?: { fromStore: string; pricePerUnit: number };
+  needed?: number; // unpriced items only: base units the plan needs, since packs are 0
 }
 
 export interface ValidationIssue {

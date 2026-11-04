@@ -67,8 +67,8 @@ export default function Login() {
   }
 
   return (
-    <Page>
-      <Header title="Sign in" />
+    <Page centered>
+      <Header title="Sign in" desktopBrand />
 
       <div className="mt-10 space-y-4">
         {step === 'email' ? (

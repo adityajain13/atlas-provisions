@@ -31,7 +31,8 @@ export interface Ingredient {
   name: string; // 'Boneless chicken thighs'
   category: Category;
   baseUnit: BaseUnit; // unit prices are normalized to $/kg, $/l or $/each
-  eachWeightKg?: number; // for 'each' items, approximate weight of one (for nutrition)
+  eachWeightKg?: number; // for 'each' items, approximate weight of one as sold (for nutrition)
+  eachLabel?: string; // for 'each' items, what one counts as, e.g. 'one loaf'
   nutritionPer100g: { kcal: number; protein: number; carbs: number; fat: number; fibre: number };
   allergens: string[]; // subset of ALLERGEN_PRESETS from shared index
   shelfLifeDays: number;
@@ -56,6 +57,7 @@ interface Extra {
   allergens?: string[];
   protein?: Ingredient['protein'];
   eachWeightKg?: number;
+  eachLabel?: string;
 }
 
 function ing(
@@ -82,6 +84,7 @@ function ing(
     aliases,
   };
   if (extra.eachWeightKg !== undefined) out.eachWeightKg = extra.eachWeightKg;
+  if (extra.eachLabel !== undefined) out.eachLabel = extra.eachLabel;
   if (extra.protein !== undefined) out.protein = extra.protein;
   return out;
 }
@@ -158,7 +161,7 @@ const seafood: Ingredient[] = [
 const proteinsOther: Ingredient[] = [
   ing('eggs-large', 'Large eggs', 'dairy', 'each', [143, 12.6, 0.7, 9.5, 0], 35, true,
     ['eggs', 'large eggs', 'egg', 'dozen eggs', 'eggs large', 'grade a eggs'],
-    { allergens: ['egg'], protein: 'egg', eachWeightKg: 0.05 }),
+    { allergens: ['egg'], protein: 'egg', eachWeightKg: 0.7, eachLabel: 'one dozen carton' }),
   ing('tofu-firm', 'Firm tofu', 'pantry', 'kg', [144, 15.8, 2.8, 8.7, 2.3], 14, true,
     ['firm tofu', 'tofu', 'extra firm tofu', 'extra-firm tofu', 'tofu firm', 'organic tofu'],
     { allergens: ['soy'], protein: 'tofu' }),
@@ -251,12 +254,12 @@ const dairy: Ingredient[] = [
 ];
 
 const bakery: Ingredient[] = [
-  ing('white-bread', 'White bread', 'bakery', 'each', [265, 9.0, 49.0, 3.2, 2.4], 7, true, ['white bread', 'sandwich bread', 'bread loaf', 'bread', 'loaf of bread'], { allergens: ['gluten'], eachWeightKg: 0.675 }),
-  ing('whole-wheat-bread', 'Whole wheat bread', 'bakery', 'each', [247, 13.0, 41.0, 3.4, 6.9], 7, true, ['whole wheat bread', 'whole grain bread', 'wholewheat bread', 'multigrain bread'], { allergens: ['gluten'], eachWeightKg: 0.675 }),
-  ing('flour-tortillas', 'Flour tortillas', 'bakery', 'each', [312, 8.2, 52.0, 7.7, 2.4], 14, true, ['flour tortillas', 'flour tortilla', 'tortillas', 'soft tortillas', 'wraps', 'large tortillas'], { allergens: ['gluten'], eachWeightKg: 0.045 }),
-  ing('corn-tortillas', 'Corn tortillas', 'bakery', 'each', [218, 5.7, 44.6, 2.9, 6.3], 14, true, ['corn tortillas', 'corn tortilla', 'soft corn tortillas'], { eachWeightKg: 0.03 }),
+  ing('white-bread', 'White bread', 'bakery', 'each', [265, 9.0, 49.0, 3.2, 2.4], 7, true, ['white bread', 'sandwich bread', 'bread loaf', 'bread', 'loaf of bread'], { allergens: ['gluten'], eachWeightKg: 0.675, eachLabel: 'one loaf' }),
+  ing('whole-wheat-bread', 'Whole wheat bread', 'bakery', 'each', [247, 13.0, 41.0, 3.4, 6.9], 7, true, ['whole wheat bread', 'whole grain bread', 'wholewheat bread', 'multigrain bread'], { allergens: ['gluten'], eachWeightKg: 0.675, eachLabel: 'one loaf' }),
+  ing('flour-tortillas', 'Flour tortillas', 'bakery', 'each', [312, 8.2, 52.0, 7.7, 2.4], 14, true, ['flour tortillas', 'flour tortilla', 'tortillas', 'soft tortillas', 'wraps', 'large tortillas'], { allergens: ['gluten'], eachWeightKg: 0.6, eachLabel: 'one pack of tortillas' }),
+  ing('corn-tortillas', 'Corn tortillas', 'bakery', 'each', [218, 5.7, 44.6, 2.9, 6.3], 14, true, ['corn tortillas', 'corn tortilla', 'soft corn tortillas'], { eachWeightKg: 0.3, eachLabel: 'one pack of tortillas' }),
   ing('naan', 'Naan', 'bakery', 'each', [262, 8.7, 45.2, 5.1, 2.2], 7, true, ['naan', 'naan bread', 'garlic naan', 'plain naan'], { allergens: ['gluten', 'dairy'], eachWeightKg: 0.1 }),
-  ing('pita', 'Pita bread', 'bakery', 'each', [275, 9.1, 55.7, 1.2, 2.2], 7, true, ['pita', 'pita bread', 'pitas', 'whole wheat pita', 'pocket pita'], { allergens: ['gluten'], eachWeightKg: 0.06 }),
+  ing('pita', 'Pita bread', 'bakery', 'each', [275, 9.1, 55.7, 1.2, 2.2], 7, true, ['pita', 'pita bread', 'pitas', 'whole wheat pita', 'pocket pita'], { allergens: ['gluten'], eachWeightKg: 0.36, eachLabel: 'one pack of pita' }),
   ing('bagels', 'Bagels', 'bakery', 'each', [257, 10.0, 50.0, 1.5, 2.0], 5, true, ['bagels', 'bagel', 'plain bagels', 'everything bagels'], { allergens: ['gluten'], eachWeightKg: 0.1 }),
 ];
 

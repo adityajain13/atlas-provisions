@@ -47,6 +47,21 @@ describe('ingredient catalogue', () => {
     }
   });
 
+  it('gives each items a sane weight as sold: one loaf, one dozen eggs, one pack', () => {
+    const kg = (id: string) => INGREDIENT_BY_ID[id]?.eachWeightKg;
+    expect(kg('white-bread')).toBeGreaterThanOrEqual(0.5);
+    expect(kg('white-bread')).toBeLessThanOrEqual(0.8);
+    expect(kg('whole-wheat-bread')).toBeGreaterThanOrEqual(0.5);
+    expect(kg('whole-wheat-bread')).toBeLessThanOrEqual(0.8);
+    expect(kg('eggs-large')).toBeGreaterThanOrEqual(0.6);
+    expect(kg('eggs-large')).toBeLessThanOrEqual(0.8);
+    expect(kg('flour-tortillas')).toBeGreaterThanOrEqual(0.3);
+    expect(kg('flour-tortillas')).toBeLessThanOrEqual(1);
+    expect(kg('pita')).toBeGreaterThanOrEqual(0.2);
+    expect(kg('pita')).toBeLessThanOrEqual(0.6);
+    expect(INGREDIENT_BY_ID['eggs-large']?.eachLabel).toBe('one dozen carton');
+  });
+
   it('indexes every ingredient by id', () => {
     expect(Object.keys(INGREDIENT_BY_ID)).toHaveLength(INGREDIENTS.length);
     expect(INGREDIENT_BY_ID['chicken-thigh-boneless']?.name).toBe('Boneless chicken thighs');
