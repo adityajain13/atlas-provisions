@@ -5,8 +5,8 @@ import { attachPrep, buildPrepPayload, generatePrep, prepSystemPrompt, type Prep
 
 function plan(over: Partial<MealPlan> = {}): MealPlan {
   return {
-    weekOf: '2026-11-12',
-    request: { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [], useItUp: false },
+    weekOf: '2026-11-15',
+    request: { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false },
     meals: [
       {
         id: 'thu-dinner',

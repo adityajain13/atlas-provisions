@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   SLOTS,
-  flyerWeekOf,
+  planWeekOf,
   torontoDate,
   type Day,
   type MealPlan,
@@ -51,7 +51,7 @@ function plannedFor(plan: MealPlan | null, day: Day, meal: MockMeal): PlannedMea
 }
 
 export default function Week() {
-  // Null until the reader picks a day: then the default (today, or Thursday) applies.
+  // Null until the reader picks a day: then the default (today, or Sunday) applies.
   const [picked, setPicked] = useState<Day | null>(null);
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [source, setSource] = useState<Source>({ status: 'loading' });
@@ -66,7 +66,7 @@ export default function Week() {
 
   useEffect(() => {
     let alive = true;
-    const weekOf = flyerWeekOf(new Date());
+    const weekOf = planWeekOf(new Date());
     Promise.all([getPlan(weekOf), getHousehold().catch(() => null), getRatings().catch(() => [] as Rating[])])
       .then(([plan, household, saved]) => {
         if (!alive) return;
@@ -160,7 +160,7 @@ export default function Week() {
           size="lg"
           subtitle={
             <>
-              Flyer week · {week.label}
+              Week of {week.label}
               {!plan && <SamplePill />}
             </>
           }
@@ -234,7 +234,7 @@ export default function Week() {
                 </span>
               </div>
               <h3
-                className={`mt-2 font-display font-normal text-paper ${
+                className={`mt-2 font-display font-medium text-paper ${
                   m.slot === 'dinner' ? 'text-[24px] leading-[1.2]' : 'text-[20px] leading-[1.25]'
                 }`}
               >
@@ -288,10 +288,10 @@ export default function Week() {
         <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between xl:gap-10">
           <div className="min-w-0">
             <p className="text-[13px] text-muted">
-              Flyer week · {week.label}
+              Week of {week.label}
               {!plan && <SamplePill />}
             </p>
-            <h1 className="mt-2 font-display text-5xl font-normal leading-[1.08] text-paper">
+            <h1 className="mt-2 font-display text-[44px] font-semibold leading-[1.05] tracking-[-0.02em] text-paper">
               {day.dayLabel},
               <br />
               {day.headline}
@@ -347,7 +347,7 @@ export default function Week() {
                     }`}
                   >
                     <span className="uppercase tracking-[0.1em]">{DAY_SHORT[d.key]}</span>
-                    <span className="font-display text-[20px] leading-none">{d.dateNum}</span>
+                    <span className="text-[20px] font-semibold leading-none tabular-nums">{d.dateNum}</span>
                   </button>
                 );
               })}
@@ -414,7 +414,7 @@ function BudgetBlock({ week, pct, className = '' }: { week: MockWeek; pct: numbe
     <div className={`border-y border-line py-4 ${className}`}>
       <div className="flex items-end justify-between gap-3">
         <div>
-          <span className="font-display text-[26px] text-paper">${week.spent.toFixed(2)}</span>
+          <span className="text-[26px] font-semibold tabular-nums text-paper">${week.spent.toFixed(2)}</span>
           <span className="ml-1.5 text-[14px] text-muted">of ${week.budget}</span>
         </div>
         <span className="text-right text-[13px] text-muted">{week.stores.join(' · ')}</span>
@@ -439,7 +439,7 @@ function MealCell({ meal, onOpen }: { meal: MockMeal; onOpen: () => void }) {
       }`}
     >
       <span
-        className={`line-clamp-3 break-words font-display text-[15px] leading-[1.25] ${meal.fixed ? 'text-muted' : 'text-paper'}`}
+        className={`line-clamp-3 break-words text-[15px] font-medium leading-[1.25] ${meal.fixed ? 'text-muted' : 'text-paper'}`}
       >
         {meal.name}
       </span>

@@ -50,8 +50,8 @@ function cleanMeals(cells = allCells()): PlannedMeal[] {
 
 function planOf(meals: PlannedMeal[], over: Partial<MealPlan> = {}, requestOver: Partial<MealPlan['request']> = {}): MealPlan {
   return {
-    weekOf: '2026-11-12',
-    request: { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [], useItUp: true, ...requestOver },
+    weekOf: '2026-11-15',
+    request: { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: true, ...requestOver },
     meals,
     fixedMeals: [],
     list: [],
@@ -518,7 +518,7 @@ describe('buildList: price-match hint', () => {
 describe('validate: busy hard cap from household time caps', () => {
   it('a timeCaps entry becomes a hard error for a meal over it', () => {
     const h = household({ timeCaps: { wed: { dinner: 15 } } });
-    const { cells } = expandWeek(h, { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [], useItUp: true });
+    const { cells } = expandWeek(h, { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: true });
     const meals = cleanMeals(cells).map((m) => (m.day === 'wed' && m.slot === 'dinner' ? { ...m, activeMinutes: 20 } : m));
     const issues = validate(planOf(meals), ctxOf({ cells, household: h }));
     expect(issues.find((i) => i.check === 'busy')).toMatchObject({ severity: 'error' });
@@ -527,7 +527,7 @@ describe('validate: busy hard cap from household time caps', () => {
 
   it('a week override cap wins over the household cap', () => {
     const h = household({ timeCaps: { wed: { dinner: 15 } } });
-    const request: PlanRequest = { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [{ day: 'wed', slot: 'dinner', maxMinutes: 30 }], useItUp: true };
+    const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [{ day: 'wed', slot: 'dinner', maxMinutes: 30 }], useItUp: true };
     const { cells } = expandWeek(h, request);
     expect(cells.find((c) => c.day === 'wed' && c.slot === 'dinner')!.maxMinutes).toBe(30);
   });

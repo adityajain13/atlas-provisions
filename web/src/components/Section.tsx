@@ -13,7 +13,7 @@ export function Section({ title, caption, action, children, className = '' }: Se
   return (
     <section className={`mt-10 border-t border-line pt-4 lg:mt-0 ${className}`}>
       <div className="flex items-center justify-between gap-4">
-        <h2 className="font-display text-[22px] font-normal text-paper">{title}</h2>
+        <h2 className="font-display font-semibold tracking-[-0.01em] text-paper text-[22px]">{title}</h2>
         {action}
       </div>
       {caption && <p className="mt-1 text-[13px] text-muted">{caption}</p>}

@@ -9,7 +9,7 @@ import {
   ReceiptCommitSchema,
   defaultExpiry,
   defaultHousehold,
-  isThursdayIso,
+  isSundayIso,
   matchFlyerItem,
   matchIngredient,
   newId,
@@ -88,7 +88,8 @@ async function loadHousehold(db: D1Database): Promise<Household> {
 
 /**
  * Matched and scored flyer items for a shopping date, from enabled stores. Used by /deals and the
- * planner. Also returns the household and the never-buy ingredient ids.
+ * planner. Also returns the household and the never-buy ingredient ids. The planner passes the
+ * plan week's Sunday, so the week is priced from the flyers valid that day.
  */
 async function loadDeals(
   env: Env,
@@ -237,7 +238,7 @@ app.post(`${API}/plan/:weekOf/prep`, async (c) => {
   const apiKey = c.env.ANTHROPIC_API_KEY;
   if (!apiKey) return c.text('Planner not configured: add the ANTHROPIC_API_KEY secret.', 503);
   const weekOf = c.req.param('weekOf');
-  if (!isThursdayIso(weekOf)) return c.text('weekOf must be a Thursday (YYYY-MM-DD)', 400);
+  if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
 
   try {
     const plan = await loadPlan(c.env.DB, weekOf);
@@ -349,7 +350,7 @@ app.post(`${API}/ratings`, async (c) => {
 
 app.get(`${API}/plan/:weekOf`, async (c) => {
   const weekOf = c.req.param('weekOf');
-  if (!isThursdayIso(weekOf)) return c.text('weekOf must be a Thursday (YYYY-MM-DD)', 400);
+  if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
   const plan = await loadPlan(c.env.DB, weekOf);
   if (!plan) return c.text('No plan for this week', 404);
   return c.json(plan);

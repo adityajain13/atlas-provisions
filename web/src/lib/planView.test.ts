@@ -3,21 +3,21 @@ import type { ListItem, MealPlan } from '@provisions/shared';
 import { defaultDay, planToList } from './planView';
 
 describe('defaultDay', () => {
-  it('opens on today when today is inside the plan week (Thu to Wed)', () => {
-    expect(defaultDay('2026-10-29', '2026-10-29')).toBe('thu');
-    expect(defaultDay('2026-10-29', '2026-11-03')).toBe('tue');
-    expect(defaultDay('2026-10-29', '2026-11-04')).toBe('wed');
+  it('opens on today when today is inside the plan week (Sun to Sat)', () => {
+    expect(defaultDay('2026-11-01', '2026-11-01')).toBe('sun');
+    expect(defaultDay('2026-11-01', '2026-11-03')).toBe('tue');
+    expect(defaultDay('2026-11-01', '2026-11-07')).toBe('sat');
   });
 
-  it('opens on Thursday when today is outside the plan week', () => {
-    expect(defaultDay('2026-10-29', '2026-11-05')).toBe('thu');
-    expect(defaultDay('2026-10-29', '2026-10-28')).toBe('thu');
+  it('opens on Sunday when today is outside the plan week', () => {
+    expect(defaultDay('2026-11-01', '2026-11-08')).toBe('sun');
+    expect(defaultDay('2026-11-01', '2026-10-31')).toBe('sun');
   });
 });
 
 function plan(list: ListItem[], stores: string[]): MealPlan {
   return {
-    weekOf: '2026-10-29',
+    weekOf: '2026-11-01',
     stores,
     list,
     meals: [],

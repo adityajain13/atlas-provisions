@@ -50,94 +50,18 @@ const yogurt: MockMeal = {
 };
 
 export const MOCK_WEEK: MockWeek = {
-  weekOf: '2026-11-12',
-  label: 'Thu Nov 12 – Wed Nov 18',
+  weekOf: '2026-11-15',
+  label: 'Sun Nov 15 – Sat Nov 21',
   budget: 150,
   spent: 131.4,
   stores: ['No Frills', 'FreshCo'],
+  // Sunday first. Sunday is the shopping and prep day, so the roast chicken cooked then feeds Monday's lunch.
   days: [
-    {
-      key: 'thu',
-      dayLabel: 'Thursday',
-      dateNum: 12,
-      headline: 'a butter chicken night.',
-      meals: [
-        { ...yogurt },
-        {
-          slot: 'lunch',
-          who: 'You',
-          name: 'Chickpea wrap',
-          detail: 'Hummus, cucumber, spinach, tortilla',
-          cost: 3.25,
-          tags: [{ kind: 'leftover', text: 'Uses Wed chickpeas' }],
-        },
-        {
-          slot: 'dinner',
-          who: 'Both',
-          name: 'Butter chicken with basmati',
-          detail: 'Chicken thighs, tomato, cream, 2 cups rice',
-          cost: 16.8,
-          tags: [
-            { kind: 'craving', text: 'Craving: butter chicken' },
-            { kind: 'deal', text: 'Chicken thighs on sale at No Frills' },
-          ],
-        },
-      ],
-    },
-    {
-      key: 'fri',
-      dayLabel: 'Friday',
-      dateNum: 13,
-      headline: 'a sheet-pan salmon night.',
-      meals: [
-        { ...yogurt },
-        {
-          slot: 'lunch',
-          who: 'You',
-          name: 'Leftover butter chicken',
-          detail: 'Packed from Thursday',
-          cost: null,
-          tags: [{ kind: 'leftover', text: 'Leftover' }],
-        },
-        {
-          slot: 'dinner',
-          who: 'Both',
-          name: 'Sheet-pan salmon and potatoes',
-          detail: 'Salmon fillet, baby potatoes, green beans',
-          cost: 18.4,
-          tags: [{ kind: 'deal', text: 'Salmon at FreshCo, $7.99/lb' }],
-        },
-      ],
-    },
-    {
-      key: 'sat',
-      dayLabel: 'Saturday',
-      dateNum: 14,
-      headline: 'a slow-cooker chili, twice.',
-      meals: [
-        {
-          slot: 'breakfast',
-          who: 'Both',
-          name: 'Pancakes',
-          detail: 'Flour, eggs, milk, maple syrup',
-          cost: 4.6,
-          tags: [],
-        },
-        {
-          slot: 'dinner',
-          who: 'Both',
-          name: 'Black bean chili',
-          detail: 'Beans, ground beef, peppers, tomato',
-          cost: 12.1,
-          tags: [{ kind: 'craving', text: 'Craving: something hearty' }],
-        },
-      ],
-    },
     {
       key: 'sun',
       dayLabel: 'Sunday',
       dateNum: 15,
-      headline: 'a roast chicken, then soup.',
+      headline: 'a roast chicken night.',
       meals: [
         {
           slot: 'breakfast',
@@ -150,10 +74,10 @@ export const MOCK_WEEK: MockWeek = {
         {
           slot: 'lunch',
           who: 'You',
-          name: 'Chili, reheated',
-          detail: 'From Saturday',
-          cost: null,
-          tags: [{ kind: 'leftover', text: 'Leftover' }],
+          name: 'Chickpea wrap',
+          detail: 'Hummus, cucumber, spinach, tortilla',
+          cost: 3.25,
+          tags: [],
         },
         {
           slot: 'dinner',
@@ -175,10 +99,10 @@ export const MOCK_WEEK: MockWeek = {
         {
           slot: 'lunch',
           who: 'You',
-          name: 'Chicken caesar wrap',
-          detail: 'Rotisserie chicken, romaine, parmesan',
-          cost: 4.75,
-          tags: [],
+          name: 'Roast chicken wrap',
+          detail: 'Packed from Sunday: chicken, romaine, parmesan',
+          cost: null,
+          tags: [{ kind: 'leftover', text: 'Leftover' }],
         },
         {
           slot: 'dinner',
@@ -232,6 +156,83 @@ export const MOCK_WEEK: MockWeek = {
         },
       ],
     },
+    {
+      key: 'thu',
+      dayLabel: 'Thursday',
+      dateNum: 19,
+      headline: 'a butter chicken night.',
+      meals: [
+        { ...yogurt },
+        {
+          slot: 'lunch',
+          who: 'You',
+          name: 'Chicken caesar wrap',
+          detail: 'Rotisserie chicken, romaine, parmesan',
+          cost: 4.75,
+          tags: [],
+        },
+        {
+          slot: 'dinner',
+          who: 'Both',
+          name: 'Butter chicken with basmati',
+          detail: 'Chicken thighs, tomato, cream, 2 cups rice',
+          cost: 16.8,
+          tags: [
+            { kind: 'craving', text: 'Craving: butter chicken' },
+            { kind: 'deal', text: 'Chicken thighs on sale at No Frills' },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'fri',
+      dayLabel: 'Friday',
+      dateNum: 20,
+      headline: 'a sheet-pan salmon night.',
+      meals: [
+        { ...yogurt },
+        {
+          slot: 'lunch',
+          who: 'You',
+          name: 'Leftover butter chicken',
+          detail: 'Packed from Thursday',
+          cost: null,
+          tags: [{ kind: 'leftover', text: 'Leftover' }],
+        },
+        {
+          slot: 'dinner',
+          who: 'Both',
+          name: 'Sheet-pan salmon and potatoes',
+          detail: 'Salmon fillet, baby potatoes, green beans',
+          cost: 18.4,
+          tags: [{ kind: 'deal', text: 'Salmon at FreshCo, $7.99/lb' }],
+        },
+      ],
+    },
+    {
+      key: 'sat',
+      dayLabel: 'Saturday',
+      dateNum: 21,
+      headline: 'a slow-cooker chili, twice.',
+      meals: [
+        {
+          slot: 'breakfast',
+          who: 'Both',
+          name: 'Pancakes',
+          detail: 'Flour, eggs, milk, maple syrup',
+          cost: 4.6,
+          tags: [],
+        },
+        {
+          slot: 'dinner',
+          who: 'Both',
+          name: 'Black bean chili',
+          detail: 'Beans, ground beef, peppers, tomato',
+          cost: 12.1,
+          tags: [{ kind: 'craving', text: 'Craving: something hearty' }],
+        },
+      ],
+    },
   ],
 };
 
@@ -265,13 +266,22 @@ export const MOCK_LIST: { weekOf: string; stores: string[]; items: MockItem[] } 
   items: [
     { id: 'bananas', store: 'No Frills', category: 'produce', name: 'Bananas', qty: '1 bunch', price: 1.49 },
     {
+      id: 'whole-chicken',
+      store: 'No Frills',
+      category: 'meat & seafood',
+      name: 'Whole chicken',
+      qty: '1.6 kg',
+      price: 5.58,
+      note: { kind: 'used', text: 'Used in Sun roast chicken, Mon wrap' },
+    },
+    {
       id: 'spinach',
       store: 'No Frills',
       category: 'produce',
       name: 'Baby spinach',
       qty: '142 g',
       price: 2.49,
-      note: { kind: 'used', text: 'Used in Wed dal, Thu wrap' },
+      note: { kind: 'used', text: 'Used in Sun wrap, Mon dal' },
     },
     {
       id: 'tomatoes',

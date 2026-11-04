@@ -17,7 +17,7 @@ import { DAY_SHORT } from './labels';
 
 const SLOT_ORDER: Record<Slot, number> = { breakfast: 0, lunch: 1, dinner: 2 };
 
-/** The Week screen's opening day: today when it falls in the plan's week (Thu to Wed), else Thursday. */
+/** The Week screen's opening day: today when it falls in the plan's week (Sun to Sat), else Sunday. */
 export function defaultDay(weekOf: string, todayIso: string): Day {
   const offset = DAYS.findIndex((_, i) => addDays(weekOf, i) === todayIso);
   return offset >= 0 ? DAYS[offset]! : DAYS[0];

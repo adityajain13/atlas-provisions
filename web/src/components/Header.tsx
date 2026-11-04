@@ -40,7 +40,7 @@ export function Header({ title, subtitle, action, size = 'md', desktopBrand = fa
       </div>
       {subtitle && <p className="mt-6 text-[13px] text-muted lg:mt-0">{subtitle}</p>}
       <h1
-        className={`${subtitle ? 'mt-2 lg:mt-1' : 'mt-6 lg:mt-0'} font-display font-normal text-paper lg:text-5xl lg:leading-[1.08] ${
+        className={`${subtitle ? 'mt-2 lg:mt-1' : 'mt-6 lg:mt-0'} font-display font-semibold tracking-[-0.02em] text-paper lg:text-[44px] lg:leading-[1.05] ${
           size === 'lg' ? 'text-[40px] leading-[1.08]' : 'text-[36px] leading-[1.1]'
         }`}
       >

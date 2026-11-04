@@ -3,7 +3,7 @@ import { baselineFor, nutrientDensity, scoreDeals, type HistoryPoint, type Score
 import type { MatchedItem } from './match';
 import { INGREDIENT_BY_ID } from './catalog';
 
-const AS_OF = '2026-11-12';
+const AS_OF = '2026-11-15'; // a plan week's Sunday
 
 function m(
   ingredientId: string,

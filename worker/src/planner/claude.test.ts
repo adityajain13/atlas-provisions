@@ -17,7 +17,7 @@ describe('anthropicClient', () => {
     const fetchImpl = fetchReturning(200, toolUse(PLAN_INPUT));
     const client = anthropicClient('test-key', 'test-model', fetchImpl);
 
-    const out = await client.submitPlan('SYSTEM', { weekOf: '2026-11-12' });
+    const out = await client.submitPlan('SYSTEM', { weekOf: '2026-11-15' });
 
     expect(out).toEqual(PLAN_INPUT);
     const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
@@ -32,7 +32,7 @@ describe('anthropicClient', () => {
     expect(body.system).toEqual([{ type: 'text', text: 'SYSTEM', cache_control: { type: 'ephemeral' } }]);
     expect(body.tools).toEqual([SUBMIT_PLAN_TOOL]);
     expect(body.tool_choice).toEqual({ type: 'tool', name: 'submit_plan' });
-    expect(JSON.parse(body.messages[0].content)).toEqual({ weekOf: '2026-11-12' });
+    expect(JSON.parse(body.messages[0].content)).toEqual({ weekOf: '2026-11-15' });
   });
 
   it('throws with the status and the body, truncated to 500 characters, on a non-2xx response', async () => {

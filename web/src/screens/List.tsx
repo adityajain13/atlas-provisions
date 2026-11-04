@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { flyerWeekOf, type MealPlan } from '@provisions/shared';
+import { planWeekOf, type MealPlan } from '@provisions/shared';
 import { errorMessage, getPlan } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
@@ -29,7 +29,7 @@ export default function List() {
 
   useEffect(() => {
     let alive = true;
-    getPlan(flyerWeekOf(new Date()))
+    getPlan(planWeekOf(new Date()))
       .then((plan: MealPlan | null) => {
         if (!alive) return;
         setState(
@@ -114,7 +114,7 @@ function ListBody({ view, plan, error }: { view: View; plan: boolean; error: str
         return (
           <section key={store} className="mt-10 border-t border-line pt-4 lg:mt-0">
             <div className="flex items-baseline justify-between gap-4">
-              <h2 className="font-display text-[24px] font-normal text-paper">{store}</h2>
+              <h2 className="font-display font-semibold tracking-[-0.01em] text-paper text-[24px]">{store}</h2>
               <span className="text-[14px] text-muted">${subtotal.toFixed(2)}</span>
             </div>
 
@@ -139,7 +139,7 @@ function ListBody({ view, plan, error }: { view: View; plan: boolean; error: str
 
       {unpriced.length > 0 && (
         <section className="mt-12 border-t border-line pt-4">
-          <h2 className="font-display text-[20px] font-normal text-paper">Not in this week&apos;s flyers</h2>
+          <h2 className="font-display font-semibold tracking-[-0.01em] text-paper text-[20px]">Not in this week&apos;s flyers</h2>
           <p className="mt-1 text-[13px] text-muted">{"Buy anywhere; prices weren't in this week's flyers."}</p>
           <ul className="mt-4">
             {unpriced.map((item) => (
