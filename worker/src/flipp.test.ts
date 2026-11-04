@@ -46,6 +46,13 @@ describe('toFlyerItem', () => {
   });
 });
 
+describe('toFlyerItem with Flipp names', () => {
+  it('stores the household store name when the merchant is one of its Flipp names', () => {
+    const stores = [{ name: 'Real Canadian Superstore', flippNames: ['RCSS'] }];
+    expect(toFlyerItem({ ...chicken, merchant_name: 'RCSS' }, stores)?.store).toBe('Real Canadian Superstore');
+  });
+});
+
 describe('fetchFlippItems', () => {
   it('sends the postal code, term and browser-like headers, and maps the items', async () => {
     const calls: { url: string; init: RequestInit }[] = [];

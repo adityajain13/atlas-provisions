@@ -61,17 +61,19 @@ export function ReceiptFlow({ onSaved }: { onSaved: () => void }) {
     setSaveError(null);
     try {
       const [receipt, household] = await Promise.all([parseReceipt(image), getHousehold().catch(() => null)]);
-      const allStores = household?.stores.map((s) => s.name) ?? [];
-      const enabled = household?.stores.filter((s) => s.enabled).map((s) => s.name) ?? [];
-      showConfirm(receipt, enabled.length > 0 ? enabled : allStores);
+      const all = household?.stores ?? [];
+      const enabled = all.filter((s) => s.enabled);
+      showConfirm(receipt, enabled.length > 0 ? enabled : all);
     } catch (e) {
       setPhase({ kind: 'error', message: errorMessage(e) });
     }
   }
 
-  function showConfirm(receipt: ParsedReceipt, storeList: string[]) {
+  function showConfirm(receipt: ParsedReceipt, stores: { name: string; flippNames?: string[] }[]) {
     const items = (receipt.items ?? []).filter((i) => i && typeof i.price === 'number');
-    const match = matchReceipt({ ...receipt, items }, storeList);
+    // Flipp names count when matching, so a receipt from a store under another name still finds it.
+    const match = matchReceipt({ ...receipt, items }, stores);
+    const storeList = stores.map((s) => s.name);
     const options = [...new Set([...(match.store ? [match.store] : []), ...storeList])];
 
     setStoreOptions(options);

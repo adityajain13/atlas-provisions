@@ -218,3 +218,16 @@ describe('ReceiptCommitSchema and planReceiptCommit', () => {
     );
   });
 });
+
+describe('detectStore with Flipp names', () => {
+  it('matches a receipt printed with a Flipp name, and returns the store name', () => {
+    const stores = [{ name: 'Real Canadian Superstore', flippNames: ['Superstore', 'RCSS'] }, { name: 'FreshCo' }];
+    expect(detectStore('SUPERSTORE #3411', stores)).toBe('Real Canadian Superstore');
+    expect(detectStore('RCSS', stores)).toBe('Real Canadian Superstore');
+    expect(detectStore('FRESHCO', stores)).toBe('FreshCo');
+  });
+
+  it('does not match a store that has been removed', () => {
+    expect(detectStore('Sunny Mart', [{ name: 'FreshCo' }])).toBeNull();
+  });
+});

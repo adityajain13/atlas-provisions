@@ -1,10 +1,11 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
   ALLERGEN_PRESETS,
   DAYS,
   DAY_LONG,
   HouseholdSchema,
   SLOTS,
+  STORE_PRESETS,
   UNITS,
   VARIETY_RULES,
   newId,
@@ -15,6 +16,8 @@ import {
   type ItemRule,
   type Person,
   type Slot,
+  type Store,
+  type StorePreset,
   type Unit,
 } from '@provisions/shared';
 import { errorMessage, getHousehold, saveHousehold } from '../api';
@@ -35,6 +38,16 @@ import {
   secondaryBtn,
 } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL, formatDays } from '../lib/labels';
+import {
+  addCustomStore,
+  clampMaxStores,
+  groupPresets,
+  maxStoresLimit,
+  groupOf,
+  presetsNotInList,
+  storeFromPreset,
+  withFlippNames,
+} from '../lib/stores';
 import { useSession } from '../session';
 
 type Update = (fn: (prev: Household) => Household) => void;
@@ -910,65 +923,280 @@ function VarietySection({ h, update }: { h: Household; update: Update }) {
 
 // ---------- Stores ----------
 
+type StoresUpdate = (fn: (stores: Store[]) => Store[]) => void;
+
 function StoresSection({ h, update }: { h: Household; update: Update }) {
+  // Every change to the list goes through here, so the per-trip count stays within the enabled stores.
+  const changeStores = useCallback<StoresUpdate>(
+    (fn) =>
+      update((prev) => {
+        const stores = fn(prev.stores);
+        return { ...prev, stores, maxStores: clampMaxStores(prev.maxStores, stores) };
+      }),
+    [update],
+  );
+  const limit = maxStoresLimit(h.stores);
+  const perTrip = clampMaxStores(h.maxStores, h.stores);
+
   function setMax(n: number) {
-    update((prev) => ({ ...prev, maxStores: Math.min(5, Math.max(1, n)) }));
+    update((prev) => ({ ...prev, maxStores: clampMaxStores(n, prev.stores) }));
   }
 
   return (
     <Section title="Stores">
       <PostalCodeField h={h} update={update} />
-      <ul className="mt-6">
-        {h.stores.map((s) => (
-          <li key={s.id}>
-            <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-4 border-b border-line2">
-              <span className="flex flex-col">
-                <span className="text-[15px] text-paper">{s.name}</span>
-                {s.priceMatches && <span className="text-[12px] text-muted">Price-matches</span>}
-              </span>
+
+      <div className="mt-6">
+        <p className={eyebrow}>Your stores</p>
+        {h.stores.length === 0 && <p className="mt-2 text-[14px] text-muted">No stores yet. Add one below.</p>}
+        <ul className="mt-2">
+          {h.stores.map((s) => (
+            <StoreRow key={s.id} store={s} change={changeStores} />
+          ))}
+        </ul>
+        <FlyerRefresh />
+      </div>
+
+      <div className="mt-8">
+        <AddPresets stores={h.stores} change={changeStores} />
+      </div>
+
+      <div className="mt-8">
+        <AddCustomStore stores={h.stores} change={changeStores} />
+      </div>
+
+      <div className="mt-8">
+        <div className="flex items-center justify-between">
+          <span className="text-[15px] text-paper">Max stores per trip</span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              aria-label="Fewer stores"
+              disabled={perTrip <= 1}
+              onClick={() => setMax(perTrip - 1)}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-edge text-[18px] text-paper disabled:opacity-40"
+            >
+              &minus;
+            </button>
+            <span className="w-6 text-center text-[18px] font-semibold tabular-nums text-paper">{perTrip}</span>
+            <button
+              type="button"
+              aria-label="More stores"
+              disabled={perTrip >= limit}
+              onClick={() => setMax(perTrip + 1)}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-edge text-[18px] text-paper disabled:opacity-40"
+            >
+              +
+            </button>
+          </div>
+        </div>
+        <p className="mt-2 text-[13px] text-muted">
+          {`We'll pick the cheapest combination of up to ${perTrip} of your enabled stores.`}
+        </p>
+      </div>
+    </Section>
+  );
+}
+
+function StoreRow({ store: s, change }: { store: Store; change: StoresUpdate }) {
+  const confirm = useConfirm();
+  const [editingFlipp, setEditingFlipp] = useState(false);
+  const [flippText, setFlippText] = useState((s.flippNames ?? []).join(', '));
+
+  function patch(p: Partial<Store>) {
+    change((list) => list.map((x) => (x.id === s.id ? { ...x, ...p } : x)));
+  }
+
+  function setFlipp(text: string) {
+    setFlippText(text);
+    change((list) => list.map((x) => (x.id === s.id ? withFlippNames(x, text) : x)));
+  }
+
+  async function remove() {
+    if (
+      !(await confirm({
+        title: `Remove ${s.name}?`,
+        message: "Its flyer prices won't be used. Past price history is kept.",
+        confirmLabel: 'Remove',
+        danger: true,
+      }))
+    )
+      return;
+    change((list) => list.filter((x) => x.id !== s.id));
+  }
+
+  return (
+    <li className="border-b border-line2 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-[15px] text-paper">{s.name}</span>
+            {groupOf(s) && <span className="text-[12px] text-muted">{groupOf(s)}</span>}
+          </div>
+          {s.flippNames && s.flippNames.length > 0 && !editingFlipp && (
+            <p className="mt-0.5 truncate text-[12px] text-muted">Flipp: {s.flippNames.join(', ')}</p>
+          )}
+          <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-1">
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-[14px] text-paper">
               <input
                 type="checkbox"
                 className="h-5 w-5 shrink-0"
                 checked={s.enabled}
-                onChange={(e) =>
-                  update((prev) => ({
-                    ...prev,
-                    stores: prev.stores.map((x) => (x.id === s.id ? { ...x, enabled: e.target.checked } : x)),
-                  }))
-                }
+                onChange={(e) => patch({ enabled: e.target.checked })}
+              />
+              Shop here
+            </label>
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-[14px] text-paper">
+              <input
+                type="checkbox"
+                className="h-5 w-5 shrink-0"
+                checked={s.priceMatches}
+                onChange={(e) => patch({ priceMatches: e.target.checked })}
+              />
+              Price-matches
+            </label>
+            <button
+              type="button"
+              aria-expanded={editingFlipp}
+              onClick={() => setEditingFlipp((v) => !v)}
+              className="min-h-11 text-[14px] text-herb"
+            >
+              Flipp names
+            </button>
+          </div>
+          {editingFlipp && (
+            <label className="mt-1 block pb-1">
+              <span className="text-[12px] text-muted">Names on Flipp, comma-separated</span>
+              <input
+                className={`${fieldCls} mt-1`}
+                value={flippText}
+                maxLength={200}
+                placeholder="e.g. RCSS, Superstore"
+                onChange={(e) => setFlipp(e.target.value)}
               />
             </label>
-          </li>
-        ))}
-      </ul>
+          )}
+        </div>
+        <button type="button" aria-label={`Remove ${s.name}`} onClick={remove} className={removeIconBtn}>
+          &times;
+        </button>
+      </div>
+    </li>
+  );
+}
 
-      <FlyerRefresh />
+function AddPresets({ stores, change }: { stores: Store[]; change: StoresUpdate }) {
+  const [open, setOpen] = useState(false);
+  const groups = groupPresets(presetsNotInList(stores, STORE_PRESETS));
+  const count = groups.reduce((n, g) => n + g.presets.length, 0);
+  if (count === 0) return <p className="text-[14px] text-muted">Every store we know about is already in your list.</p>;
 
-      <div className="mt-5 flex items-center justify-between">
-        <span className="text-[15px] text-paper">Max stores per trip</span>
-        <div className="flex items-center gap-3">
+  // On a phone the chips fold away behind a button when there are many; on desktop they always show.
+  const collapsible = count > 6;
+  const hidden = collapsible && !open ? 'hidden lg:block' : '';
+
+  function add(preset: StorePreset) {
+    change((list) => (list.some((x) => x.id === preset.id) ? list : [...list, storeFromPreset(preset)]));
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-4">
+        <p className={`${eyebrow} ${collapsible ? 'hidden lg:block' : ''}`}>Add stores</p>
+        {collapsible && (
           <button
             type="button"
-            aria-label="Fewer stores"
-            disabled={h.maxStores <= 1}
-            onClick={() => setMax(h.maxStores - 1)}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-edge text-[18px] text-paper disabled:opacity-40"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className={`${linkBtn} lg:hidden`}
           >
-            &minus;
+            {open ? 'Hide' : 'Add stores'}
           </button>
-          <span className="w-6 text-center text-[18px] font-semibold tabular-nums text-paper">{h.maxStores}</span>
-          <button
-            type="button"
-            aria-label="More stores"
-            disabled={h.maxStores >= 5}
-            onClick={() => setMax(h.maxStores + 1)}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-edge text-[18px] text-paper disabled:opacity-40"
-          >
-            +
+        )}
+      </div>
+      <div className={`mt-3 flex flex-col gap-4 ${hidden}`}>
+        {groups.map((g) => (
+          <div key={g.group}>
+            <p className="text-[12px] text-muted">{g.group}</p>
+            <ul className="mt-2 flex flex-wrap gap-2">
+              {g.presets.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    aria-label={`Add ${p.name}`}
+                    onClick={() => add(p)}
+                    className={`${chipBase} border-edge px-4 text-paper`}
+                  >
+                    + {p.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AddCustomStore({ stores, change }: { stores: Store[]; change: StoresUpdate }) {
+  const [name, setName] = useState('');
+  const [flipp, setFlipp] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  function add(e: FormEvent) {
+    e.preventDefault();
+    const result = addCustomStore(stores, name, flipp);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    const store = result.store;
+    change((list) => {
+      const again = addCustomStore(list, name, flipp);
+      return again.ok && again.store.id === store.id ? [...list, again.store] : list;
+    });
+    setName('');
+    setFlipp('');
+    setError(null);
+  }
+
+  return (
+    <form onSubmit={add} noValidate>
+      <p className={eyebrow}>Add another store</p>
+      <div className="mt-3 flex flex-col gap-2">
+        <input
+          className={fieldCls}
+          placeholder="Store name"
+          aria-label="Store name"
+          value={name}
+          maxLength={40}
+          aria-invalid={error !== null}
+          onChange={(e) => {
+            setName(e.target.value);
+            setError(null);
+          }}
+        />
+        <input
+          className={fieldCls}
+          placeholder="Name on Flipp (if different)"
+          aria-label="Name on Flipp (if different)"
+          value={flipp}
+          maxLength={200}
+          onChange={(e) => setFlipp(e.target.value)}
+        />
+        <div>
+          <button type="submit" className={addBtn}>
+            Add
           </button>
         </div>
       </div>
-    </Section>
+      {error && (
+        <p role="alert" className={`mt-2 text-[13px] ${ERROR_TEXT}`}>
+          {error}
+        </p>
+      )}
+    </form>
   );
 }
 
