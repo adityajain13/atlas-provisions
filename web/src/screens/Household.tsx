@@ -26,6 +26,7 @@ import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatu
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { useConfirm } from '../components/ConfirmDialog';
+import { Disclosure } from '../components/Disclosure';
 import { Section } from '../components/Section';
 import {
   addBtn,
@@ -223,6 +224,13 @@ function readableCount(n: number): string {
 function PeopleSection({ h, update }: { h: Household; update: Update }) {
   const confirm = useConfirm();
   const [openId, setOpenId] = useState<string | null>(null);
+  // The row added last, so its name field takes focus when it opens. Cleared on any toggle.
+  const [freshId, setFreshId] = useState<string | null>(null);
+
+  function toggle(id: string) {
+    setFreshId(null);
+    setOpenId((cur) => (cur === id ? null : id));
+  }
 
   function addPerson() {
     const id = newId();
@@ -232,6 +240,7 @@ function PeopleSection({ h, update }: { h: Household; update: Update }) {
       schedule: { ...prev.schedule, [id]: allOn() },
     }));
     setOpenId(id);
+    setFreshId(id);
   }
 
   async function removePerson(p: Person) {
@@ -245,6 +254,7 @@ function PeopleSection({ h, update }: { h: Household; update: Update }) {
     )
       return;
     setOpenId(null);
+    setFreshId(null);
     update((prev) => {
       const schedule = { ...prev.schedule };
       delete schedule[p.id];
@@ -264,23 +274,20 @@ function PeopleSection({ h, update }: { h: Household; update: Update }) {
     <Section title="People">
       {h.people.length === 0 && <p className="text-[14px] text-muted">No one yet.</p>}
       <ul>
-        {h.people.map((p) => {
-          const open = openId === p.id;
-          return (
-            <li key={p.id} className="border-b border-line2">
-              <button
-                type="button"
-                aria-expanded={open}
-                onClick={() => setOpenId(open ? null : p.id)}
-                className="flex min-h-[48px] w-full items-center justify-between gap-3 py-3 text-left"
-              >
-                <span className="text-[16px] text-paper">{p.name}</span>
-                <span className="shrink-0 text-[13px] text-muted">{readableCount(countMeals(h, p.id))}</span>
-              </button>
-              {open && <PersonEditor person={p} update={update} onRemove={() => removePerson(p)} />}
-            </li>
-          );
-        })}
+        {h.people.map((p) => (
+          <li key={p.id}>
+            <Disclosure
+              open={openId === p.id}
+              onToggle={() => toggle(p.id)}
+              title={p.name}
+              summary={readableCount(countMeals(h, p.id))}
+              focusFirstField={freshId === p.id}
+              remove={{ label: 'Remove person', onClick: () => void removePerson(p) }}
+            >
+              <PersonFields person={p} update={update} />
+            </Disclosure>
+          </li>
+        ))}
       </ul>
       <button type="button" onClick={addPerson} className={`mt-3 ${linkBtn}`}>
         + Add person
@@ -289,7 +296,7 @@ function PeopleSection({ h, update }: { h: Household; update: Update }) {
   );
 }
 
-function PersonEditor({ person, update, onRemove }: { person: Person; update: Update; onRemove: () => void }) {
+function PersonFields({ person, update }: { person: Person; update: Update }) {
   const [custom, setCustom] = useState('');
 
   function patch(p: Partial<Person>) {
@@ -317,7 +324,7 @@ function PersonEditor({ person, update, onRemove }: { person: Person; update: Up
   const customs = person.allergies.filter((a) => !ALLERGEN_PRESETS.includes(a));
 
   return (
-    <div className="space-y-6 pb-5 pt-4">
+    <>
       <label className="block">
         <span className={eyebrow}>Name</span>
         <input
@@ -393,14 +400,7 @@ function PersonEditor({ person, update, onRemove }: { person: Person; update: Up
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onRemove}
-        className={secondaryBtn}
-      >
-        Remove person
-      </button>
-    </div>
+    </>
   );
 }
 
@@ -525,7 +525,14 @@ function TimeCaps({ h, update }: { h: Household; update: Update }) {
 // ---------- Fixed meals ----------
 
 function FixedMealsSection({ h, update }: { h: Household; update: Update }) {
+  const confirm = useConfirm();
   const [openId, setOpenId] = useState<string | null>(null);
+  const [freshId, setFreshId] = useState<string | null>(null);
+
+  function toggle(id: string) {
+    setFreshId(null);
+    setOpenId((cur) => (cur === id ? null : id));
+  }
 
   function addMeal() {
     const id = newId();
@@ -537,57 +544,42 @@ function FixedMealsSection({ h, update }: { h: Household; update: Update }) {
       ],
     }));
     setOpenId(id);
+    setFreshId(id);
+  }
+
+  async function removeMeal(m: FixedMeal) {
+    if (
+      !(await confirm({
+        title: `Delete ${m.name}?`,
+        message: 'It stops appearing in future plans. Meals already planned for a week are not changed.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    )
+      return;
+    setOpenId(null);
+    setFreshId(null);
+    update((prev) => ({ ...prev, fixedMeals: prev.fixedMeals.filter((x) => x.id !== m.id) }));
   }
 
   return (
     <Section title="Fixed meals">
       {h.fixedMeals.length === 0 && <p className="text-[14px] text-muted">None yet.</p>}
       <ul>
-        {h.fixedMeals.map((m) => {
-          const open = openId === m.id;
-          return (
-            <li key={m.id} className="border-b border-line2">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  aria-expanded={open}
-                  onClick={() => setOpenId(open ? null : m.id)}
-                  className="flex min-h-[48px] min-w-0 flex-1 flex-col justify-center py-2 text-left"
-                >
-                  <span className="text-[16px] text-paper">{m.name}</span>
-                  <span className="truncate text-[13px] text-muted">{fixedMealSummary(m, h.people)}</span>
-                </button>
-                <label className="flex min-h-[44px] shrink-0 items-center gap-2 text-[13px] text-muted">
-                  Active
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5"
-                    checked={m.active}
-                    onChange={(e) =>
-                      update((prev) => ({
-                        ...prev,
-                        fixedMeals: prev.fixedMeals.map((x) =>
-                          x.id === m.id ? { ...x, active: e.target.checked } : x,
-                        ),
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-              {open && (
-                <FixedMealEditor
-                  meal={m}
-                  people={h.people}
-                  update={update}
-                  onRemove={() => {
-                    setOpenId(null);
-                    update((prev) => ({ ...prev, fixedMeals: prev.fixedMeals.filter((x) => x.id !== m.id) }));
-                  }}
-                />
-              )}
-            </li>
-          );
-        })}
+        {h.fixedMeals.map((m) => (
+          <li key={m.id}>
+            <Disclosure
+              open={openId === m.id}
+              onToggle={() => toggle(m.id)}
+              title={m.name}
+              detail={`${m.active ? '' : 'Paused · '}${fixedMealSummary(m, h.people)}`}
+              focusFirstField={freshId === m.id}
+              remove={{ label: 'Delete fixed meal', onClick: () => void removeMeal(m) }}
+            >
+              <FixedMealFields meal={m} people={h.people} update={update} />
+            </Disclosure>
+          </li>
+        ))}
       </ul>
       <button type="button" onClick={addMeal} className={`mt-3 ${linkBtn}`}>
         + Add fixed meal
@@ -596,18 +588,7 @@ function FixedMealsSection({ h, update }: { h: Household; update: Update }) {
   );
 }
 
-function FixedMealEditor({
-  meal,
-  people,
-  update,
-  onRemove,
-}: {
-  meal: FixedMeal;
-  people: Person[];
-  update: Update;
-  onRemove: () => void;
-}) {
-  const confirm = useConfirm();
+function FixedMealFields({ meal, people, update }: { meal: FixedMeal; people: Person[]; update: Update }) {
   function patchMeal(p: Partial<FixedMeal>) {
     update((prev) => ({
       ...prev,
@@ -643,7 +624,20 @@ function FixedMealEditor({
   }
 
   return (
-    <div className="space-y-6 pb-5 pt-4">
+    <>
+      <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4">
+        <span>
+          <span className="block text-[15px] text-paper">Active</span>
+          <span className="block text-[12px] text-muted">Turn off to leave it out of plans.</span>
+        </span>
+        <input
+          type="checkbox"
+          className="h-5 w-5 shrink-0"
+          checked={meal.active}
+          onChange={(e) => patchMeal({ active: e.target.checked })}
+        />
+      </label>
+
       <label className="block">
         <span className={eyebrow}>Name</span>
         <input
@@ -772,24 +766,7 @@ function FixedMealEditor({
         </button>
       </div>
 
-      <button
-        type="button"
-        onClick={async () => {
-          if (
-            await confirm({
-              title: `Delete ${meal.name}?`,
-              message: 'It stops appearing in future plans. Meals already planned for a week are not changed.',
-              confirmLabel: 'Delete',
-              danger: true,
-            })
-          )
-            onRemove();
-        }}
-        className={secondaryBtn}
-      >
-        Delete fixed meal
-      </button>
-    </div>
+    </>
   );
 }
 
@@ -1055,27 +1032,26 @@ function StoreRow({ store: s, change }: { store: Store; change: StoresUpdate }) 
               />
               Price-matches
             </label>
-            <button
-              type="button"
-              aria-expanded={editingFlipp}
-              onClick={() => setEditingFlipp((v) => !v)}
-              className="min-h-11 text-[14px] text-herb"
-            >
-              Flipp names
-            </button>
           </div>
-          {editingFlipp && (
-            <label className="mt-1 block pb-1">
-              <span className="text-[12px] text-muted">Names on Flipp, comma-separated</span>
-              <input
-                className={`${fieldCls} mt-1`}
-                value={flippText}
-                maxLength={200}
-                placeholder="e.g. RCSS, Superstore"
-                onChange={(e) => setFlipp(e.target.value)}
-              />
-            </label>
-          )}
+          <div className="mt-1">
+            <Disclosure
+              variant="compact"
+              open={editingFlipp}
+              onToggle={() => setEditingFlipp((v) => !v)}
+              title="Flipp names"
+            >
+              <label className="block">
+                <span className="text-[12px] text-muted">Names on Flipp, comma-separated</span>
+                <input
+                  className={`${fieldCls} mt-1`}
+                  value={flippText}
+                  maxLength={200}
+                  placeholder="e.g. RCSS, Superstore"
+                  onChange={(e) => setFlipp(e.target.value)}
+                />
+              </label>
+            </Disclosure>
+          </div>
         </div>
         <button type="button" aria-label={`Remove ${s.name}`} onClick={remove} className={removeIconBtn}>
           &times;
@@ -1091,50 +1067,58 @@ function AddPresets({ stores, change }: { stores: Store[]; change: StoresUpdate 
   const count = groups.reduce((n, g) => n + g.presets.length, 0);
   if (count === 0) return <p className="text-[14px] text-muted">Every store we know about is already in your list.</p>;
 
-  // On a phone the chips fold away behind a button when there are many; on desktop they always show.
+  // On a phone the chips fold away behind a toggle when there are many; on desktop they always show.
   const collapsible = count > 6;
-  const hidden = collapsible && !open ? 'hidden lg:block' : '';
 
   function add(preset: StorePreset) {
     change((list) => (list.some((x) => x.id === preset.id) ? list : [...list, storeFromPreset(preset)]));
   }
 
+  const chips = (
+    <div className="flex flex-col gap-4">
+      {groups.map((g) => (
+        <div key={g.group}>
+          <p className="text-[12px] text-muted">{g.group}</p>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {g.presets.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  aria-label={`Add ${p.name}`}
+                  onClick={() => add(p)}
+                  className={`${chipBase} border-edge px-4 text-paper`}
+                >
+                  + {p.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+
+  if (!collapsible) {
+    return (
+      <div>
+        <p className={eyebrow}>Add stores</p>
+        <div className="mt-3">{chips}</div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between gap-4">
-        <p className={`${eyebrow} ${collapsible ? 'hidden lg:block' : ''}`}>Add stores</p>
-        {collapsible && (
-          <button
-            type="button"
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-            className={`${linkBtn} lg:hidden`}
-          >
-            {open ? 'Hide' : 'Add stores'}
-          </button>
-        )}
-      </div>
-      <div className={`mt-3 flex flex-col gap-4 ${hidden}`}>
-        {groups.map((g) => (
-          <div key={g.group}>
-            <p className="text-[12px] text-muted">{g.group}</p>
-            <ul className="mt-2 flex flex-wrap gap-2">
-              {g.presets.map((p) => (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    aria-label={`Add ${p.name}`}
-                    onClick={() => add(p)}
-                    className={`${chipBase} border-edge px-4 text-paper`}
-                  >
-                    + {p.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+      <p className={`${eyebrow} hidden lg:block`}>Add stores</p>
+      <Disclosure
+        variant="compact"
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        title="Add stores"
+        desktopAlwaysOpen
+      >
+        {chips}
+      </Disclosure>
     </div>
   );
 }
