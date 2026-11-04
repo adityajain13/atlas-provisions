@@ -6,7 +6,7 @@ Atlas Provisions plans a household's week of home-cooked meals around local groc
 
 ## What it does
 
-- Scores the week's flyer deals and keeps a shortlist of the best value per category.
+- Plans a week that runs Sunday to Saturday, priced from the flyers valid on its Sunday (the shopping day), and keeps a shortlist of the best value per category.
 - Plans the week with one Claude call that returns the meals and a batch-prep list together. The code then checks the plan (budget, allergies as a hard block, never-buy items, macros, waste, busy-night time caps, cravings, optional variety rules) and asks for a fix when a check fails, up to 3 attempts.
 - Builds a shopping list grouped by store, with price-match hints when another store is cheaper, and a separate section for items no flyer covers.
 - Keeps household defaults (people, eating schedule, fixed meals, equipment, allergies, time caps) and lets you change a single week (guests, eating out, shared meals) without changing the defaults.
@@ -41,7 +41,7 @@ Atlas Provisions plans a household's week of home-cooked meals around local groc
 
 1. **Ingest.** Flyer items are read into a common shape: store, name, price, size, and valid dates. The Flipp flyer import is not built yet, so sample fixtures in `worker/fixtures/` stand in for real flyers.
 2. **Normalize.** Each flyer name is matched to an ingredient in the catalogue by its aliases and size is converted to the ingredient's unit (kg, L or each). A Claude fallback for names the matcher cannot place is planned; the interface exists and is not wired up.
-3. **Score.** Each ingredient keeps its cheapest unit price per store, measured against recent price history. Never-buy items are dropped, always-buy items are added, and the top 8 per category go to the planner.
+3. **Score.** A plan week is saved under its Sunday's date and priced from the flyers valid that day, since shopping happens on Sunday. Each ingredient keeps its cheapest unit price per store, measured against recent price history. Never-buy items are dropped, always-buy items are added, and the top 8 per category go to the planner.
 4. **Plan.** One Claude call returns the meals for each slot and the batch-prep list for the prep day. Quantities are in each ingredient's unit, and the code, not the model, computes the cost.
 5. **Validate.** The plan is checked in code. A failed check, such as a plan over budget or an allergen in a dish, is fed back to the model for another attempt, up to 3 attempts. A plan with errors is shown with the errors listed.
 6. **List.** The saved plan becomes a shopping list: quantities are rounded up to whole packs, pantry stock is taken off first, and each item is placed at its cheapest enabled store.
@@ -113,7 +113,7 @@ wrangler.jsonc
 
 ## Tests
 
-`npm test` runs vitest over `shared/`, `worker/` and the web view helpers in `web/src/lib/`. The current run has 326 tests in 23 files. `npm run typecheck` checks the web and Worker projects.
+`npm test` runs vitest over `shared/`, `worker/` and the web view helpers in `web/src/lib/`. The current run has 335 tests in 25 files. `npm run typecheck` checks the web and Worker projects.
 
 ## Roadmap
 

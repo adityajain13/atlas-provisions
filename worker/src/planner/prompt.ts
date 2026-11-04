@@ -44,8 +44,8 @@ export const SUBMIT_PLAN_TOOL = {
         items: {
           type: 'object',
           properties: {
-            id: { type: 'string', description: 'Unique meal id, e.g. "thu-dinner"' },
-            slotId: { type: 'string', description: 'The slot id from `slots`, e.g. "thu-dinner"' },
+            id: { type: 'string', description: 'Unique meal id, e.g. "sun-dinner"' },
+            slotId: { type: 'string', description: 'The slot id from `slots`, e.g. "sun-dinner"' },
             name: { type: 'string' },
             ingredients: {
               type: 'array',

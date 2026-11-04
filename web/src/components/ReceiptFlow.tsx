@@ -190,7 +190,7 @@ export function ReceiptFlow({ onSaved }: { onSaved: () => void }) {
 
       {phase.kind === 'reading' && (
         <div className="py-6">
-          <h2 className="font-display text-[22px] font-normal text-paper">Reading receipt&hellip;</h2>
+          <h2 className="font-display font-semibold tracking-[-0.01em] text-paper text-[22px]">Reading receipt&hellip;</h2>
           <p className="mt-2 text-[13px] text-muted">Claude is reading every line. This takes a few seconds.</p>
         </div>
       )}
@@ -224,7 +224,7 @@ export function ReceiptFlow({ onSaved }: { onSaved: () => void }) {
 
       {phase.kind === 'confirm' && (
         <div>
-          <h2 className="font-display text-[22px] font-normal text-paper">Check the receipt</h2>
+          <h2 className="font-display font-semibold tracking-[-0.01em] text-paper text-[22px]">Check the receipt</h2>
           <p className="mt-1 text-[13px] text-muted">Lines marked Check were matched by guess. Fix anything that is wrong.</p>
 
           <div className="mt-4 grid grid-cols-2 gap-3">

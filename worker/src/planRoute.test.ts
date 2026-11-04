@@ -5,7 +5,7 @@ import app from './index';
 
 const H = '/provisions/api';
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const REQUEST: PlanRequest = { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [], useItUp: false };
+const REQUEST: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false };
 
 function household(over: Partial<Household> = {}): Household {
   const people = [
@@ -150,3 +150,36 @@ describe('POST /plan', () => {
     expect(body.issues.some((i) => i.check === 'prep')).toBe(false);
   });
 });
+
+describe('Sunday plan weeks', () => {
+  const SUNDAY_MESSAGE = 'weekOf must be a Sunday (YYYY-MM-DD)';
+  const get = (path: string, env: unknown) =>
+    app.request(path, { method: 'GET', headers: { cookie: 'ap_session=valid-token' } }, env as never);
+
+  it('rejects a Thursday weekOf on POST /plan, GET /plan and the prep route with the schema message', async () => {
+    const { db } = fakeDb(household());
+    const fetchMock = stubClaude(claudeInput());
+
+    const planRes = await post(`${H}/plan`, { ...REQUEST, weekOf: '2026-11-12' }, makeEnv(db));
+    expect(planRes.status).toBe(400);
+    expect(await planRes.text()).toContain(SUNDAY_MESSAGE);
+
+    const getRes = await get(`${H}/plan/2026-11-12`, makeEnv(db));
+    expect(getRes.status).toBe(400);
+    expect(await getRes.text()).toBe(SUNDAY_MESSAGE);
+
+    const prepRes = await post(`${H}/plan/2026-11-12/prep`, {}, makeEnv(db));
+    expect(prepRes.status).toBe(400);
+    expect(await prepRes.text()).toBe(SUNDAY_MESSAGE);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts a Sunday on GET /plan (no saved plan yet, so 404)', async () => {
+    const { db } = fakeDb(household());
+    const res = await get(`${H}/plan/2026-11-15`, makeEnv(db));
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe('No plan for this week');
+  });
+});
+

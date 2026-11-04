@@ -24,7 +24,7 @@ export interface WeekOverride {
 }
 
 export interface PlanRequest {
-  weekOf: string; // Thursday YYYY-MM-DD
+  weekOf: string; // Sunday YYYY-MM-DD, the first day of the plan week
   budget: number;
   cravings: string[];
   overrides: WeekOverride[];
@@ -51,13 +51,13 @@ export function isRealIsoDate(s: string): boolean {
 /** A real calendar date in YYYY-MM-DD form. */
 export const IsoDateSchema = z.string().refine(isRealIsoDate, 'Dates must be real YYYY-MM-DD dates');
 
-/** True for a real calendar date in YYYY-MM-DD form that falls on a Thursday. */
-export function isThursdayIso(s: string): boolean {
-  return isRealIsoDate(s) && new Date(`${s}T00:00:00Z`).getUTCDay() === 4;
+/** True for a real calendar date in YYYY-MM-DD form that falls on a Sunday. */
+export function isSundayIso(s: string): boolean {
+  return isRealIsoDate(s) && new Date(`${s}T00:00:00Z`).getUTCDay() === 0;
 }
 
 export const PlanRequestSchema = z.object({
-  weekOf: z.string().refine(isThursdayIso, 'weekOf must be a Thursday (YYYY-MM-DD)'),
+  weekOf: z.string().refine(isSundayIso, 'weekOf must be a Sunday (YYYY-MM-DD)'),
   budget: z.number().min(1, 'Budget must be at least 1').max(2000, 'Budget must be 2000 or less'),
   cravings: z.array(z.string().trim().min(1).max(60)).max(10, 'At most 10 cravings'),
   overrides: z.array(WeekOverrideSchema),
@@ -159,8 +159,11 @@ export interface MealPlan {
 
 const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 
-/** The Thursday on or before `date`, judged on the Toronto calendar. Returns YYYY-MM-DD. */
-export function flyerWeekOf(date: Date): string {
+/**
+ * The plan week a date belongs to: the Sunday on or before `date`, judged on the Toronto calendar.
+ * Returns YYYY-MM-DD. Week days are weekOf + 0 (Sunday) to weekOf + 6 (Saturday).
+ */
+export function planWeekOf(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Toronto',
     year: 'numeric',
@@ -176,8 +179,7 @@ export function flyerWeekOf(date: Date): string {
   if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(dayOfMonth) || weekday === undefined) {
     throw new Error(`Could not read the Toronto date for ${date.toISOString()}`);
   }
-  const back = (weekday - 4 + 7) % 7; // Thursday is 4
-  return new Date(Date.UTC(year, month - 1, dayOfMonth - back)).toISOString().slice(0, 10);
+  return new Date(Date.UTC(year, month - 1, dayOfMonth - weekday)).toISOString().slice(0, 10); // Sunday is 0
 }
 
 export function addDaysIso(date: string, days: number): string {
@@ -188,7 +190,7 @@ export function addDaysIso(date: string, days: number): string {
 
 /**
  * Dinner names served in the `windowDays` before `weekOf`, from earlier saved plans.
- * Each meal's date is its plan's Thursday plus its day offset in flyer-week order.
+ * Each meal's date is its plan's Sunday plus its day offset in DAYS order (Sunday first).
  */
 export function recentDinnerNames(plans: MealPlan[], weekOf: string, windowDays = 14): string[] {
   const start = addDaysIso(weekOf, -windowDays);

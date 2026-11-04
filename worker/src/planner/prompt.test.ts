@@ -46,7 +46,7 @@ describe('each quantities', () => {
 
   it('passes eachMeans through the payload, and the system prompt forbids counting slices', () => {
     const household: Household = { ...defaultHousehold() };
-    const request: PlanRequest = { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [], useItUp: true };
+    const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: true };
     const { cells, fixed } = expandWeek(household, request);
     const available = buildAvailable([deal('white-bread', 0.5)], noFixed);
     const payload = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available, neverBuy: [], recentDinnerNames: [] });
@@ -64,7 +64,7 @@ describe('buildPayload', () => {
       { id: 'ben', name: 'Ben', dietTags: [], allergies: [] },
     ],
   };
-  const request: PlanRequest = { weekOf: '2026-11-12', budget: 150, cravings: ['tacos'], overrides: [], useItUp: true };
+  const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: ['tacos'], overrides: [], useItUp: true };
 
   it('builds slots, allergies and the remaining budget after fixed meals', () => {
     const { cells, fixed } = expandWeek(household, request);
@@ -79,7 +79,7 @@ describe('buildPayload', () => {
       recentDinnerNames: [],
     });
     expect(payload.slots).toHaveLength(21);
-    expect(payload.slots[0]).toEqual({ id: 'thu-breakfast', day: 'thu', slot: 'breakfast', eaters: ['ann', 'ben'] });
+    expect(payload.slots[0]).toEqual({ id: 'sun-breakfast', day: 'sun', slot: 'breakfast', eaters: ['ann', 'ben'] });
     expect(payload.allergies).toEqual({ ann: ['dairy'], ben: [] });
     expect(payload.remainingBudget).toBe(130);
     expect(payload.people[0]).toMatchObject({ id: 'ann', proteinTargetG: 80 });

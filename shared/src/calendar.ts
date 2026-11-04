@@ -1,11 +1,9 @@
 // Week and slot constants. Kept apart from index.ts so planner modules can import them
 // at runtime without a cycle through the barrel file.
 
-export const DAYS = ['thu', 'fri', 'sat', 'sun', 'mon', 'tue', 'wed'] as const; // flyer week order, Thu to Wed
+// The plan week runs Sunday to Saturday. Every grid, picker and loop uses this order.
+export const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 export type Day = (typeof DAYS)[number];
-
-// Recurring weekly settings (schedule, time caps, fixed meals, prep day) list days Sunday first.
-export const DISPLAY_DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
 export const SLOTS = ['breakfast', 'lunch', 'dinner'] as const;
 export type Slot = (typeof SLOTS)[number];

@@ -98,7 +98,7 @@ function ConfirmDialog({ request, onDone }: { request: ConfirmOptions; onDone: (
       className="m-auto w-[calc(100%-32px)] max-w-[380px] bg-transparent p-0 backdrop:bg-black/60"
     >
       <div className="rounded-xl border border-edge bg-field p-6">
-        <h2 id="confirm-title" className="font-display text-[20px] leading-[1.25] text-paper">
+        <h2 id="confirm-title" className="font-display font-semibold tracking-[-0.01em] text-paper text-[20px] leading-[1.25]">
           {request.title}
         </h2>
         {request.message && (

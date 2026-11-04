@@ -61,10 +61,12 @@ export async function insertFlyerItems(
   return items.length;
 }
 
+// Shopping happens on Sunday, so the week is priced from the flyers valid that day.
+/** Flyer items valid on `date` (valid_from <= date <= valid_to). */
 export async function currentFlyerItems(db: D1Database, date: string): Promise<FlyerItem[]> {
   const { results } = await db
-    .prepare('SELECT * FROM flyer_items WHERE valid_to >= ?')
-    .bind(date)
+    .prepare('SELECT * FROM flyer_items WHERE valid_from <= ? AND valid_to >= ?')
+    .bind(date, date)
     .all<FlyerRow>();
   return results.map((r) => ({
     id: r.id,

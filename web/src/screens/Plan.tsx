@@ -5,7 +5,7 @@ import {
   DAY_LONG,
   SLOTS,
   addDaysIso,
-  flyerWeekOf,
+  planWeekOf,
   type Day,
   type FixedMeal,
   type Household,
@@ -41,8 +41,8 @@ export default function Plan() {
   const people = household?.people ?? [];
   const maxCount = people.length + 2;
   const budgetValue = budget ?? (household ? String(household.defaultBudget) : '');
-  // The flyer week this grid is for: Thursday first, so each column carries its date.
-  const weekOf = flyerWeekOf(new Date());
+  // The plan week this grid is for: Sunday first, so each column carries its date.
+  const weekOf = planWeekOf(new Date());
 
   function defaultCount(day: Day, slot: Slot): number {
     if (!household) return 0;
@@ -93,7 +93,7 @@ export default function Plan() {
     setGenerateError(null);
     try {
       await generatePlan({
-        weekOf: flyerWeekOf(new Date()),
+        weekOf: planWeekOf(new Date()),
         budget: budgetNumber,
         cravings,
         overrides: buildOverrides(),
@@ -129,13 +129,13 @@ export default function Plan() {
       <Section title="Budget" className="lg:col-start-1 lg:row-start-1">
         <label className="block">
           <div className="flex items-baseline gap-1 border-b border-line pb-2">
-            <span className="font-display text-[32px] text-muted">$</span>
+            <span className="text-[32px] font-semibold tabular-nums text-muted">$</span>
             <input
               type="number"
               inputMode="decimal"
               min={0}
               aria-label="Weekly budget"
-              className="w-full bg-transparent font-display text-[32px] text-paper focus:outline-none"
+              className="w-full bg-transparent text-[32px] font-semibold tabular-nums text-paper focus:outline-none"
               value={budgetValue}
               onChange={(e) => setBudget(e.target.value)}
             />

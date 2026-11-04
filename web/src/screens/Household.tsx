@@ -3,7 +3,6 @@ import {
   ALLERGEN_PRESETS,
   DAYS,
   DAY_LONG,
-  DISPLAY_DAYS,
   HouseholdSchema,
   SLOTS,
   UNITS,
@@ -403,7 +402,7 @@ function ScheduleSection({ h, update }: { h: Household; update: Update }) {
           <p className="mb-2 text-[14px] text-paper">{p.name}</p>
           <div className="grid grid-cols-[76px_repeat(7,minmax(0,1fr))] gap-1.5">
             <span />
-            {DISPLAY_DAYS.map((d) => (
+            {DAYS.map((d) => (
               <span key={d} className="text-center text-[11px] text-muted" aria-hidden="true">
                 {DAY_SHORT[d]}
               </span>
@@ -413,7 +412,7 @@ function ScheduleSection({ h, update }: { h: Household; update: Update }) {
                 <span className="flex items-center text-[12px] text-muted" aria-hidden="true">
                   {SLOT_LABEL[slot]}
                 </span>
-                {DISPLAY_DAYS.map((day) => {
+                {DAYS.map((day) => {
                   const on = isEating(h, p.id, day, slot);
                   return (
                     <button
@@ -457,7 +456,7 @@ function PrepSection({ h, update }: { h: Household; update: Update }) {
           }
         >
           <option value="none">None</option>
-          {DISPLAY_DAYS.map((d) => (
+          {DAYS.map((d) => (
             <option key={d} value={d}>
               {DAY_LONG[d]}
             </option>
@@ -477,7 +476,7 @@ function TimeCaps({ h, update }: { h: Household; update: Update }) {
       </p>
       <div className="mt-4 grid grid-cols-[76px_repeat(7,minmax(0,1fr))] gap-1.5">
         <span />
-        {DISPLAY_DAYS.map((d) => (
+        {DAYS.map((d) => (
           <span key={d} className="text-center text-[11px] text-muted" aria-hidden="true">
             {DAY_SHORT[d]}
           </span>
@@ -487,7 +486,7 @@ function TimeCaps({ h, update }: { h: Household; update: Update }) {
             <span className="flex items-center text-[12px] text-muted" aria-hidden="true">
               {SLOT_LABEL[slot]}
             </span>
-            {DISPLAY_DAYS.map((day) => {
+            {DAYS.map((day) => {
               const cap = h.timeCaps[day]?.[slot];
               return (
                 <button
@@ -660,7 +659,7 @@ function FixedMealEditor({
       <div>
         <span className={eyebrow}>Days</span>
         <div className="mt-2 flex gap-1.5">
-          {DISPLAY_DAYS.map((d) => {
+          {DAYS.map((d) => {
             const on = meal.days.includes(d);
             return (
               <button
@@ -954,7 +953,7 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
           >
             &minus;
           </button>
-          <span className="w-6 text-center font-display text-[18px] text-paper">{h.maxStores}</span>
+          <span className="w-6 text-center text-[18px] font-semibold tabular-nums text-paper">{h.maxStores}</span>
           <button
             type="button"
             aria-label="More stores"

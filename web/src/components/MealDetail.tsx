@@ -76,7 +76,7 @@ export default function MealDetail({ day, meal, planned, rating, ratingError, on
           </button>
         </div>
 
-        <h2 id="meal-detail-title" className="mt-4 font-display text-[32px] font-normal leading-[1.15] text-paper">
+        <h2 id="meal-detail-title" className="mt-4 font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-paper">
           {meal.name}
         </h2>
         <p className="mt-2 text-[14px] text-muted">
@@ -118,7 +118,7 @@ export default function MealDetail({ day, meal, planned, rating, ratingError, on
 
         {planned && planned.ingredients.length > 0 && (
           <section className="mt-8 border-t border-line pt-4">
-            <h3 className="font-display text-[20px] font-normal text-paper">Ingredients</h3>
+            <h3 className="font-display font-semibold tracking-[-0.01em] text-paper text-[20px]">Ingredients</h3>
             <ul className="mt-3">
               {planned.ingredients.map((ing) => (
                 <li key={ing.ingredientId} className="flex items-baseline justify-between gap-4 border-b border-line2 py-2 text-[14px]">
@@ -134,7 +134,7 @@ export default function MealDetail({ day, meal, planned, rating, ratingError, on
 
         {planned && planned.steps.length > 0 && (
           <section className="mt-8 border-t border-line pt-4">
-            <h3 className="font-display text-[20px] font-normal text-paper">Steps</h3>
+            <h3 className="font-display font-semibold tracking-[-0.01em] text-paper text-[20px]">Steps</h3>
             <ol className="mt-3 space-y-3">
               {planned.steps.map((step, i) => (
                 <li key={i} className="flex gap-3 text-[14px] leading-[1.5] text-paper">

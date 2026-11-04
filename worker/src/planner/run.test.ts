@@ -27,7 +27,7 @@ const deals: Deal[] = scoreDeals(matched, {
   neverBuy: [],
   alwaysBuy: [],
   allergens: [],
-  shoppingDate: '2026-11-12',
+  shoppingDate: '2026-11-15',
   householdSize: 2,
 });
 
@@ -50,7 +50,7 @@ function household(over: Partial<Household> = {}): Household {
 }
 
 function request(over: Partial<PlanRequest> = {}): PlanRequest {
-  return { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [], useItUp: true, ...over };
+  return { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: true, ...over };
 }
 
 function cellsOf(h: Household, req: PlanRequest): SlotCell[] {

@@ -1,4 +1,4 @@
-import { DISPLAY_DAYS, type Day, type Slot } from '@provisions/shared';
+import { DAYS, type Day, type Slot } from '@provisions/shared';
 
 export const DAY_SHORT: Record<Day, string> = {
   thu: 'Thu',
@@ -20,15 +20,15 @@ export const SLOT_LABEL: Record<Slot, string> = {
 // Runs do not wrap: Sat and Sun are not adjacent, so "Sat, Sun" reads "Sun, Sat".
 export function formatDays(days: Day[]): string {
   if (days.length === 0) return 'No days';
-  if (days.length === DISPLAY_DAYS.length) return 'Every day';
+  if (days.length === DAYS.length) return 'Every day';
 
-  const ordered = DISPLAY_DAYS.filter((d) => days.includes(d));
+  const ordered = DAYS.filter((d) => days.includes(d));
   const runs: string[] = [];
   let start = 0;
   for (let i = 0; i < ordered.length; i++) {
     const endOfRun =
       i === ordered.length - 1 ||
-      DISPLAY_DAYS.indexOf(ordered[i + 1]!) !== DISPLAY_DAYS.indexOf(ordered[i]!) + 1;
+      DAYS.indexOf(ordered[i + 1]!) !== DAYS.indexOf(ordered[i]!) + 1;
     if (endOfRun) {
       const a = ordered[start]!;
       const b = ordered[i]!;

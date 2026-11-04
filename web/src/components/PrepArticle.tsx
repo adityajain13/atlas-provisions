@@ -62,7 +62,7 @@ export function PrepArticle({ plan, prep, framed = false }: { plan: MealPlan; pr
 
   return (
     <article className={framed ? 'rounded-lg border border-line2 p-5' : 'border-t border-line pt-4'}>
-      <h3 className="font-display text-[20px] font-normal leading-[1.25] text-paper">Prep &middot; {prep.totalMinutes} min</h3>
+      <h3 className="font-display font-semibold tracking-[-0.01em] text-paper text-[20px] leading-[1.25]">Prep &middot; {prep.totalMinutes} min</h3>
       {prep.steps.length === 0 ? (
         <p className="mt-3 text-[13px] text-muted">Nothing to prep ahead this week.</p>
       ) : (

@@ -13,7 +13,7 @@ function household(over: Partial<Household> = {}): Household {
 }
 
 function request(over: Partial<PlanRequest> = {}): PlanRequest {
-  return { weekOf: '2026-11-12', budget: 150, cravings: [], overrides: [], useItUp: true, ...over };
+  return { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: true, ...over };
 }
 
 function fixedMeal(over: Partial<FixedMeal> = {}): FixedMeal {

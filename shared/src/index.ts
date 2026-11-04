@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
-export { DAYS, DISPLAY_DAYS, SLOTS, DAY_LONG, isWeeknight, type Day, type Slot } from './calendar';
+export { DAYS, SLOTS, DAY_LONG, isWeeknight, type Day, type Slot } from './calendar';
 
 export const UNITS = ['g', 'kg', 'ml', 'l', 'each'] as const;
 export type Unit = (typeof UNITS)[number];
@@ -114,7 +114,7 @@ export const HouseholdSchema = z.object({
   itemRules: z.array(ItemRuleSchema),
   // timeCaps[day][slot] = most active minutes a meal in that slot may take (busy nights).
   timeCaps: z.record(z.record(z.number().int().min(5).max(180))).default({}),
-  // Day to batch-prep for (Thu to Wed), or null for none. Stored households without it get Sunday.
+  // Day to batch-prep for (Sunday to Saturday), or null for none. Stored households without it get Sunday.
   prepDay: z.enum(DAYS).nullable().default('sun'),
 });
 export type Household = z.infer<typeof HouseholdSchema>;
