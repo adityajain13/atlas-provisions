@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
-import { planWeekOf, type MealPlan } from '@provisions/shared';
+import { useEffect, useState, type ReactNode } from 'react';
+import { type MealPlan } from '@provisions/shared';
 import { errorMessage, getPlan } from '../api';
 import { Header } from '../components/Header';
 import { NoPlan } from '../components/NoPlan';
 import { Page } from '../components/Page';
 import { SaveStatus, useSaveScope } from '../components/SaveStatus';
+import WeekSwitcher from '../components/WeekSwitcher';
+import { useViewedWeek, viewWindow } from '../lib/week';
 import { eyebrow } from '../components/ui';
 import { useChecks } from '../lib/useChecks';
 import { LIST_CATEGORY_ORDER, planToList, type ViewItem } from '../lib/planView';
@@ -18,11 +20,17 @@ type State =
   | { status: 'error'; error: string };
 
 export default function List() {
+  const { weekOf, current, go } = useViewedWeek();
+  // Keyed by week: switching weeks starts a fresh load and fresh ticks.
+  return <ListScreen key={weekOf} weekOf={weekOf} current={current} go={go} />;
+}
+
+function ListScreen({ weekOf, current, go }: { weekOf: string; current: string; go: (weekOf: string) => void }) {
   const [state, setState] = useState<State>({ status: 'loading' });
 
   useEffect(() => {
     let alive = true;
-    getPlan(planWeekOf(new Date()))
+    getPlan(weekOf)
       .then((plan: MealPlan | null) => {
         if (!alive) return;
         setState(plan ? { status: 'plan', view: planToList(plan) } : { status: 'none' });
@@ -33,12 +41,19 @@ export default function List() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [weekOf]);
+
+  const switcher = (
+    <div className="mt-6">
+      <WeekSwitcher weekOf={weekOf} current={current} first={viewWindow(current).first} last={viewWindow(current).last} onChange={go} />
+    </div>
+  );
 
   if (state.status === 'loading') {
     return (
       <Page>
         <Header title="Shopping list" />
+        {switcher}
         <p className="mt-10 text-[14px] text-muted">Loading&hellip;</p>
       </Page>
     );
@@ -48,7 +63,8 @@ export default function List() {
     return (
       <Page>
         <Header title="Shopping list" />
-        <NoPlan />
+        {switcher}
+        <NoPlan weekOf={weekOf} current={current} />
       </Page>
     );
   }
@@ -57,16 +73,17 @@ export default function List() {
     return (
       <Page>
         <Header title="Shopping list" />
+        {switcher}
         <p className="mt-10 text-[14px] text-muted">Could not load this week&apos;s plan: {state.error}</p>
       </Page>
     );
   }
 
   // Mounted only once the view is known, so the checked state comes from this week's key.
-  return <ListBody view={state.view} />;
+  return <ListBody view={state.view} switcher={switcher} />;
 }
 
-function ListBody({ view }: { view: View }) {
+function ListBody({ view, switcher }: { view: View; switcher: ReactNode }) {
   const { checks, toggle, ready } = useChecks(view.weekOf);
   useSaveScope('sync', ready);
 
@@ -83,6 +100,7 @@ function ListBody({ view }: { view: View }) {
         title="Shopping list"
         status={<SaveStatus />}
       />
+      {switcher}
       <p className="mt-2 text-[12px] text-muted">Shared with everyone in your household.</p>
 
       {items.length === 0 && <p className="mt-10 text-[14px] text-muted">Nothing to buy.</p>}

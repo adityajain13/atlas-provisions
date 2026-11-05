@@ -14,6 +14,7 @@ import {
   type PantryItem,
   type ParsedReceipt,
   type PlanRequest,
+  readStoredPlan,
   type Rating,
   type RatingInput,
   type ReceiptCommit,
@@ -105,20 +106,20 @@ export async function generatePlan(req: PlanRequest): Promise<MealPlan> {
       body: JSON.stringify(req),
     }),
   );
-  return (await res.json()) as MealPlan;
+  return readStoredPlan((await res.json()) as MealPlan) as MealPlan;
 }
 
 /** Rebuilds only the batch prep of a saved plan, with one Haiku call. Returns the updated plan. */
 export async function regeneratePrep(weekOf: string): Promise<MealPlan> {
   const res = await ensureOk(await authFetch(`${BASE}/plan/${weekOf}/prep`, { method: 'POST' }));
-  return (await res.json()) as MealPlan;
+  return readStoredPlan((await res.json()) as MealPlan) as MealPlan;
 }
 
 /** The saved plan for a week, or null when there is none. */
 export async function getPlan(weekOf: string): Promise<MealPlan | null> {
   const res = await authFetch(`${BASE}/plan/${weekOf}`);
   if (res.status === 404) return null;
-  return (await ensureOk(res)).json() as Promise<MealPlan>;
+  return readStoredPlan((await (await ensureOk(res)).json()) as MealPlan) as MealPlan;
 }
 
 // ---- Pantry (milestone 3A) ----

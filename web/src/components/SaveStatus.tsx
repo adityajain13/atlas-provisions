@@ -21,7 +21,7 @@ export type SaveScope = 'sync' | 'local' | 'plan';
 export type SaveState =
   | { kind: 'idle' }
   | { kind: 'pending' } // an edit waiting for its debounce to end
-  | { kind: 'saving' }
+  | { kind: 'saving'; text?: string } // text replaces "Saving…", e.g. "Planning…"
   | { kind: 'saved'; at: number }
   | { kind: 'error'; message: string; retry?: () => Promise<unknown> };
 
@@ -29,7 +29,7 @@ interface SaveContextValue {
   status: SaveState;
   scope: SaveScope;
   ready: boolean;
-  track<T>(promise: Promise<T>, retry?: () => Promise<T>): Promise<T>;
+  track<T>(promise: Promise<T>, retry?: () => Promise<T>, opts?: { busy?: string }): Promise<T>;
   setPending(): void;
   setFailure(message: string): void;
   setFlush(fn: (() => void) | null): void;
@@ -64,8 +64,8 @@ export function SaveStatusProvider({ children }: { children: ReactNode }) {
   const unsavedRef = useRef(unsaved);
   unsavedRef.current = unsaved;
 
-  const track = useCallback(<T,>(promise: Promise<T>, retry?: () => Promise<T>): Promise<T> => {
-    setStatus({ kind: 'saving' });
+  const track = useCallback(<T,>(promise: Promise<T>, retry?: () => Promise<T>, opts?: { busy?: string }): Promise<T> => {
+    setStatus({ kind: 'saving', text: opts?.busy });
     return promise.then(
       (value) => {
         setStatus({ kind: 'saved', at: Date.now() });
@@ -207,7 +207,7 @@ export function SaveStatus() {
     body = (
       <span className="flex items-center gap-2 text-muted">
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted" aria-hidden="true" />
-        Saving&hellip;
+        {status.kind === 'saving' && status.text ? status.text : <>Saving&hellip;</>}
       </span>
     );
   } else if (status.kind === 'saved' && recent) {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DAYS, SLOTS, type Day, type Slot } from './calendar';
+import { DAYS, PLAN_RETENTION_WEEKS, SLOTS, WEEKS_AHEAD, addWeeks, isSunday, type Day, type Slot } from './calendar';
 import type { Category, BaseUnit } from './catalog';
 import type { PrepPlan } from './prep';
 
@@ -118,7 +118,9 @@ export interface ValidationIssue {
     | 'use-it-up'
     | 'never-again'
     | 'store-cap'
-    | 'prep';
+    | 'prep'
+    | 'prep-timing'
+    | 'prices';
   severity: 'error' | 'warning';
   message: string; // written as an instruction to the planner
 }
@@ -142,8 +144,12 @@ export interface RawPlan {
   prep?: unknown; // the batch-prep list from the same call, when prepDay is set; checked by the worker
 }
 
+// Which flyer prices priced the week: the flyers valid on its Sunday, those overlapping it, or today's.
+export type PriceSource = 'week' | 'overlap' | 'current';
+
 export interface MealPlan {
   weekOf: string;
+  priceSource?: PriceSource; // absent on plans saved before this was recorded
   request: PlanRequest;
   meals: PlannedMeal[];
   fixedMeals: { id: string; name: string; day: Day; slot: Slot; eaters: string[] }[];
@@ -183,6 +189,19 @@ export function planWeekOf(date: Date): string {
     throw new Error(`Could not read the Toronto date for ${date.toISOString()}`);
   }
   return new Date(Date.UTC(year, month - 1, dayOfMonth - weekday)).toISOString().slice(0, 10); // Sunday is 0
+}
+
+export const PLAN_WINDOW_MESSAGE = 'You can plan this week or up to 2 weeks ahead.';
+
+/** True when a plan may be made for the Sunday `weekOf`: the current plan week, or up to WEEKS_AHEAD after it. */
+export function isPlannableWeek(weekOf: string, now: Date): boolean {
+  const current = planWeekOf(now);
+  return isSunday(weekOf) && weekOf >= current && weekOf <= addWeeks(current, WEEKS_AHEAD);
+}
+
+/** The oldest week whose plans and ticks are kept, as of `now`. Rows for earlier weeks are deleted. */
+export function retentionCutoff(now: Date): string {
+  return addWeeks(planWeekOf(now), -PLAN_RETENTION_WEEKS);
 }
 
 export function addDaysIso(date: string, days: number): string {

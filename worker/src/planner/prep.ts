@@ -2,8 +2,11 @@ import {
   DAYS,
   DAY_LONG,
   INGREDIENT_BY_ID,
+  PREP_TIMES,
   PrepPlanSchema,
   RawPrepSchema,
+  STORAGE_METHODS,
+  prepTimingIssues,
   type Day,
   type MealPlan,
   type PrepPlan,
@@ -15,6 +18,42 @@ import {
 export interface PrepClient {
   submitPrep(system: string, payload: unknown): Promise<unknown>;
 }
+
+/** The prep rules the planner follows. Shared by the meal call's system prompt and the regenerate call. */
+export const PREP_RULES = [
+  'Batch most steps on the prep day. Put a step on a later day or time when the item would not keep until its last meal, when it must be done close to cooking (thawing, soaking, marinating), or when it is quick and better fresh.',
+  'Each step has a `day` (Sunday to Saturday) on or before the first meal it serves in `forMeals`. Use `time` (morning, afternoon or evening) when the time of day matters, for example thawing in the morning for dinner.',
+  '`storage` has a `method` (fridge, freezer, counter or pantry), a `how` (the container or wrapping, such as "airtight container" or "wrapped in a damp paper towel"), and `keepsDays`: how many days the item stays good from the step\'s day to the last meal it serves. If it cannot keep that long, split the step into two so each batch keeps.',
+  'When one prepped item serves meals on different days, say in `useNote` how to split it and where the rest is kept, for example "Use half Monday; the rest is for Wednesday, in the fridge."',
+  'Only prep what keeps until it is eaten: respect each ingredient\'s `shelfLifeDays`. Link each step to the meal ids it serves in `forMeals`. Keep active prep under 90 minutes in total when possible.',
+];
+
+/** The step properties of the prep list, shared by the meal call and the regenerate call. */
+export const PREP_STEP_PROPERTIES = {
+  task: { type: 'string', description: 'What to do, e.g. "Cook a tray of chicken thighs"' },
+  minutes: { type: 'number', description: 'Active minutes for this step' },
+  forMeals: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Meal ids from `meals` that this step serves',
+  },
+  day: { type: 'string', enum: [...DAYS], description: 'The day to do this step, on or before its first meal' },
+  time: { type: 'string', enum: [...PREP_TIMES], description: 'When that day, if it matters' },
+  storage: {
+    type: 'object',
+    description: 'Where the prepped item is kept and for how long from this step',
+    properties: {
+      method: { type: 'string', enum: [...STORAGE_METHODS] },
+      how: { type: 'string', description: 'The container or wrapping, e.g. "airtight container"' },
+      keepsDays: { type: 'number', description: 'Days it stays good from this step to its last meal' },
+    },
+    required: ['method', 'how', 'keepsDays'],
+  },
+  useNote: {
+    type: 'string',
+    description: 'When one item serves several days: how to split it and where the rest is kept',
+  },
+} as const;
 
 export const PREP_TOOL = {
   name: 'submit_prep',
@@ -28,17 +67,8 @@ export const PREP_TOOL = {
         maxItems: 30,
         items: {
           type: 'object',
-          properties: {
-            task: { type: 'string', description: 'What to do, e.g. "Cook a tray of chicken thighs"' },
-            minutes: { type: 'number', description: 'Active minutes for this step' },
-            forMeals: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Meal ids from `meals` that this step serves',
-            },
-            storage: { type: 'string', description: 'How to store it and until when, e.g. "fridge, 3 days"' },
-          },
-          required: ['task', 'minutes', 'forMeals'],
+          properties: PREP_STEP_PROPERTIES,
+          required: ['task', 'minutes', 'forMeals', 'day', 'storage'],
         },
       },
     },
@@ -48,9 +78,8 @@ export const PREP_TOOL = {
 
 export function prepSystemPrompt(prepDay: Day): string {
   return [
-    `Turn this week's meals into a batch-prep list for ${DAY_LONG[prepDay]}: what to cook ahead (grains, proteins, sauces), what to wash and chop, what to marinate, with minutes and how to store each.`,
-    "Only prep things that keep until they're eaten (respect shelf life: no cut avocado for 4 days). Use `shelfLifeDays` for each ingredient.",
-    'Link each step to the meal ids it serves, in `forMeals`. Keep it under 90 minutes total when possible.',
+    `Turn this week's meals into a batch-prep list, mostly for ${DAY_LONG[prepDay]}: what to cook ahead (grains, proteins, sauces), what to wash and chop, what to marinate or thaw, with minutes, the day and time to do each, and how to store each.`,
+    ...PREP_RULES,
     'Return the prep only via the submit_prep tool.',
   ].join('\n');
 }
@@ -95,7 +124,10 @@ export function normalisePrep(raw: unknown, prepDay: Day, mealIds: ReadonlySet<s
     task: s.task,
     minutes: Math.round(s.minutes),
     forMeals: s.forMeals.filter((id) => mealIds.has(id)),
+    day: s.day ?? prepDay,
+    ...(s.time ? { time: s.time } : {}),
     ...(s.storage ? { storage: s.storage } : {}),
+    ...(s.useNote ? { useNote: s.useNote } : {}),
   }));
   const totalMinutes = steps.reduce((sum, s) => sum + s.minutes, 0);
   return PrepPlanSchema.parse({ day: prepDay, steps, totalMinutes });
@@ -117,11 +149,11 @@ export async function generatePrep(plan: MealPlan, prepDay: Day, client: PrepCli
  */
 export async function attachPrep(plan: MealPlan, prepDay: Day | null, client: PrepClient): Promise<MealPlan> {
   const { prep: _stale, ...rest } = plan;
-  const issues = plan.issues.filter((i) => i.check !== 'prep');
+  const issues = plan.issues.filter((i) => i.check !== 'prep' && i.check !== 'prep-timing');
   if (!prepDay) return { ...rest, issues };
   try {
     const prep = await generatePrep(plan, prepDay, client);
-    return { ...rest, issues, prep };
+    return { ...rest, issues: [...issues, ...prepTimingIssues(prep, plan.meals)], prep };
   } catch (e) {
     const reason = e instanceof Error ? e.message : 'unknown error';
     return {
