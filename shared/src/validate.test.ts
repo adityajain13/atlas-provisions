@@ -580,3 +580,84 @@ describe('buildList: pantry', () => {
     expect(list[0]).toMatchObject({ packs: 1, total: 1, usedIn: ['m1'] });
   });
 });
+
+describe('buildList: store cap', () => {
+  // Three stores, each sells one ingredient only. With maxStores 2, one of them must be left out.
+  const deals = [deal('broccoli', 'A', 2), deal('spinach', 'B', 2), deal('garlic', 'C', 5)];
+  const meals = oneMeal([{ id: 'broccoli', qty: 1 }, { id: 'spinach', qty: 1 }, { id: 'garlic', qty: 1 }]);
+
+  it('never buys from more stores than maxStores', () => {
+    const list = buildList(meals, NO_FIXED, deals, [], ['A', 'B', 'C'], 2);
+    const bought = new Set(list.filter((i) => i.store !== 'Unpriced').map((i) => i.store));
+    expect(bought.size).toBeLessThanOrEqual(2);
+    expect(list.filter((i) => i.store === 'Unpriced')).toHaveLength(1);
+  });
+
+  it('leaves out the ingredients the chosen stores cannot cover, and never buys them from another store', () => {
+    const list = buildList(meals, NO_FIXED, deals, [], ['A', 'B', 'C'], 1);
+    expect(new Set(list.filter((i) => i.store !== 'Unpriced').map((i) => i.store))).toEqual(new Set(['A']));
+    const left = list.filter((i) => i.store === 'Unpriced').map((i) => i.ingredientId).sort();
+    expect(left).toEqual(['garlic', 'spinach']);
+  });
+
+  it('gives an uncovered item the cheapest elsewhere hint, from an enabled store outside the list', () => {
+    const list = buildList(meals, NO_FIXED, deals, [], ['A', 'B', 'C'], 1);
+    expect(list.find((i) => i.ingredientId === 'garlic')).toMatchObject({
+      store: 'Unpriced',
+      needed: 1,
+      cheapestElsewhere: { store: 'C', price: 5 },
+    });
+  });
+
+  it('covers the most ingredients first, then the lowest total', () => {
+    // A covers broccoli and spinach (total 4). B covers only garlic. Two stores, so A + B covers all.
+    const d = [deal('broccoli', 'A', 2), deal('spinach', 'A', 2), deal('garlic', 'B', 5)];
+    const list = buildList(meals, NO_FIXED, d, [], ['A', 'B'], 2);
+    expect(list.filter((i) => i.store === 'Unpriced')).toHaveLength(0);
+    expect(list.reduce((s, i) => s + i.total, 0)).toBe(9);
+  });
+
+  it('gives no hint to an ingredient no enabled store sells', () => {
+    const list = buildList(oneMeal([{ id: 'broccoli', qty: 1 }]), NO_FIXED, [], [], ['A'], 1);
+    expect(list[0]!.cheapestElsewhere).toBeUndefined();
+  });
+});
+
+describe('validate: store cap warning', () => {
+  const capped = (n: number, cheaper = true): ListItem[] =>
+    Array.from({ length: n }, (_, i) =>
+      item(`x${i}`, {
+        store: 'Unpriced',
+        packs: 0,
+        packQty: 0,
+        packPrice: 0,
+        total: 0,
+        ...(cheaper ? { cheapestElsewhere: { store: 'Longo', price: 4.99 } } : {}),
+      }),
+    );
+
+  it('warns with the count and the top store limit', () => {
+    const h = household({ maxStores: 2 });
+    const issues = validate(planOf(cleanMeals(), { list: capped(2) }), ctxOf({ household: h }));
+    const hit = issues.find((i) => i.check === 'store-cap');
+    expect(hit).toMatchObject({ severity: 'warning', message: "2 items aren't in your top 2 stores' flyers; buy them anywhere or allow more stores." });
+  });
+
+  it('uses the singular for one item and one store', () => {
+    const h = household({ maxStores: 1 });
+    const issues = validate(planOf(cleanMeals(), { list: capped(1) }), ctxOf({ household: h }));
+    expect(issues.find((i) => i.check === 'store-cap')!.message).toBe("1 item isn't in your top 1 store's flyers; buy it anywhere or allow more stores.");
+  });
+
+  it('is not raised for items no enabled store sells, and those keep the unpriced warning', () => {
+    const plain = capped(1, false);
+    const issues = validate(planOf(cleanMeals(), { list: plain }), ctxOf());
+    expect(issues.some((i) => i.check === 'store-cap')).toBe(false);
+    expect(issues.some((i) => i.check === 'unknown-ingredient' && i.severity === 'warning')).toBe(true);
+  });
+
+  it('does not repeat the unpriced warning for items another enabled store sells', () => {
+    const issues = validate(planOf(cleanMeals(), { list: capped(2) }), ctxOf());
+    expect(issues.some((i) => i.check === 'unknown-ingredient')).toBe(false);
+  });
+});

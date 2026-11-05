@@ -91,9 +91,9 @@ function subsetsUpTo<T>(items: T[], maxSize: number): T[][] {
  * Pick one store per ingredient, minimising stores used and cost.
  *
  * Every subset of the enabled stores up to maxStores is tried. Each ingredient takes the cheapest
- * store in the subset that sells it. A subset that leaves an ingredient out is only used when no
- * subset covers everything, and then that ingredient falls back to its cheapest store. Ranking:
- * fewest uncovered ingredients, then lowest total, then fewest stores.
+ * store in the subset that sells it. An ingredient no store in the subset sells is left out
+ * (uncovered), never bought from a store outside the subset, so the list never uses more than
+ * maxStores stores. Ranking: fewest uncovered ingredients, then lowest total, then fewest stores.
  */
 function assignStores(
   ids: string[],
@@ -109,12 +109,11 @@ function assignStores(
     let total = 0;
     for (const id of ids) {
       const all = offers.get(id) ?? [];
-      let pick = cheapest(all.filter((o) => subset.includes(o.store)));
+      const pick = cheapest(all.filter((o) => subset.includes(o.store)));
       if (!pick) {
         uncovered++;
-        pick = cheapest(all);
+        continue;
       }
-      if (!pick) continue;
       picks.set(id, pick);
       total += packsFor(qty.get(id) ?? 0, pick.packQty) * pick.packPrice;
     }
@@ -141,6 +140,9 @@ function assignStores(
  *
  * Pantry: stock on hand is taken off each ingredient's quantity before packs are counted, so
  * ingredients the pantry covers fully are not bought at all.
+ *
+ * Store cap: never more than maxStores stores. An item outside the chosen stores is Unpriced, and
+ * carries cheapestElsewhere when an enabled store sells it.
  *
  * Sort: store (highest subtotal first, Unpriced last), then CATEGORY_ORDER, then name.
  */
@@ -210,6 +212,8 @@ export function buildList(
   }
   for (const id of unpriced) {
     const catalog = INGREDIENT_BY_ID[id];
+    // Offers are already limited to enabled stores, and none of them is a chosen store.
+    const elsewhere = cheapest(offers.get(id) ?? []);
     items.push({
       ingredientId: id,
       name: catalog?.name ?? id,
@@ -221,6 +225,7 @@ export function buildList(
       total: 0,
       usedIn: [...(usedIn.get(id) ?? [])],
       needed: Number((qty.get(id) ?? 0).toFixed(3)),
+      ...(elsewhere ? { cheapestElsewhere: { store: elsewhere.store, price: elsewhere.packPrice } } : {}),
     });
   }
 
@@ -574,12 +579,28 @@ function checkVariety(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
 
 function checkUnpriced(plan: MealPlan): ValidationIssue[] {
   return plan.list
-    .filter((i) => i.store === 'Unpriced')
+    .filter((i) => i.store === 'Unpriced' && !i.cheapestElsewhere)
     .map((i) => ({
       check: 'unknown-ingredient' as const,
       severity: 'warning' as const,
       message: `No enabled store sells ${i.name.toLowerCase()}, so it is not priced. Check the shelf price, or remove it from the meal.`,
     }));
+}
+
+/** Items left out of the list because the chosen stores do not sell them. Warned, never retried. */
+function checkStoreCap(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  const n = plan.list.filter((i) => i.store === 'Unpriced' && i.cheapestElsewhere).length;
+  if (n === 0) return [];
+  const m = ctx.household.maxStores;
+  const subject = n === 1 ? "1 item isn't" : `${n} items aren't`;
+  const object = n === 1 ? 'it' : 'them';
+  return [
+    {
+      check: 'store-cap',
+      severity: 'warning',
+      message: `${subject} in your top ${m} ${m === 1 ? "store's" : "stores'"} flyers; buy ${object} anywhere or allow more stores.`,
+    },
+  ];
 }
 
 /** Every check on a plan. Errors make the planner retry. Warnings are shown to the user. */
@@ -595,6 +616,7 @@ export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[
     ...checkCravings(plan),
     ...checkVariety(plan, ctx),
     ...checkUnpriced(plan),
+    ...checkStoreCap(plan, ctx),
     ...checkUseItUp(plan, ctx),
     ...checkNeverAgain(plan, ctx),
   ];

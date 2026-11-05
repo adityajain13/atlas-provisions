@@ -67,12 +67,12 @@ export function PrepArticle({ plan, prep, framed = false }: { plan: MealPlan; pr
       {prep.steps.length === 0 ? (
         <p className="mt-3 text-[13px] text-muted">Nothing to prep ahead this week.</p>
       ) : (
-        <ul className="mt-3">
+        <ul className="mt-3 columns-1 gap-x-8 lg:columns-2 2xl:columns-3">
           {prep.steps.map((s) => {
             const ticked = done.has(s.id);
             const serves = s.forMeals.map((id) => mealLabel(plan, id)).filter((x): x is string => x !== null);
             return (
-              <li key={s.id} className="border-b border-line2 py-2.5">
+              <li key={s.id} className="break-inside-avoid border-b border-line2 py-2.5">
                 <label className="flex cursor-pointer gap-3">
                   <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={ticked} onChange={() => toggle(s.id)} />
                   <span className="min-w-0 flex-1">

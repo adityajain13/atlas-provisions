@@ -58,7 +58,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="lg:pl-[240px]">
-        <div className="lg:mx-auto lg:max-w-[1200px] lg:px-10 lg:py-10">{children}</div>
+        <div className="lg:mx-auto lg:max-w-[1680px] lg:px-10 xl:px-12 lg:py-10">{children}</div>
       </div>
     </>
   );

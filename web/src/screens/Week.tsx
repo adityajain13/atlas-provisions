@@ -334,7 +334,7 @@ export default function Week() {
           </div>
         )}
 
-        <div className={`mt-8 ${hasDeskSide ? '2xl:grid 2xl:grid-cols-[minmax(0,1fr)_320px] 2xl:items-start 2xl:gap-10' : ''}`}>
+        <div className="mt-8 min-w-0">
           <div className="min-w-0">
             <div className="grid grid-cols-[96px_repeat(7,minmax(0,1fr))] gap-2">
               <span aria-hidden="true" />
@@ -392,12 +392,10 @@ export default function Week() {
           </div>
 
           {hasDeskSide && (
-            <aside className="mt-8 min-w-0 space-y-6 2xl:mt-0">
-              {plan && deskPrep && (
-                <PrepArticle plan={plan} prep={deskPrep} framed />
-              )}
+            <div className="mt-8 min-w-0 space-y-6">
+              {plan && deskPrep && <PrepArticle plan={plan} prep={deskPrep} framed />}
               {deskWarning}
-            </aside>
+            </div>
           )}
         </div>
 
@@ -420,20 +418,37 @@ export default function Week() {
 }
 
 function BudgetBlock({ week, pct, className = '' }: { week: ViewWeek; pct: number; className?: string }) {
+  const n = week.stores.length;
   return (
     <div className={`border-y border-line py-4 ${className}`}>
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <span className="text-[26px] font-semibold tabular-nums text-paper">${week.spent.toFixed(2)}</span>
-          <span className="ml-1.5 text-[14px] text-muted">of ${week.budget}</span>
-        </div>
-        <span className="text-right text-[13px] text-muted">{week.stores.join(' · ')}</span>
+      <div className="flex flex-wrap items-baseline gap-x-1.5">
+        <span className="whitespace-nowrap text-[26px] font-semibold tabular-nums text-paper">${week.spent.toFixed(2)}</span>
+        <span className="whitespace-nowrap text-[14px] text-muted">of ${week.budget}</span>
       </div>
       <div className="mt-3 h-1 w-full rounded-full bg-line" aria-hidden="true">
         <div className="h-1 rounded-full bg-herb" style={{ width: `${pct}%` }} />
       </div>
+      {n > 0 && (
+        <div className="mt-3">
+          <p className="text-[12px] text-muted">
+            {n} {n === 1 ? 'store' : 'stores'}
+          </p>
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {week.stores.map((s) => (
+              <li key={s} className="rounded-full border border-edge px-2.5 py-0.5 text-[12px] text-muted">
+                {s}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
+}
+
+/** A tag pill's text, cut only when it runs past 24 characters. The full text is in the title. */
+function shortPill(text: string): string {
+  return text.length > 24 ? `${text.slice(0, 23).trimEnd()}…` : text;
 }
 
 function MealCell({ meal, onOpen }: { meal: ViewMeal; onOpen: () => void }) {
@@ -444,12 +459,13 @@ function MealCell({ meal, onOpen }: { meal: ViewMeal; onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className={`${RING} flex min-h-[112px] w-full min-w-0 flex-col rounded-lg border p-3 text-left hover:border-edge ${
+      title={meal.name}
+      className={`${RING} flex min-h-[112px] w-full min-w-0 flex-1 flex-col rounded-lg border p-3 text-left hover:border-edge ${
         meal.fixed ? 'border-line2 bg-ink' : 'border-line2 bg-field'
       }`}
     >
       <span
-        className={`line-clamp-3 break-words text-[15px] font-medium leading-[1.25] ${meal.fixed ? 'text-muted' : 'text-paper'}`}
+        className={`line-clamp-3 break-normal text-[15px] font-medium leading-[1.25] [overflow-wrap:normal] hyphens-none ${meal.fixed ? 'text-muted' : 'text-paper'}`}
       >
         {meal.name}
       </span>
@@ -459,9 +475,10 @@ function MealCell({ meal, onOpen }: { meal: ViewMeal; onOpen: () => void }) {
           {meal.tags.slice(0, 2).map((t) => (
             <span
               key={`${t.kind}-${t.text}`}
-              className={`max-w-full truncate rounded-full border px-2 py-0.5 text-[11px] ${TAG_TONE[t.kind]}`}
+              title={t.text}
+              className={`max-w-full rounded-full border px-2 py-0.5 text-[11px] ${TAG_TONE[t.kind]}`}
             >
-              {t.text}
+              {shortPill(t.text)}
             </span>
           ))}
         </span>

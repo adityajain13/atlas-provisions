@@ -117,7 +117,11 @@ function ListBody({ view }: { view: View }) {
 
       {items.length === 0 && <p className="mt-10 text-[14px] text-muted">Nothing to buy.</p>}
 
-      <div className="lg:mt-12 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8 lg:gap-y-12 xl:grid-cols-3">
+      <div
+        className={`lg:mt-12 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8 lg:gap-y-12 xl:grid-cols-3 ${
+          stores.length >= 4 ? '2xl:grid-cols-4' : ''
+        }`}
+      >
       {stores.map((store) => {
         const storeItems = items.filter((i) => i.store === store);
         const subtotal = storeItems.reduce((sum, i) => sum + i.price, 0);
@@ -187,6 +191,7 @@ function ListRow({
               {item.note.text}
             </span>
           )}
+          {item.elsewhere && <span className="block text-[12px] text-muted">{item.elsewhere}</span>}
         </span>
         {showPrice && (
           <span className={`shrink-0 text-[14px] ${done ? 'text-faint' : 'text-paper'}`}>${item.price.toFixed(2)}</span>

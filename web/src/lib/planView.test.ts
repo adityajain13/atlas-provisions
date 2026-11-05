@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ListItem, MealPlan } from '@provisions/shared';
-import { defaultDay, planToList } from './planView';
+import type { ListItem, MealPlan, PlannedMeal } from '@provisions/shared';
+import { defaultDay, planToList, planToWeek } from './planView';
 
 describe('defaultDay', () => {
   it('opens on today when today is inside the plan week (Sun to Sat)', () => {
@@ -65,5 +65,80 @@ describe('planToList', () => {
   it('shows the pack count for a priced item', () => {
     const view = planToList(plan([priced], ['No Frills']));
     expect(view.items[0]).toMatchObject({ store: 'No Frills', qty: '2 × 1 kg', price: 5 });
+  });
+});
+
+describe('planToList: cheapest elsewhere', () => {
+  it('shows the cheapest enabled store for an item outside the chosen stores', () => {
+    const item: ListItem = {
+      ingredientId: 'garlic',
+      name: 'Garlic',
+      category: 'produce',
+      store: 'Unpriced',
+      packs: 0,
+      packQty: 0,
+      packPrice: 0,
+      total: 0,
+      usedIn: [],
+      needed: 0.1,
+      cheapestElsewhere: { store: "Longo's", price: 4.99 },
+    };
+    const view = planToList(plan([item], ['No Frills']));
+    expect(view.items[0]!.elsewhere).toBe("Cheapest at Longo's: $4.99");
+  });
+});
+
+function meal(name: string, slot: 'breakfast' | 'lunch' | 'dinner', tags: string[], usesLeftoversFrom?: string): PlannedMeal {
+  return {
+    id: `sun-${slot}`,
+    day: 'sun',
+    slot,
+    name,
+    eaters: [],
+    ingredients: [],
+    activeMinutes: 10,
+    steps: [],
+    tags,
+    ...(usesLeftoversFrom ? { usesLeftoversFrom } : {}),
+  } as PlannedMeal;
+}
+
+function weekWith(meals: PlannedMeal[], cravings: string[] = []) {
+  const p = {
+    weekOf: '2026-11-01',
+    request: { weekOf: '2026-11-01', budget: 150, cravings },
+    stores: [],
+    list: [],
+    meals,
+    fixedMeals: [],
+    totalCost: 0,
+  } as unknown as MealPlan;
+  return planToWeek(p, new Map());
+}
+
+describe('planToWeek: tags and headline', () => {
+  it('drops tags that only repeat the slot name, case-insensitively', () => {
+    const week = weekWith([meal('Oat bake', 'breakfast', ['Breakfast', 'quick'])]);
+    expect(week.days[0]!.meals[0]!.tags.map((t) => t.text)).toEqual(['Quick']);
+  });
+
+  it('drops a leftover tag when the Leftovers pill already shows', () => {
+    const week = weekWith([meal('Chili', 'dinner', ['leftovers', 'quick'], 'm0')]);
+    expect(week.days[0]!.meals[0]!.tags.map((t) => t.text)).toEqual(['Leftovers', 'Quick']);
+  });
+
+  it('keeps a leftover tag when no leftovers are used', () => {
+    const week = weekWith([meal('Chili', 'dinner', ['Leftovers'])]);
+    expect(week.days[0]!.meals[0]!.tags.map((t) => t.text)).toEqual(['Leftovers']);
+  });
+
+  it('shows each pill once', () => {
+    const week = weekWith([meal('Chili', 'dinner', ['quick', 'Quick'])]);
+    expect(week.days[0]!.meals[0]!.tags.map((t) => t.text)).toEqual(['Quick']);
+  });
+
+  it('takes the headline from the dinner name without its portion note', () => {
+    const week = weekWith([meal('Pepperoni potato frittata (2 portions)', 'dinner', [])]);
+    expect(week.days[0]!.headline).toBe('pepperoni potato frittata.');
   });
 });

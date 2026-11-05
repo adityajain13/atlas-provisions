@@ -150,6 +150,7 @@ describe('buildPayload', () => {
 
   it('system prompt asks for the submit_plan tool and the no-prices rule', () => {
     expect(SYSTEM_PROMPT).toContain('submit_plan');
+    expect(SYSTEM_PROMPT).toContain("never the meal slot name");
     expect(SYSTEM_PROMPT).toContain('Do not estimate prices');
   });
 });

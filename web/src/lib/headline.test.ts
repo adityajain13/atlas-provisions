@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { headlineName } from './headline';
+import { headlineName, stripPortionNotes } from './headline';
 
 describe('headlineName', () => {
   it('lowercases the first letter of an ordinary dish name', () => {
@@ -22,5 +22,34 @@ describe('headlineName', () => {
     expect(headlineName('quick dal')).toBe('quick dal');
     expect(headlineName('')).toBe('');
     expect(headlineName('1-pot pasta')).toBe('1-pot pasta');
+  });
+});
+
+describe('headlineName drops portion notes', () => {
+  it('drops a trailing portion count in parentheses', () => {
+    expect(headlineName('Pepperoni potato frittata (2 portions)')).toBe('pepperoni potato frittata');
+  });
+
+  it('drops (serves N) and (xN)', () => {
+    expect(headlineName('Lentil dal (serves 4)')).toBe('lentil dal');
+    expect(headlineName('Chicken fajitas (x2)')).toBe('chicken fajitas');
+  });
+
+  it('drops a dash portion note', () => {
+    expect(headlineName('Shrimp and tomato pasta – 2 portions')).toBe('shrimp and tomato pasta');
+    expect(headlineName('Shrimp and tomato pasta - serves 3')).toBe('shrimp and tomato pasta');
+  });
+
+  it('drops a comma serving note', () => {
+    expect(headlineName('Ham and hummus wrap, serves 2')).toBe('ham and hummus wrap');
+  });
+
+  it('keeps parentheses in the middle of a name, and keeps the proper-adjective rule', () => {
+    expect(headlineName('Chicken (thighs) with rice')).toBe('chicken (thighs) with rice');
+    expect(headlineName('Italian sausage and peppers (2 portions)')).toBe('Italian sausage and peppers');
+  });
+
+  it('keeps the name when stripping would leave nothing', () => {
+    expect(stripPortionNotes('(2 portions)')).toBe('(2 portions)');
   });
 });
