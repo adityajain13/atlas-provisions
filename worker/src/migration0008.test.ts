@@ -168,7 +168,9 @@ describe('migration 0008 on an empty database', () => {
     ).toThrow(/UNIQUE|constraint/i);
   });
 
-  it('is the last migration on disk', () => {
-    expect(migrationFiles().at(-1)?.name).toBe(MIGRATION);
+  it('is followed by the access migration, which is now the last on disk', () => {
+    const names = migrationFiles().map((f) => f.name);
+    expect(names[names.indexOf(MIGRATION) + 1]).toBe('0009_access.sql');
+    expect(migrationFiles().at(-1)?.name).toBe('0009_access.sql');
   });
 });

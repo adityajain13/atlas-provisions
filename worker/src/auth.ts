@@ -23,12 +23,11 @@ import {
 } from './authCore';
 import { createSession, endSession, getSession, type SessionEnv } from './session';
 import { sendMail, type MailEnv } from './mail';
-import { mayUseApp, resolveAccess } from './access';
+import { mayUseApp, resolveAccess, type AccessEnv } from './access';
 
 export type AuthEnv = SessionEnv &
-  MailEnv & {
-    /** Comma-separated addresses allowed to sign in and to start a household of their own. */
-    ALLOWED_EMAILS?: string;
+  MailEnv &
+  AccessEnv & {
     /** Local dev only: with DEV=1 and DEV_AUTH_EMAIL set, codes are logged instead of emailed. */
     DEV?: string;
     DEV_AUTH_EMAIL?: string;
@@ -46,7 +45,7 @@ authRoutes.post('/request', async (c) => {
   const email = normEmail(raw);
   if (!email.includes('@')) return c.json({ error: 'Enter a valid email' }, 400, NO_STORE);
   // Same response either way, so the endpoint does not reveal who may sign in
-  if (!(await mayUseApp(c.env.DB, c.env.ALLOWED_EMAILS, email))) return c.json({ ok: true }, 200, NO_STORE);
+  if (!(await mayUseApp(c.env.DB, c.env, email))) return c.json({ ok: true }, 200, NO_STORE);
 
   const prev = await c.env.DB.prepare('SELECT created_at FROM login_codes WHERE email = ?')
     .bind(email)
@@ -85,7 +84,7 @@ authRoutes.post('/verify', async (c) => {
     await c.env.DB.prepare('UPDATE login_codes SET attempts = attempts + 1 WHERE email = ?').bind(email).run();
     return c.json({ error: 'Wrong code' }, 400, NO_STORE);
   }
-  if (!(await mayUseApp(c.env.DB, c.env.ALLOWED_EMAILS, email))) {
+  if (!(await mayUseApp(c.env.DB, c.env, email))) {
     return c.json({ error: "This address can't use Atlas Provisions" }, 403, NO_STORE);
   }
   const cookie = await createSession(c.req.raw, c.env, email);
@@ -102,7 +101,7 @@ authRoutes.get('/link', async (c) => {
   if (!row || isExpired(row.expires_at) || !safeEqual(row.link_hash, await sha256(t))) {
     return Response.redirect(`${url.origin}${BASE}/login?expired=1`, 302);
   }
-  if (!(await mayUseApp(c.env.DB, c.env.ALLOWED_EMAILS, email))) {
+  if (!(await mayUseApp(c.env.DB, c.env, email))) {
     return Response.redirect(`${url.origin}${BASE}/login?expired=1`, 302);
   }
   const cookie = await createSession(c.req.raw, c.env, email);
@@ -113,7 +112,7 @@ authRoutes.get('/me', async (c) => {
   const s = await getSession(c.req.raw, c.env);
   if (!s) return c.json({ error: 'Sign in' }, 401, NO_STORE);
   // Same check as every API request, so the app does not open for an address that has lost access.
-  if (!(await resolveAccess(c.env.DB, c.env.ALLOWED_EMAILS, s.email))) return c.json({ error: 'Sign in' }, 401, NO_STORE);
+  if (!(await resolveAccess(c.env.DB, c.env, s.email))) return c.json({ error: 'Sign in' }, 401, NO_STORE);
   return c.json({ email: s.email }, 200, s.refreshCookie ? { ...NO_STORE, 'Set-Cookie': s.refreshCookie } : NO_STORE);
 });
 

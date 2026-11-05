@@ -71,6 +71,7 @@ import { MAX_RECEIPT_IMAGE_CHARS, parseReceiptImage } from './receipts';
 import { authRoutes, type AuthEnv } from './auth';
 import { requireSession, type SessionVars } from './authMiddleware';
 import { householdRoutes } from './householdRoutes';
+import { accessRoutes } from './accessRoutes';
 import { capMessage, recordUsage } from './usage';
 
 type Env = AuthEnv & {
@@ -94,6 +95,7 @@ export const app = new Hono<{ Bindings: Env; Variables: SessionVars }>();
 app.use(`${API}/*`, requireSession);
 app.route(`${API}/auth`, authRoutes);
 app.route(API, householdRoutes);
+app.route(API, accessRoutes);
 
 function formatZod(error: ZodError): string {
   return error.issues

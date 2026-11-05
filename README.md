@@ -54,7 +54,8 @@ Each signed-in address belongs to one household. The first address in a new hous
 
 - Owners invite people by email. The invitee signs in with that address and joins the household as a member. Invites can be withdrawn, and a member can leave.
 - An owner cannot leave while others remain, and there is no way to hand over ownership yet.
-- Access: an address may use the app if it is on `ALLOWED_EMAILS`, is a member, or has an invite. An allow-listed address with no household gets its own.
+- Access: an address may use the app if it is approved: on `ALLOWED_EMAILS`, on the app's access list, or an admin. Without that, it may use the app as a member of a household that has an approved owner, or with an invite from one. An approved address with no household gets its own.
+- App access: admins manage who may sign in in Household > App access. They give an address access, optionally emailing the sign-in link (through Resend, when `RESEND_API_KEY` is set), and remove it. Removing access signs the address out at once. An admin cannot remove their own access, nor an address set in Worker settings. Admins are the addresses in `ADMIN_EMAILS`; without it, they are the owners of household `h1`, the household that existing data moved into. A new deployment with no `h1` must set `ADMIN_EMAILS`, or no one can manage access.
 - Pantry, plans, ratings, ticks and the household document are per household. Flyer prices are per postal code. Price history and receipt matches are shared.
 - Monthly caps per household, counted in Toronto calendar months: plans (`PLAN_CAP_MONTHLY`, default 20), receipt scans (`RECEIPT_CAP_MONTHLY`, default 30) and prep refreshes (`PREP_CAP_MONTHLY`, default 30). The Household screen shows the counts.
 
@@ -88,15 +89,19 @@ GitHub repository secrets:
 Worker secrets (Cloudflare dashboard: Workers & Pages > atlas-provisions > Settings > Variables and Secrets, type Secret):
 
 - `ANTHROPIC_API_KEY`: the Claude API key for planning and receipts.
-- `ALLOWED_EMAILS`: comma-separated addresses that may sign in, for example `you@example.com`. Unless RESEND_API_KEY is set, each address must be a verified destination in Cloudflare Email Routing, or the sign-in email is not delivered.
+- `ALLOWED_EMAILS`: optional fallback. Comma-separated addresses that may sign in even when they are not on the app's access list, for example `you@example.com`. Access is normally managed in Household > App access, so this can be just your own address. Unless RESEND_API_KEY is set, each address must be a verified destination in Cloudflare Email Routing, or the sign-in email is not delivered.
+- `ADMIN_EMAILS`: optional. Comma-separated admins who manage App access. Without it, the owners of household `h1` are the admins.
 - `RESEND_API_KEY`: optional. Sign-in emails go through Resend when the RESEND_API_KEY secret is set (domain adityajain.ca verified in Resend); otherwise Cloudflare Email Routing, which only delivers to verified destination addresses.
 
 `MAIL_FROM` and `PLANNER_MODEL` are variables in `wrangler.jsonc`.
 
+Migration `0009_access.sql` adds the empty `allowed_emails` table, the app's access list. It changes no access by itself.
+
 Migration `0008_households.sql` changes live data. It moves every existing row into one household, `h1`, makes each address that has a session a member (the earliest is owner), and rebuilds `meal_plans`, `checks` and `flyer_items` with new primary keys. The old `household` table is left in place and unused. Before deploying to production:
 
 - Export the database: `npx wrangler d1 export atlas-provisions --remote --output backup.sql`.
-- Check that `ALLOWED_EMAILS` lists every address that should keep access. Membership is granted by sessions, so an address removed from `ALLOWED_EMAILS` keeps access while it is a member.
+- Check that everyone who should keep access is approved. The owners of `h1` are admins unless `ADMIN_EMAILS` is set, and admins are approved.
+- Behaviour change: a member keeps access only while one of their household's owners is approved. Removing an owner's access, or an owner's address from `ALLOWED_EMAILS`, now also blocks that household's members, unless a member is approved in its own right.
 - Deploying runs the migration before the new Worker is live. For a few minutes the old Worker can run against the new tables, and its `ON CONFLICT(week_of)` upserts for plans and ticks fail. Deploy in a quiet period.
 
 ## Flyer import

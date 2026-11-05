@@ -146,3 +146,28 @@ export interface MyInvitesView {
   current: { householdId: string; name: string; role: HouseholdRole; memberCount: number };
   invites: InviteSummary[];
 }
+
+// ---- App access: who may sign in (admins only) ----
+
+/** Where an approved address comes from: added in the app, listed in Worker settings, or an admin. */
+export type AccessSource = 'app' | 'settings' | 'admin';
+
+export interface AccessEntry {
+  email: string;
+  source: AccessSource;
+  addedAt?: string;
+  addedBy?: string;
+  /** The household this address is a member of, if any. soleOwner: it owns that household and no one else does. */
+  household?: { id: string; name: string; role: HouseholdRole; soleOwner: boolean };
+}
+
+export interface AccessView {
+  entries: AccessEntry[];
+  isAdmin: true;
+}
+
+/** The signed-in address and whether it is an admin. */
+export interface MeView {
+  email: string;
+  isAdmin: boolean;
+}

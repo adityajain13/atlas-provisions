@@ -1,6 +1,9 @@
 import {
   ChecksSchema,
   HouseholdSchema,
+  type AccessEntry,
+  type AccessView,
+  type MeView,
   type MembersView,
   type MyInvitesView,
   type UsageView,
@@ -309,4 +312,36 @@ export async function acceptInvite(householdId: string): Promise<{ householdId: 
 
 export async function getUsage(): Promise<UsageView> {
   return json(await authFetch(`${BASE}/usage`), (raw) => raw as UsageView);
+}
+
+// ---- App access (admins only; see Household > App access) ----
+
+export async function getMe(): Promise<MeView> {
+  return json(await authFetch(`${BASE}/me`), (raw) => raw as MeView);
+}
+
+/** Every approved address and where its access comes from. Admins only. */
+export async function getAccess(): Promise<AccessView> {
+  return json(await authFetch(`${BASE}/access`), (raw) => raw as AccessView);
+}
+
+/** Gives an address access. `emailed` says whether the sign-in email went out (it is only sent when asked). */
+export async function giveAccess(email: string, sendEmail: boolean): Promise<{ entry: AccessEntry; emailed: boolean }> {
+  return json(
+    await authFetch(`${BASE}/access`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, sendEmail }),
+    }),
+    (raw) => raw as { entry: AccessEntry; emailed: boolean },
+  );
+}
+
+/** Removes an address's app access and signs it out. With deleteHousehold, its own household goes too. */
+export async function revokeAccess(email: string, deleteHousehold: boolean): Promise<{ householdDeleted: boolean }> {
+  const query = deleteHousehold ? '?deleteHousehold=1' : '';
+  return json(
+    await authFetch(`${BASE}/access/${encodeURIComponent(email)}${query}`, { method: 'DELETE' }),
+    (raw) => raw as { householdDeleted: boolean },
+  );
 }

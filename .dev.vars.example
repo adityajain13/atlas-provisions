@@ -1,6 +1,6 @@
 DEV=1
 # Local sign-in: the code and one-tap link are printed to the console instead of emailed.
-# Use an address from ALLOWED_EMAILS.
+# Use an address that may sign in: on ALLOWED_EMAILS, or an admin (see README).
 ALLOWED_EMAILS=you@example.com
 DEV_AUTH_EMAIL=you@example.com
 # Optional: RESEND_API_KEY=re_...  Sign-in emails go through Resend when this is set (remote only; local dev still logs).

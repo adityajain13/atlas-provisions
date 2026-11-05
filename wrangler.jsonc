@@ -12,7 +12,7 @@
     }
   ],
   // Sign-in codes via Email Routing (free plan), unless RESEND_API_KEY is set. Email Routing only
-  // delivers to verified destination addresses, so the address in ALLOWED_EMAILS must be one (see README).
+  // delivers to verified destination addresses, so an address that signs in must be one (see README).
   "send_email": [{ "name": "EMAIL" }],
   "vars": {
     "DEV": "0",
@@ -21,7 +21,9 @@
     "MAIL_FROM": "provisions@adityajain.ca"
   },
   // Secrets (set with `npx wrangler secret put NAME`, or in the Cloudflare dashboard):
-  //   ALLOWED_EMAILS     comma-separated emails allowed to sign in. Nobody can sign in without it.
+  //   ALLOWED_EMAILS     optional fallback: comma-separated emails approved to sign in. Access is managed
+  //                      in Household > App access.
+  //   ADMIN_EMAILS       optional: comma-separated admins who manage App access. Unset: the owners of household h1.
   //   ANTHROPIC_API_KEY  Claude API key (planner, receipts)
   //   RESEND_API_KEY     optional: sign-in mail via Resend (domain adityajain.ca verified there). Also sends invites.
   // Monthly caps per household (whole numbers; default 20 plans, 30 receipt scans, 30 prep refreshes). Set as

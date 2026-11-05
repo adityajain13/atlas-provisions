@@ -1,5 +1,5 @@
 // Wording and decisions for the household members UI. Pure: no DOM, no requests.
-import type { HouseholdRole } from '@provisions/shared';
+import type { AccessSource, HouseholdRole } from '@provisions/shared';
 
 export const roleLabel = (role: HouseholdRole): string => (role === 'owner' ? 'Owner' : 'Member');
 
@@ -75,5 +75,42 @@ export function joinDecision(
     message: `You will leave ${current.name}. The others in it keep it.`,
     confirmLabel: 'Join',
     danger: false,
+  };
+}
+
+// ---- App access (admins) ----
+
+const ACCESS_SOURCE_LABEL: Record<AccessSource, string> = {
+  app: 'Added in app',
+  settings: 'From Worker settings',
+  admin: 'Admin',
+};
+
+/** Where an approved address's access comes from, in a small label under its address. */
+export const accessSourceLabel = (source: AccessSource): string => ACCESS_SOURCE_LABEL[source];
+
+/** The line under the add form after access is given. `asked` is whether the person ticked "Send them an email". */
+export function accessOutcome(email: string, asked: boolean, emailed: boolean): string {
+  if (!asked) return `Gave access to ${email}.`;
+  return emailed
+    ? `Gave access to ${email}. Sent them an email.`
+    : `Gave access to ${email}. The email wasn't sent; tell them to sign in.`;
+}
+
+export interface RemoveAccessCopy {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  /** The tick box, shown only when the address owns a household of its own. Unticked by default. */
+  checkbox?: string;
+}
+
+/** What removing an address's app access says. The household box appears only when they own one alone. */
+export function removeAccessCopy(email: string, ownsHousehold: boolean): RemoveAccessCopy {
+  return {
+    title: `Remove ${email}?`,
+    message: "They're signed out right away. They can only get back in if someone invites them to their household.",
+    confirmLabel: 'Remove',
+    ...(ownsHousehold ? { checkbox: 'Also delete their household and its data' } : {}),
   };
 }
