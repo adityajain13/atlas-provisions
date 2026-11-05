@@ -78,7 +78,8 @@ GitHub repository secrets:
 Worker secrets (Cloudflare dashboard: Workers & Pages > atlas-provisions > Settings > Variables and Secrets, type Secret):
 
 - `ANTHROPIC_API_KEY`: the Claude API key for planning and receipts.
-- `ALLOWED_EMAILS`: comma-separated addresses that may sign in, for example `you@example.com`. Each address must be a verified destination in Cloudflare Email Routing, or the sign-in email is not delivered.
+- `ALLOWED_EMAILS`: comma-separated addresses that may sign in, for example `you@example.com`. Unless RESEND_API_KEY is set, each address must be a verified destination in Cloudflare Email Routing, or the sign-in email is not delivered.
+- `RESEND_API_KEY`: optional. Sign-in emails go through Resend when the RESEND_API_KEY secret is set (domain adityajain.ca verified in Resend); otherwise Cloudflare Email Routing, which only delivers to verified destination addresses.
 
 `MAIL_FROM` and `PLANNER_MODEL` are variables in `wrangler.jsonc`.
 

@@ -108,6 +108,7 @@ const json = (body: unknown): RequestInit => ({
 
 afterEach(() => {
   send.mockClear();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -249,5 +250,55 @@ describe('sign-in flow (dev mode: code is logged, nothing sent)', () => {
     expect(message.to).toBe('owner@example.com');
     expect(message.raw).toContain('From: Atlas Provisions <provisions@adityajain.ca>');
     expect(message.raw).toContain('Subject: Your Atlas Provisions sign-in code');
+  });
+  it('sends through Resend when RESEND_API_KEY is set, and not through send_email', async () => {
+    const fetchStub = vi.fn(async () => new Response('{"id":"abc"}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchStub);
+    const { db } = fakeDb();
+    const res = await call(
+      `${H}/auth/request`,
+      json({ email: 'owner@example.com' }),
+      makeEnv(db, { RESEND_API_KEY: 're_test_123' }),
+    );
+    expect(res.status).toBe(200);
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://api.resend.com/emails');
+    expect(JSON.parse(init.body as string).to).toEqual(['owner@example.com']);
+  });
+
+  it('returns the usual mail error and logs the detail when Resend fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('domain not verified', { status: 403 })));
+    const errors: unknown[][] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args);
+    });
+    const { db, codes } = fakeDb();
+    const res = await call(
+      `${H}/auth/request`,
+      json({ email: 'owner@example.com' }),
+      makeEnv(db, { RESEND_API_KEY: 're_test_123' }),
+    );
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "Couldn't send the email" });
+    expect(errors.some((args) => String(args[1]).includes('Resend 403: domain not verified'))).toBe(true);
+    expect(codes.size).toBe(1);
+  });
+
+  it('keeps dev mode log-only even when RESEND_API_KEY is set', async () => {
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.join(' '));
+    });
+    const fetchStub = vi.fn();
+    vi.stubGlobal('fetch', fetchStub);
+    const { db } = fakeDb();
+    const env = makeEnv(db, { DEV: '1', DEV_AUTH_EMAIL: 'owner@example.com', RESEND_API_KEY: 're_test_123' });
+    const res = await call(`${H}/auth/request`, json({ email: 'owner@example.com' }), env);
+    expect(res.status).toBe(200);
+    expect(fetchStub).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(logs.some((l) => l.includes('sign-in code for owner@example.com'))).toBe(true);
   });
 });

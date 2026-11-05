@@ -11,8 +11,8 @@
       "migrations_dir": "worker/migrations"
     }
   ],
-  // Sign-in codes via Email Routing (free plan). Only delivers to verified destination addresses,
-  // so the address in ALLOWED_EMAILS must be one (see README).
+  // Sign-in codes via Email Routing (free plan), unless RESEND_API_KEY is set. Email Routing only
+  // delivers to verified destination addresses, so the address in ALLOWED_EMAILS must be one (see README).
   "send_email": [{ "name": "EMAIL" }],
   "vars": {
     "DEV": "0",
@@ -23,6 +23,7 @@
   // Secrets (set with `npx wrangler secret put NAME`, or in the Cloudflare dashboard):
   //   ALLOWED_EMAILS     comma-separated emails allowed to sign in. Nobody can sign in without it.
   //   ANTHROPIC_API_KEY  Claude API key (planner, receipts)
+  //   RESEND_API_KEY     optional: sign-in mail via Resend (domain adityajain.ca verified there)
   "triggers": { "crons": ["0 11 * * SUN"] },
   "routes": [{ "pattern": "adityajain.ca/provisions*", "zone_name": "adityajain.ca" }]
 }
