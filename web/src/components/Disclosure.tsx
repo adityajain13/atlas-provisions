@@ -12,6 +12,8 @@ type Props = {
   detail?: ReactNode;
   /** Row only: muted text at the right of the header, such as "18 meals a week". */
   summary?: ReactNode;
+  /** Row only: a control before the header, outside its button, such as a switch. Clicking it does not toggle. */
+  lead?: ReactNode;
   /** Row only: a destructive action on the left of the footer. Done always shows. */
   remove?: { label: string; onClick: () => void };
   /** Focus the first field when this opens. Set for an item that was just added. */
@@ -38,6 +40,7 @@ export function Disclosure({
   title,
   detail,
   summary,
+  lead,
   remove,
   focusFirstField = false,
   desktopAlwaysOpen = false,
@@ -95,9 +98,9 @@ export function Disclosure({
       aria-expanded={open}
       aria-controls={panelId}
       onClick={onToggle}
-      className={`flex min-h-[52px] w-full items-center gap-3 px-3 text-left transition-colors hover:bg-chip/40 ${FOCUS_RING} ${
-        open ? 'rounded-t-xl' : 'rounded-lg'
-      }`}
+      className={`flex items-center gap-3 text-left transition-colors hover:bg-chip/40 ${FOCUS_RING} ${
+        lead ? 'min-h-12 min-w-0 flex-1 py-1 pl-1 pr-3' : 'min-h-[52px] w-full px-3'
+      } ${open ? 'rounded-t-xl' : 'rounded-lg'}`}
     >
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[16px] text-paper">{title}</span>
@@ -155,7 +158,14 @@ export function Disclosure({
 
   return (
     <div className={rootCls}>
-      {header}
+      {lead ? (
+        <div className="flex items-center pl-2">
+          {lead}
+          {header}
+        </div>
+      ) : (
+        header
+      )}
       <div className={outer} {...(inertWhenClosed ? { inert: '' } : {})}>
         <div
           ref={panelRef}
