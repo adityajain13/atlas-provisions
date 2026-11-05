@@ -9,6 +9,7 @@ import Plan from './screens/Plan';
 import HouseholdScreen from './screens/Household';
 import Pantry from './screens/Pantry';
 import Login from './screens/Login';
+import { InviteBanner } from './components/InviteBanner';
 import { SessionProvider, safeNext, useSession } from './session';
 
 export default function App() {
@@ -45,6 +46,7 @@ function AppRoutes() {
 
   return (
     <div className="min-h-screen bg-ink font-sans text-paper">
+      <InviteBanner />
       <AppShell>
         <Routes>
           <Route path="/" element={<Week />} />

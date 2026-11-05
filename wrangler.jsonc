@@ -17,6 +17,6 @@
     "PLANNER_MODEL": "claude-sonnet-5-5",
     "MAIL_FROM": "provisions@adityajain.ca"
   },
-  "triggers": { "crons": ["0 11 * * SUN"] },
+  "triggers": { "crons": ["0 * * * SUN"] },
   "routes": [{ "pattern": "adityajain.ca/provisions*", "zone_name": "adityajain.ca" }]
 }

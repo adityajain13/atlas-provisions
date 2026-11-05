@@ -20,18 +20,18 @@ import {
   planReceiptCommit,
   planWeekOf,
   ratingSignals,
-  retentionCutoff,
   recentDinnerNames,
   addDaysIso,
   scoreDeals,
   torontoDate,
+  usageCapsFrom,
+  usageMonth,
   type Deal,
-  type IngestRunSummary,
-  type PriceSource,
   type FlyerItem,
   type Household,
   type MatchedItem,
   type PantryItem,
+  type PriceSource,
   type Rating,
 } from '@provisions/shared';
 import type { ZodError } from 'zod';
@@ -41,7 +41,6 @@ import {
   commitReceiptRows,
   currentFlyerItems,
   overlappingFlyerItems,
-  pruneWeeksBefore,
   insertMissingChecks,
   deletePantryItem,
   flyerCountsForDate,
@@ -57,6 +56,7 @@ import {
   loadRatings,
   plansBetween,
   priceHistory,
+  saveHouseholdDocument,
   savePlan,
   setCheck,
   updatePantryItem,
@@ -64,12 +64,14 @@ import {
   type HistoryInsert,
 } from './db';
 import { anthropicClient, anthropicPrepClient } from './planner/claude';
-import { runIngest } from './ingest';
+import { enabledStores, notRunSummary, refreshWaitMinutes, runIngest, runScheduledIngest } from './ingest';
 import { attachPrep } from './planner/prep';
 import { runPlanner } from './planner/run';
 import { MAX_RECEIPT_IMAGE_CHARS, parseReceiptImage } from './receipts';
 import { authRoutes, type AuthEnv } from './auth';
 import { requireSession, type SessionVars } from './authMiddleware';
+import { householdRoutes } from './householdRoutes';
+import { capMessage, recordUsage } from './usage';
 
 type Env = AuthEnv & {
   ASSETS: Fetcher;
@@ -78,6 +80,9 @@ type Env = AuthEnv & {
   PREP_MODEL?: string;
   RECEIPT_MODEL?: string;
   EXTRACT_MODEL?: string;
+  PLAN_CAP_MONTHLY?: string;
+  RECEIPT_CAP_MONTHLY?: string;
+  PREP_CAP_MONTHLY?: string;
 };
 
 const API = '/provisions/api';
@@ -88,6 +93,7 @@ export const app = new Hono<{ Bindings: Env; Variables: SessionVars }>();
 // Sign-in is required for every API route except health and /auth/* (checked in the middleware).
 app.use(`${API}/*`, requireSession);
 app.route(`${API}/auth`, authRoutes);
+app.route(API, householdRoutes);
 
 function formatZod(error: ZodError): string {
   return error.issues
@@ -96,28 +102,32 @@ function formatZod(error: ZodError): string {
 }
 
 /**
- * The flyer items that price a week starting on `weekOf`. The flyers valid that Sunday come first. When
- * none are out yet, the flyers that overlap the week are used, and then the flyers valid today.
+ * The flyer items that price a week starting on `weekOf`, for a postal code. The flyers valid that Sunday come
+ * first. When none are out yet, the flyers that overlap the week are used, and then the flyers valid today.
+ * A household with no postal code has no flyers.
  */
 async function flyerItemsFor(
   db: D1Database,
+  postalCode: string | undefined,
   weekOf: string,
   today: string,
 ): Promise<{ items: FlyerItem[]; source: PriceSource }> {
-  const onDay = await currentFlyerItems(db, weekOf);
+  if (!postalCode) return { items: [], source: 'current' };
+  const onDay = await currentFlyerItems(db, postalCode, weekOf);
   if (onDay.length > 0) return { items: onDay, source: 'week' };
-  const overlap = await overlappingFlyerItems(db, weekOf, addDaysIso(weekOf, 6));
+  const overlap = await overlappingFlyerItems(db, postalCode, weekOf, addDaysIso(weekOf, 6));
   if (overlap.length > 0) return { items: overlap, source: 'overlap' };
-  return { items: await currentFlyerItems(db, today), source: 'current' };
+  return { items: await currentFlyerItems(db, postalCode, today), source: 'current' };
 }
 
 /**
- * Matched and scored flyer items for a shopping date, from enabled stores. Used by /deals and the
- * planner. Also returns the household and the never-buy ingredient ids. The planner passes the
- * plan week's Sunday, so the week is priced from the flyers valid that day.
+ * Matched and scored flyer items for a shopping date, from the household's enabled stores. Used by /deals and
+ * the planner. Also returns the household and the never-buy ingredient ids. The planner passes the plan week's
+ * Sunday, so the week is priced from the flyers valid that day.
  */
 async function loadDeals(
   env: Env,
+  householdId: string,
   date: string,
 ): Promise<{
   household: Household;
@@ -127,8 +137,13 @@ async function loadDeals(
   neverBuy: string[];
   priceSource: PriceSource;
 }> {
-  const household = await loadHousehold(env.DB);
-  const { items: flyerItems, source: priceSource } = await flyerItemsFor(env.DB, date, torontoDate());
+  const household = await loadHousehold(env.DB, householdId);
+  const { items: flyerItems, source: priceSource } = await flyerItemsFor(
+    env.DB,
+    household.postalCode,
+    date,
+    torontoDate(),
+  );
 
   // Only enabled stores count. If none are enabled, every store in the flyer is used.
   const enabled = new Set(household.stores.filter((s) => s.enabled).map((s) => s.name));
@@ -166,23 +181,23 @@ async function loadDeals(
   return { household, matched, unmatched, deals, neverBuy, priceSource };
 }
 
+/** A 429 for a household that has used up a monthly cap, or null when it may go ahead. */
+async function overCap(env: Env, householdId: string, kind: 'plan' | 'receipt' | 'prep'): Promise<Response | null> {
+  const today = torontoDate();
+  const message = await capMessage(env.DB, householdId, kind, usageCapsFrom(env), usageMonth(today));
+  return message ? new Response(message, { status: 429 }) : null;
+}
+
 app.get(`${API}/health`, (c) => c.json({ ok: true }));
 
 app.get(`${API}/household`, async (c) => {
-  const row = await c.env.DB.prepare('SELECT data FROM household WHERE id = 1').first<{
-    data: string;
-  }>();
-  if (!row) return c.json(defaultHousehold());
-
-  let raw: unknown;
+  let household: Household;
   try {
-    raw = JSON.parse(row.data);
-  } catch {
-    return c.text('Stored household is not valid JSON', 500);
+    household = await loadHousehold(c.env.DB, c.get('householdId'));
+  } catch (e) {
+    return c.text(e instanceof Error ? e.message : 'Stored household is invalid', 500);
   }
-  const parsed = HouseholdSchema.safeParse(raw);
-  if (!parsed.success) return c.text(`Stored household is invalid: ${formatZod(parsed.error)}`, 500);
-  return c.json(parsed.data);
+  return c.json(household);
 });
 
 app.put(`${API}/household`, async (c) => {
@@ -196,13 +211,8 @@ app.put(`${API}/household`, async (c) => {
   const parsed = HouseholdSchema.safeParse(body);
   if (!parsed.success) return c.text(formatZod(parsed.error), 400);
 
-  await c.env.DB.prepare(
-    `INSERT INTO household (id, data, updated_at) VALUES (1, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
-  )
-    .bind(JSON.stringify(parsed.data), new Date().toISOString())
-    .run();
-
+  const saved = await saveHouseholdDocument(c.env.DB, c.get('householdId'), parsed.data, new Date().toISOString());
+  if (!saved) return c.text('Household not found', 404);
   return c.json(parsed.data);
 });
 
@@ -210,7 +220,8 @@ app.put(`${API}/household`, async (c) => {
 app.post(`${API}/dev/load-fixtures`, async (c) => {
   if (c.env.DEV !== '1') return c.json({ error: 'Not found' }, 404);
 
-  const flyerCount = await insertFlyerItems(c.env.DB, flyerFixture as FlyerItem[]);
+  const household = await loadHousehold(c.env.DB, c.get('householdId'));
+  const flyerCount = await insertFlyerItems(c.env.DB, household.postalCode ?? '', flyerFixture as FlyerItem[]);
   const historyCount = await insertPriceHistory(c.env.DB, historyFixture as HistoryInsert[]);
   return c.json({ flyerItems: flyerCount, priceHistory: historyCount });
 });
@@ -220,7 +231,7 @@ app.get(`${API}/deals`, async (c) => {
   const date = c.req.query('date');
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.text('date must be YYYY-MM-DD', 400);
 
-  const { matched, unmatched, deals } = await loadDeals(c.env, date);
+  const { matched, unmatched, deals } = await loadDeals(c.env, c.get('householdId'), date);
   return c.json({ matched: matched.length, unmatched, deals });
 });
 
@@ -239,13 +250,17 @@ app.post(`${API}/plan`, async (c) => {
   const request = parsed.data;
   if (!isPlannableWeek(request.weekOf, new Date())) return c.text(PLAN_WINDOW_MESSAGE, 400);
 
+  const householdId = c.get('householdId');
+  const capped = await overCap(c.env, householdId, 'plan');
+  if (capped) return capped;
+
   try {
-    const { household, matched, deals, neverBuy, priceSource } = await loadDeals(c.env, request.weekOf);
+    const { household, matched, deals, neverBuy, priceSource } = await loadDeals(c.env, householdId, request.weekOf);
     // Plans starting up to 21 days before the week can hold dinners in the 14-day window.
-    const earlier = await plansBetween(c.env.DB, addDaysIso(request.weekOf, -21), request.weekOf);
+    const earlier = await plansBetween(c.env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf);
     const today = torontoDate();
-    const pantry = await loadPantry(c.env.DB);
-    const ratings = ratingSignals(await loadRatings(c.env.DB), household.people, today);
+    const pantry = await loadPantry(c.env.DB, householdId);
+    const ratings = ratingSignals(await loadRatings(c.env.DB, householdId), household.people, today);
     // One Claude call makes the meals and, when a prep day is set, the prep list.
     const plan = await runPlanner({
       household,
@@ -268,7 +283,8 @@ app.post(`${API}/plan`, async (c) => {
         message: "Prices are estimates from the current flyer; next week's flyers aren't out yet.",
       });
     }
-    await savePlan(c.env.DB, plan);
+    await savePlan(c.env.DB, householdId, plan);
+    await recordUsage(c.env.DB, householdId, 'plan', usageMonth(today));
     return c.json(plan);
   } catch (e) {
     return c.text(e instanceof Error ? e.message : 'Planner failed', 500);
@@ -282,10 +298,14 @@ app.post(`${API}/plan/:weekOf/prep`, async (c) => {
   const weekOf = c.req.param('weekOf');
   if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
 
+  const householdId = c.get('householdId');
+  const capped = await overCap(c.env, householdId, 'prep');
+  if (capped) return capped;
+
   try {
-    const plan = await loadPlan(c.env.DB, weekOf);
+    const plan = await loadPlan(c.env.DB, householdId, weekOf);
     if (!plan) return c.text('No plan for this week', 404);
-    const household = await loadHousehold(c.env.DB);
+    const household = await loadHousehold(c.env.DB, householdId);
     if (!household.prepDay) return c.text('Set a prep day in Household first', 400);
 
     const updated = await attachPrep(
@@ -293,7 +313,8 @@ app.post(`${API}/plan/:weekOf/prep`, async (c) => {
       household.prepDay,
       anthropicPrepClient(apiKey, c.env.PREP_MODEL ?? DEFAULT_PREP_MODEL),
     );
-    await savePlan(c.env.DB, updated);
+    await savePlan(c.env.DB, householdId, updated);
+    await recordUsage(c.env.DB, householdId, 'prep', usageMonth(torontoDate()));
     return c.json(updated);
   } catch (e) {
     return c.text(e instanceof Error ? e.message : 'Prep failed', 500);
@@ -302,26 +323,43 @@ app.post(`${API}/plan/:weekOf/prep`, async (c) => {
 
 // ---- Flyer import (milestone 4) ----
 
-// Searches Flipp now. Takes up to a minute or so.
+// Searches Flipp for the household's postal code now. Takes up to a minute or so. Limited to once per 10
+// minutes per postal code, since the flyers for a postal code do not change that often.
 app.post(`${API}/flyers/refresh`, async (c) => {
+  const household = await loadHousehold(c.env.DB, c.get('householdId'));
+  const postal = household.postalCode;
+  if (!postal) return c.json(notRunSummary('Add a postal code in Household first.'));
+  const stores = enabledStores(household);
+  if (stores.length === 0) return c.json(notRunSummary('Turn on at least one store in Household first.'));
+
+  const wait = await refreshWaitMinutes(c.env.DB, postal, new Date());
+  if (wait > 0) {
+    return c.text(
+      `Flyers for this postal code were refreshed a few minutes ago. Try again in ${wait} minute${wait === 1 ? '' : 's'}.`,
+      429,
+    );
+  }
   try {
-    return c.json(await runIngest(c.env));
+    return c.json(await runIngest(c.env, postal, stores));
   } catch (e) {
     return c.text(e instanceof Error ? e.message : 'Flyer refresh failed', 500);
   }
 });
 
-// The latest run and the prices valid today, per store. ?debug=1 adds the run's sample and flyers.
+// The latest run and the prices valid today, for the household's postal code. ?debug=1 adds the run's sample and flyers.
 app.get(`${API}/flyers/status`, async (c) => {
-  const lastRun = await latestIngestRun(c.env.DB, { debug: c.req.query('debug') === '1' });
-  const currentItems = await flyerCountsForDate(c.env.DB, torontoDate());
+  const household = await loadHousehold(c.env.DB, c.get('householdId'));
+  const postal = household.postalCode;
+  if (!postal) return c.json({ lastRun: null, currentItems: [] });
+  const lastRun = await latestIngestRun(c.env.DB, postal, { debug: c.req.query('debug') === '1' });
+  const currentItems = await flyerCountsForDate(c.env.DB, postal, torontoDate());
   return c.json({ lastRun, currentItems });
 });
 
 // ---- Pantry (milestone 3A) ----
 
 app.get(`${API}/pantry`, async (c) => {
-  return c.json(await loadPantry(c.env.DB));
+  return c.json(await loadPantry(c.env.DB, c.get('householdId')));
 });
 
 // The unit comes from the catalogue. Expiry defaults from the ingredient's shelf life.
@@ -349,7 +387,7 @@ app.post(`${API}/pantry`, async (c) => {
     expiresOn: parsed.data.expiresOn ?? defaultExpiry(ingredientId, addedOn),
     source: 'manual',
   };
-  await insertPantryItem(c.env.DB, item);
+  await insertPantryItem(c.env.DB, c.get('householdId'), item);
   return c.json(item, 201);
 });
 
@@ -363,7 +401,8 @@ app.patch(`${API}/pantry/:id`, async (c) => {
   const parsed = PantryPatchSchema.safeParse(body);
   if (!parsed.success) return c.text(formatZod(parsed.error), 400);
 
-  const current = await loadPantryItem(c.env.DB, c.req.param('id'));
+  const householdId = c.get('householdId');
+  const current = await loadPantryItem(c.env.DB, householdId, c.req.param('id'));
   if (!current) return c.text('No pantry item with that id', 404);
 
   const item: PantryItem = {
@@ -371,12 +410,12 @@ app.patch(`${API}/pantry/:id`, async (c) => {
     qty: parsed.data.qty ?? current.qty,
     expiresOn: parsed.data.expiresOn ?? current.expiresOn,
   };
-  await updatePantryItem(c.env.DB, item);
+  await updatePantryItem(c.env.DB, householdId, item);
   return c.json(item);
 });
 
 app.delete(`${API}/pantry/:id`, async (c) => {
-  const removed = await deletePantryItem(c.env.DB, c.req.param('id'));
+  const removed = await deletePantryItem(c.env.DB, c.get('householdId'), c.req.param('id'));
   if (!removed) return c.text('No pantry item with that id', 404);
   return c.json({ ok: true });
 });
@@ -384,7 +423,7 @@ app.delete(`${API}/pantry/:id`, async (c) => {
 // ---- Meal ratings (milestone 3A) ----
 
 app.get(`${API}/ratings`, async (c) => {
-  return c.json(await loadRatings(c.env.DB));
+  return c.json(await loadRatings(c.env.DB, c.get('householdId')));
 });
 
 // Upserts by meal name and person. The date is today on the Toronto calendar.
@@ -398,20 +437,21 @@ app.post(`${API}/ratings`, async (c) => {
   const parsed = RatingInputSchema.safeParse(body);
   if (!parsed.success) return c.text(formatZod(parsed.error), 400);
 
-  const household = await loadHousehold(c.env.DB);
+  const householdId = c.get('householdId');
+  const household = await loadHousehold(c.env.DB, householdId);
   if (!household.people.some((p) => p.id === parsed.data.personId)) {
     return c.text(`Unknown person: ${parsed.data.personId}`, 400);
   }
 
   const rating: Rating = { id: newId(), date: torontoDate(), ...parsed.data };
-  await upsertRating(c.env.DB, rating);
+  await upsertRating(c.env.DB, householdId, rating);
   return c.json(rating, 201);
 });
 
 app.get(`${API}/plan/:weekOf`, async (c) => {
   const weekOf = c.req.param('weekOf');
   if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
-  const plan = await loadPlan(c.env.DB, weekOf);
+  const plan = await loadPlan(c.env.DB, c.get('householdId'), weekOf);
   if (!plan) return c.text('No plan for this week', 404);
   return c.json(plan);
 });
@@ -422,7 +462,7 @@ app.get(`${API}/plan/:weekOf`, async (c) => {
 app.get(`${API}/checks/:weekOf`, async (c) => {
   const weekOf = c.req.param('weekOf');
   if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
-  return c.json(await loadChecks(c.env.DB, weekOf));
+  return c.json(await loadChecks(c.env.DB, c.get('householdId'), weekOf));
 });
 
 // Sets one tick. Last write wins; the row records the signed-in address and the time.
@@ -439,7 +479,16 @@ app.put(`${API}/checks/:weekOf`, async (c) => {
   if (!parsed.success) return c.text(formatZod(parsed.error), 400);
 
   const updatedAt = new Date().toISOString();
-  await setCheck(c.env.DB, weekOf, parsed.data.kind, parsed.data.itemId, parsed.data.checked, c.get('email'), updatedAt);
+  await setCheck(
+    c.env.DB,
+    c.get('householdId'),
+    weekOf,
+    parsed.data.kind,
+    parsed.data.itemId,
+    parsed.data.checked,
+    c.get('email'),
+    updatedAt,
+  );
   return c.json({ updatedAt });
 });
 
@@ -456,7 +505,14 @@ app.post(`${API}/checks/:weekOf/bulk`, async (c) => {
   const parsed = CheckBulkSchema.safeParse(body);
   if (!parsed.success) return c.text(formatZod(parsed.error), 400);
 
-  const received = await insertMissingChecks(c.env.DB, weekOf, parsed.data, c.get('email'), new Date().toISOString());
+  const received = await insertMissingChecks(
+    c.env.DB,
+    c.get('householdId'),
+    weekOf,
+    parsed.data,
+    c.get('email'),
+    new Date().toISOString(),
+  );
   return c.json({ received });
 });
 
@@ -478,8 +534,13 @@ app.post(`${API}/receipts/parse`, async (c) => {
     return c.text('Missing or oversized image', 400);
   }
 
+  const householdId = c.get('householdId');
+  const capped = await overCap(c.env, householdId, 'receipt');
+  if (capped) return capped;
+
   const result = await parseReceiptImage(image, c.env);
   if (!result.ok) return c.text(result.message, result.status);
+  await recordUsage(c.env.DB, householdId, 'receipt', usageMonth(torontoDate()));
   return c.json(result.receipt);
 });
 
@@ -498,7 +559,7 @@ app.post(`${API}/receipts/commit`, async (c) => {
   if (unknown) return c.text(`Unknown ingredient: ${unknown.ingredientId}`, 400);
 
   const rows = planReceiptCommit(parsed.data, torontoDate(), newId);
-  const counts = await commitReceiptRows(c.env.DB, rows, new Date().toISOString());
+  const counts = await commitReceiptRows(c.env.DB, c.get('householdId'), rows, new Date().toISOString());
   return c.json(counts, 201);
 });
 
@@ -518,19 +579,18 @@ app.all('*', async (c) => {
   return res;
 });
 
-// The Sunday job: refresh the flyers, then delete plans and ticks past the retention window.
-export async function runSunday(env: Env): Promise<IngestRunSummary> {
-  try {
-    return await runIngest(env);
-  } finally {
-    await pruneWeeksBefore(env.DB, retentionCutoff(new Date()));
-  }
+/**
+ * The Sunday job (hourly on Sundays, see wrangler.jsonc). Refreshes the flyers for one postal code that is
+ * stale this week, and deletes plans and ticks past the retention window in the last run of the day.
+ */
+export async function runSunday(env: Env, now: Date = new Date()) {
+  return runScheduledIngest(env, now);
 }
 
-// The Sunday cron (wrangler.jsonc) refreshes the flyers. Fetch serves the Hono app as before.
+// The scheduled job refreshes the flyers. Fetch serves the Hono app as before.
 export default {
   fetch: (request: Request, env: Env, ctx: ExecutionContext) => app.fetch(request, env, ctx),
-  scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runSunday(env));
+  scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runSunday(env, new Date(event.scheduledTime)));
   },
 };

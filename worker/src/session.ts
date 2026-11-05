@@ -3,7 +3,6 @@ import {
   COOKIE,
   ROLL_WHEN_LEFT_MS,
   SESSION_MAX_AGE,
-  isAllowed,
   isExpired,
   parseCookies,
   randomToken,
@@ -13,7 +12,6 @@ import {
 
 export interface SessionEnv {
   DB: D1Database;
-  ALLOWED_EMAILS?: string;
 }
 
 export interface Session {
@@ -22,7 +20,10 @@ export interface Session {
   refreshCookie?: string;
 }
 
-/** Resolves the session from the cookie. Rolls expiry forward when under 11 months remain. */
+/**
+ * Resolves the session from the cookie. Rolls expiry forward when under 11 months remain. This does not check
+ * that the address may still use the app: that is access.ts, on every request.
+ */
 export async function getSession(req: Request, env: SessionEnv): Promise<Session | null> {
   const token = parseCookies(req)[COOKIE];
   if (!token) return null;
@@ -31,8 +32,6 @@ export async function getSession(req: Request, env: SessionEnv): Promise<Session
     .bind(idHash)
     .first<{ email: string; expires_at: number }>();
   if (!row || isExpired(row.expires_at)) return null;
-  // Removing an address from ALLOWED_EMAILS revokes its sessions immediately
-  if (!isAllowed(env.ALLOWED_EMAILS, row.email)) return null;
 
   const s: Session = { email: row.email };
   if (row.expires_at - Date.now() < ROLL_WHEN_LEFT_MS) {

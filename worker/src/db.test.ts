@@ -1,68 +1,59 @@
-// The flyer query prices a plan week from the flyers valid on its Sunday. No real D1 here.
+// The flyer queries and the latest run, against a real in-memory database.
 import { describe, expect, it } from 'vitest';
-import { currentFlyerItems, latestIngestRun } from './db';
+import { currentFlyerItems, latestIngestRun, overlappingFlyerItems } from './db';
+import { newTestDb } from './testing/d1';
+
+function seeded() {
+  const { DB, raw } = newTestDb();
+  const flyer = (id: string, postal: string, from: string, to: string, store = 'No Frills') =>
+    raw
+      .prepare(
+        `INSERT INTO flyer_items (postal_code, id, store, raw_name, price_text, valid_from, valid_to, source, fetched_at)
+         VALUES (?, ?, ?, ?, '$1', ?, ?, 'flipp', 'now')`,
+      )
+      .run(postal, id, store, `Item ${id}`, from, to);
+  flyer('on-day', 'M5V2T6', '2026-11-12', '2026-11-18');
+  flyer('other-postal', 'K1A0B1', '2026-11-12', '2026-11-18');
+  flyer('overlap', 'M5V2T6', '2026-11-17', '2026-11-23');
+  flyer('ended', 'M5V2T6', '2026-10-01', '2026-10-31');
+  return { DB, raw };
+}
 
 describe('currentFlyerItems', () => {
-  it('selects flyer items valid on the date: started on or before it, and not yet ended', () => {
-    const calls: { sql: string; args: unknown[] }[] = [];
-    const db = {
-      prepare(sql: string) {
-        let args: unknown[] = [];
-        const stmt = {
-          bind(...values: unknown[]) {
-            args = values;
-            return stmt;
-          },
-          async all() {
-            calls.push({ sql, args });
-            return { results: [] };
-          },
-        };
-        return stmt;
-      },
-    } as unknown as D1Database;
+  it('selects flyer items for the postal code valid on the date: started on or before it, and not yet ended', async () => {
+    const { DB } = seeded();
+    const items = await currentFlyerItems(DB, 'M5V2T6', '2026-11-15');
+    expect(items.map((i) => i.id)).toEqual(['on-day']);
+  });
+});
 
-    return currentFlyerItems(db, '2026-11-15').then(() => {
-      expect(calls).toHaveLength(1);
-      expect(calls[0]!.sql).toContain('valid_from <= ?');
-      expect(calls[0]!.sql).toContain('valid_to >= ?');
-      expect(calls[0]!.args).toEqual(['2026-11-15', '2026-11-15']);
-    });
+describe('overlappingFlyerItems', () => {
+  it('selects the flyers of the postal code that overlap the range', async () => {
+    const { DB } = seeded();
+    const items = await overlappingFlyerItems(DB, 'M5V2T6', '2026-11-15', '2026-11-21');
+    expect(items.map((i) => i.id).sort()).toEqual(['on-day', 'overlap']);
   });
 });
 
 describe('latestIngestRun', () => {
-  const row = {
-    id: 'run-1',
-    started_at: '2026-11-01T12:00:00.000Z',
-    finished_at: '2026-11-01T12:01:00.000Z',
-    ok: 1,
-    mode: 'flyers',
-    terms: 0,
-    flyers: JSON.stringify([{ id: '7', merchant: 'NOFRILLS', name: 'Weekly', store: 'No Frills', items: 3 }]),
-    items: 3,
-    kept: 3,
-    stored: 4,
-    matched: 3,
-    errors: JSON.stringify(['flyer list HTTP 500']),
-    sample: JSON.stringify([{ id: 1 }]),
-  };
-
-  function dbReturning(r: unknown) {
-    const sqls: string[] = [];
-    const db = {
-      prepare(sql: string) {
-        sqls.push(sql);
-        return { first: async () => r };
-      },
-    } as unknown as D1Database;
-    return { db, sqls };
+  function withRun(raw: ReturnType<typeof seeded>['raw'], postal: string) {
+    raw
+      .prepare(
+        `INSERT INTO ingest_runs (id, postal_code, started_at, finished_at, ok, mode, terms, flyers, items, kept, stored, matched, errors, sample)
+         VALUES ('run-1', ?, '2026-11-01T12:00:00.000Z', '2026-11-01T12:01:00.000Z', 1, 'flyers', 0, ?, 3, 3, 4, 3, ?, ?)`,
+      )
+      .run(
+        postal,
+        JSON.stringify([{ id: '7', merchant: 'NOFRILLS', name: 'Weekly', store: 'No Frills', items: 3 }]),
+        JSON.stringify(['flyer list HTTP 500']),
+        JSON.stringify([{ id: 1 }]),
+      );
   }
 
   it('leaves out the sample and the flyer list unless debug is asked for', async () => {
-    const { db, sqls } = dbReturning(row);
-    const out = await latestIngestRun(db);
-    expect(sqls[0]).not.toContain('sample');
+    const { DB, raw } = seeded();
+    withRun(raw, 'M5V2T6');
+    const out = await latestIngestRun(DB, 'M5V2T6');
     expect(out).toEqual({
       id: 'run-1',
       startedAt: '2026-11-01T12:00:00.000Z',
@@ -80,17 +71,19 @@ describe('latestIngestRun', () => {
   });
 
   it('adds the sample and the flyers in debug mode', async () => {
-    const { db, sqls } = dbReturning(row);
-    const out = await latestIngestRun(db, { debug: true });
-    expect(sqls[0]).toContain('sample');
+    const { DB, raw } = seeded();
+    withRun(raw, 'M5V2T6');
+    const out = await latestIngestRun(DB, 'M5V2T6', { debug: true });
     expect(out).toMatchObject({
       sample: [{ id: 1 }],
       flyers: [{ id: '7', merchant: 'NOFRILLS', name: 'Weekly', store: 'No Frills', items: 3 }],
     });
   });
 
-  it('returns null when there has been no run', async () => {
-    const { db } = dbReturning(null);
-    expect(await latestIngestRun(db)).toBeNull();
+  it('returns only the runs of the postal code asked for, and null when there are none', async () => {
+    const { DB, raw } = seeded();
+    withRun(raw, 'K1A0B1');
+    expect(await latestIngestRun(DB, 'M5V2T6')).toBeNull();
+    expect(await latestIngestRun(DB, 'K1A0B1')).toMatchObject({ id: 'run-1' });
   });
 });

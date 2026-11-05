@@ -1,4 +1,6 @@
-// Thin D1 access. Not unit tested: the logic lives in shared/ and is tested there.
+// Thin D1 access. Every household-scoped statement takes the household id; the Worker passes the id of the
+// household the signed-in address belongs to. Flyer items and ingest runs are scoped by postal code instead.
+// Price history and receipt matches are shared. Tested against real SQLite (see testing/d1.ts).
 import {
   CHECK_KINDS,
   HouseholdSchema,
@@ -45,20 +47,23 @@ export interface HistoryInsert extends HistoryPoint {
   source: string;
 }
 
+/** Stores flyer items for a postal code. The same flyer item under another postal code is a separate row. */
 export async function insertFlyerItems(
   db: D1Database,
+  postalCode: string,
   items: FlyerItem[],
   fetchedAt: string = new Date().toISOString(),
 ): Promise<number> {
   if (items.length === 0) return 0;
   const stmt = db.prepare(
     `INSERT OR REPLACE INTO flyer_items
-       (id, store, raw_name, price_text, size_text, valid_from, valid_to, source, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (postal_code, id, store, raw_name, price_text, size_text, valid_from, valid_to, source, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   await db.batch(
     items.map((i) =>
       stmt.bind(
+        postalCode,
         i.id,
         i.store,
         i.rawName,
@@ -89,28 +94,24 @@ function flyerFromRow(r: FlyerRow): FlyerItem {
 
 // Shopping happens on Sunday, so the week is priced from the flyers valid that day.
 /** Flyer items valid on `date` (valid_from <= date <= valid_to). */
-export async function currentFlyerItems(db: D1Database, date: string): Promise<FlyerItem[]> {
+export async function currentFlyerItems(db: D1Database, postalCode: string, date: string): Promise<FlyerItem[]> {
   const { results } = await db
-    .prepare('SELECT * FROM flyer_items WHERE valid_from <= ? AND valid_to >= ?')
-    .bind(date, date)
+    .prepare('SELECT * FROM flyer_items WHERE postal_code = ? AND valid_from <= ? AND valid_to >= ?')
+    .bind(postalCode, date, date)
     .all<FlyerRow>();
-  return results.map((r) => ({
-    id: r.id,
-    store: r.store,
-    rawName: r.raw_name,
-    priceText: r.price_text,
-    sizeText: r.size_text ?? undefined,
-    validFrom: r.valid_from,
-    validTo: r.valid_to,
-    source: r.source,
-  }));
+  return results.map(flyerFromRow);
 }
 
 /** Flyer items whose validity overlaps [from, to]: they start on or before to and end on or after from. */
-export async function overlappingFlyerItems(db: D1Database, from: string, to: string): Promise<FlyerItem[]> {
+export async function overlappingFlyerItems(
+  db: D1Database,
+  postalCode: string,
+  from: string,
+  to: string,
+): Promise<FlyerItem[]> {
   const { results } = await db
-    .prepare('SELECT * FROM flyer_items WHERE valid_from <= ? AND valid_to >= ?')
-    .bind(to, from)
+    .prepare('SELECT * FROM flyer_items WHERE postal_code = ? AND valid_from <= ? AND valid_to >= ?')
+    .bind(postalCode, to, from)
     .all<FlyerRow>();
   return results.map(flyerFromRow);
 }
@@ -159,11 +160,16 @@ export async function recordPrices(db: D1Database, matched: MatchedItem[], date:
 
 // ---- Meal plans (milestone 2B) ----
 
-/** Saved plans whose week starts in [fromWeek, beforeWeek). */
-export async function plansBetween(db: D1Database, fromWeek: string, beforeWeek: string): Promise<MealPlan[]> {
+/** The household's saved plans whose week starts in [fromWeek, beforeWeek). */
+export async function plansBetween(
+  db: D1Database,
+  householdId: string,
+  fromWeek: string,
+  beforeWeek: string,
+): Promise<MealPlan[]> {
   const { results } = await db
-    .prepare('SELECT data FROM meal_plans WHERE week_of >= ? AND week_of < ?')
-    .bind(fromWeek, beforeWeek)
+    .prepare('SELECT data FROM meal_plans WHERE household_id = ? AND week_of >= ? AND week_of < ?')
+    .bind(householdId, fromWeek, beforeWeek)
     .all<{ data: string }>();
   return results.flatMap((r) => {
     try {
@@ -174,20 +180,23 @@ export async function plansBetween(db: D1Database, fromWeek: string, beforeWeek:
   });
 }
 
-export async function loadPlan(db: D1Database, weekOf: string): Promise<MealPlan | null> {
-  const row = await db.prepare('SELECT data FROM meal_plans WHERE week_of = ?').bind(weekOf).first<{ data: string }>();
+export async function loadPlan(db: D1Database, householdId: string, weekOf: string): Promise<MealPlan | null> {
+  const row = await db
+    .prepare('SELECT data FROM meal_plans WHERE household_id = ? AND week_of = ?')
+    .bind(householdId, weekOf)
+    .first<{ data: string }>();
   if (!row) return null;
   return readStoredPlan(JSON.parse(row.data) as MealPlan) as MealPlan;
 }
 
-/** Insert or replace the plan for its week. */
-export async function savePlan(db: D1Database, plan: MealPlan): Promise<void> {
+/** Insert or replace the household's plan for its week. */
+export async function savePlan(db: D1Database, householdId: string, plan: MealPlan): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO meal_plans (week_of, data, created_at) VALUES (?, ?, ?)
-       ON CONFLICT(week_of) DO UPDATE SET data = excluded.data, created_at = excluded.created_at`,
+      `INSERT INTO meal_plans (household_id, week_of, data, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(household_id, week_of) DO UPDATE SET data = excluded.data, created_at = excluded.created_at`,
     )
-    .bind(plan.weekOf, JSON.stringify(plan), plan.generatedAt)
+    .bind(householdId, plan.weekOf, JSON.stringify(plan), plan.generatedAt)
     .run();
 }
 
@@ -222,39 +231,47 @@ const toPantryItem = (r: PantryRow): PantryItem => ({
   source: r.source,
 });
 
-export async function loadPantry(db: D1Database): Promise<PantryItem[]> {
+export async function loadPantry(db: D1Database, householdId: string): Promise<PantryItem[]> {
   const { results } = await db
-    .prepare('SELECT * FROM pantry_items ORDER BY expires_on, added_on, id')
+    .prepare('SELECT * FROM pantry_items WHERE household_id = ? ORDER BY expires_on, added_on, id')
+    .bind(householdId)
     .all<PantryRow>();
   return results.map(toPantryItem);
 }
 
-export async function loadPantryItem(db: D1Database, id: string): Promise<PantryItem | null> {
-  const row = await db.prepare('SELECT * FROM pantry_items WHERE id = ?').bind(id).first<PantryRow>();
+/** One of the household's pantry items. Another household's item with the same id is not found. */
+export async function loadPantryItem(db: D1Database, householdId: string, id: string): Promise<PantryItem | null> {
+  const row = await db
+    .prepare('SELECT * FROM pantry_items WHERE household_id = ? AND id = ?')
+    .bind(householdId, id)
+    .first<PantryRow>();
   return row ? toPantryItem(row) : null;
 }
 
-export async function insertPantryItem(db: D1Database, item: PantryItem): Promise<void> {
+export async function insertPantryItem(db: D1Database, householdId: string, item: PantryItem): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO pantry_items (id, ingredient_id, qty, unit, added_on, expires_on, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO pantry_items (household_id, id, ingredient_id, qty, unit, added_on, expires_on, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(item.id, item.ingredientId, item.qty, item.unit, item.addedOn, item.expiresOn, item.source)
+    .bind(householdId, item.id, item.ingredientId, item.qty, item.unit, item.addedOn, item.expiresOn, item.source)
     .run();
 }
 
-/** Set quantity and use-by date. Returns false when no item has that id. */
-export async function updatePantryItem(db: D1Database, item: PantryItem): Promise<boolean> {
+/** Set quantity and use-by date. Returns false when the household has no item with that id. */
+export async function updatePantryItem(db: D1Database, householdId: string, item: PantryItem): Promise<boolean> {
   const res = await db
-    .prepare('UPDATE pantry_items SET qty = ?, expires_on = ? WHERE id = ?')
-    .bind(item.qty, item.expiresOn, item.id)
+    .prepare('UPDATE pantry_items SET qty = ?, expires_on = ? WHERE household_id = ? AND id = ?')
+    .bind(item.qty, item.expiresOn, householdId, item.id)
     .run();
   return (res.meta.changes ?? 0) > 0;
 }
 
-export async function deletePantryItem(db: D1Database, id: string): Promise<boolean> {
-  const res = await db.prepare('DELETE FROM pantry_items WHERE id = ?').bind(id).run();
+export async function deletePantryItem(db: D1Database, householdId: string, id: string): Promise<boolean> {
+  const res = await db
+    .prepare('DELETE FROM pantry_items WHERE household_id = ? AND id = ?')
+    .bind(householdId, id)
+    .run();
   return (res.meta.changes ?? 0) > 0;
 }
 
@@ -269,23 +286,27 @@ const toRating = (r: RatingRow): Rating => ({
   date: r.date,
 });
 
-export async function loadRatings(db: D1Database): Promise<Rating[]> {
-  const { results } = await db.prepare('SELECT * FROM meal_ratings').all<RatingRow>();
+export async function loadRatings(db: D1Database, householdId: string): Promise<Rating[]> {
+  const { results } = await db
+    .prepare('SELECT * FROM meal_ratings WHERE household_id = ?')
+    .bind(householdId)
+    .all<RatingRow>();
   return results.map(toRating);
 }
 
-/** One rating per meal name (case-insensitive) and person: the old one is replaced. */
-export async function upsertRating(db: D1Database, rating: Rating): Promise<void> {
+/** One rating per meal name (case-insensitive) and person, within the household: the old one is replaced. */
+export async function upsertRating(db: D1Database, householdId: string, rating: Rating): Promise<void> {
   await db.batch([
     db
-      .prepare('DELETE FROM meal_ratings WHERE meal_name = ? COLLATE NOCASE AND person_id = ?')
-      .bind(rating.mealName, rating.personId),
+      .prepare('DELETE FROM meal_ratings WHERE household_id = ? AND meal_name = ? COLLATE NOCASE AND person_id = ?')
+      .bind(householdId, rating.mealName, rating.personId),
     db
       .prepare(
-        `INSERT INTO meal_ratings (id, meal_name, person_id, rating, ingredient_ids, date)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO meal_ratings (household_id, id, meal_name, person_id, rating, ingredient_ids, date)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
+        householdId,
         rating.id,
         rating.mealName,
         rating.personId,
@@ -305,6 +326,7 @@ const STATEMENTS_PER_BATCH = 50;
 /** Writes the rows a confirmed receipt produced: prices, confirmed matches and pantry items. */
 export async function commitReceiptRows(
   db: D1Database,
+  householdId: string,
   rows: ReceiptCommitRows,
   now: string,
 ): Promise<{ prices: number; matches: number; pantryItems: number }> {
@@ -342,10 +364,10 @@ export async function commitReceiptRows(
     statements.push(
       db
         .prepare(
-          `INSERT INTO pantry_items (id, ingredient_id, qty, unit, added_on, expires_on, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO pantry_items (household_id, id, ingredient_id, qty, unit, added_on, expires_on, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(item.id, item.ingredientId, item.qty, item.unit, item.addedOn, item.expiresOn, item.source),
+        .bind(householdId, item.id, item.ingredientId, item.qty, item.unit, item.addedOn, item.expiresOn, item.source),
     );
   }
 
@@ -357,9 +379,12 @@ export async function commitReceiptRows(
 
 // ---- Household and flyer imports (milestone 4) ----
 
-/** The stored household, or the default when none is saved. Throws when the stored document is invalid. */
-export async function loadHousehold(db: D1Database): Promise<Household> {
-  const row = await db.prepare('SELECT data FROM household WHERE id = 1').first<{ data: string }>();
+/** The household's document, or the default when none is saved. Throws when the stored document is invalid. */
+export async function loadHousehold(db: D1Database, householdId: string): Promise<Household> {
+  const row = await db
+    .prepare('SELECT data FROM households WHERE id = ?')
+    .bind(householdId)
+    .first<{ data: string }>();
   if (!row) return defaultHousehold();
   const parsed = HouseholdSchema.safeParse(JSON.parse(row.data));
   if (!parsed.success) {
@@ -367,6 +392,20 @@ export async function loadHousehold(db: D1Database): Promise<Household> {
     throw new Error(`Stored household is invalid: ${detail}`);
   }
   return parsed.data;
+}
+
+/** Replaces the household's document. Returns false when the household does not exist. */
+export async function saveHouseholdDocument(
+  db: D1Database,
+  householdId: string,
+  household: Household,
+  updatedAt: string,
+): Promise<boolean> {
+  const res = await db
+    .prepare('UPDATE households SET data = ?, updated_at = ? WHERE id = ?')
+    .bind(JSON.stringify(household), updatedAt, householdId)
+    .run();
+  return (res.meta.changes ?? 0) > 0;
 }
 
 export interface IngestRunRow {
@@ -385,14 +424,15 @@ export interface IngestRunRow {
   sample: unknown[];
 }
 
-export async function insertIngestRun(db: D1Database, run: IngestRunRow): Promise<void> {
+export async function insertIngestRun(db: D1Database, postalCode: string, run: IngestRunRow): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO ingest_runs (id, started_at, finished_at, ok, mode, terms, flyers, items, kept, stored, matched, errors, sample)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ingest_runs (id, postal_code, started_at, finished_at, ok, mode, terms, flyers, items, kept, stored, matched, errors, sample)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       run.id,
+      postalCode,
       run.startedAt,
       run.finishedAt,
       run.ok ? 1 : 0,
@@ -441,11 +481,16 @@ function parseJsonArray(text: string | undefined): unknown[] {
  */
 export async function latestIngestRun(
   db: D1Database,
+  postalCode: string,
   opts: { debug?: boolean } = {},
 ): Promise<NonNullable<IngestStatus['lastRun']> | null> {
   const columns = 'id, started_at, finished_at, ok, mode, terms, flyers, items, kept, stored, matched, errors';
   const row = await db
-    .prepare(`SELECT ${columns}${opts.debug ? ', sample' : ''} FROM ingest_runs ORDER BY started_at DESC LIMIT 1`)
+    .prepare(
+      `SELECT ${columns}${opts.debug ? ', sample' : ''} FROM ingest_runs
+       WHERE postal_code = ? ORDER BY started_at DESC LIMIT 1`,
+    )
+    .bind(postalCode)
     .first<IngestRunDbRow>();
   if (!row) return null;
   const flyers = parseJsonArray(row.flyers) as FlyerUsed[];
@@ -470,13 +515,18 @@ export async function latestIngestRun(
   return out;
 }
 
-/** Flyer items valid on `date`, counted per store. */
-export async function flyerCountsForDate(db: D1Database, date: string): Promise<{ store: string; count: number }[]> {
+/** Flyer items for the postal code valid on `date`, counted per store. */
+export async function flyerCountsForDate(
+  db: D1Database,
+  postalCode: string,
+  date: string,
+): Promise<{ store: string; count: number }[]> {
   const { results } = await db
     .prepare(
-      'SELECT store, COUNT(*) AS n FROM flyer_items WHERE valid_from <= ? AND valid_to >= ? GROUP BY store ORDER BY store',
+      `SELECT store, COUNT(*) AS n FROM flyer_items
+       WHERE postal_code = ? AND valid_from <= ? AND valid_to >= ? GROUP BY store ORDER BY store`,
     )
-    .bind(date, date)
+    .bind(postalCode, date, date)
     .all<{ store: string; n: number }>();
   return results.map((r) => ({ store: r.store, count: r.n }));
 }
@@ -491,10 +541,10 @@ interface CheckRow {
 }
 
 /** Every tick saved for the week. updatedAt is the latest write, or null when nothing is saved. */
-export async function loadChecks(db: D1Database, weekOf: string): Promise<Checks> {
+export async function loadChecks(db: D1Database, householdId: string, weekOf: string): Promise<Checks> {
   const { results } = await db
-    .prepare('SELECT kind, item_id, checked, updated_at FROM checks WHERE week_of = ?')
-    .bind(weekOf)
+    .prepare('SELECT kind, item_id, checked, updated_at FROM checks WHERE household_id = ? AND week_of = ?')
+    .bind(householdId, weekOf)
     .all<CheckRow>();
   const out: Checks = { list: {}, prep: {}, updatedAt: null };
   for (const r of results) {
@@ -507,6 +557,7 @@ export async function loadChecks(db: D1Database, weekOf: string): Promise<Checks
 /** Sets one tick. The latest write wins, and the row records who and when. */
 export async function setCheck(
   db: D1Database,
+  householdId: string,
   weekOf: string,
   kind: CheckKind,
   itemId: string,
@@ -516,18 +567,19 @@ export async function setCheck(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO checks (week_of, kind, item_id, checked, updated_at, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(week_of, kind, item_id) DO UPDATE SET
+      `INSERT INTO checks (household_id, week_of, kind, item_id, checked, updated_at, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(household_id, week_of, kind, item_id) DO UPDATE SET
          checked = excluded.checked, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
     )
-    .bind(weekOf, kind, itemId, checked ? 1 : 0, updatedAt, updatedBy)
+    .bind(householdId, weekOf, kind, itemId, checked ? 1 : 0, updatedAt, updatedBy)
     .run();
 }
 
 /** One-time move of ticks from a browser. Items already saved for the week are left alone. Returns the count sent. */
 export async function insertMissingChecks(
   db: D1Database,
+  householdId: string,
   weekOf: string,
   bulk: CheckBulk,
   updatedBy: string,
@@ -539,9 +591,9 @@ export async function insertMissingChecks(
       stmts.push(
         db
           .prepare(
-            'INSERT OR IGNORE INTO checks (week_of, kind, item_id, checked, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT OR IGNORE INTO checks (household_id, week_of, kind, item_id, checked, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
           )
-          .bind(weekOf, kind, itemId, checked ? 1 : 0, updatedAt, updatedBy),
+          .bind(householdId, weekOf, kind, itemId, checked ? 1 : 0, updatedAt, updatedBy),
       );
     }
   }
@@ -552,7 +604,7 @@ export async function insertMissingChecks(
 
 // ---- Retention (the Sunday job) ----
 
-/** Deletes plans and ticks for weeks starting before `cutoff`. Returns how many rows went. */
+/** Deletes plans and ticks of every household for weeks starting before `cutoff`. Returns how many rows went. */
 export async function pruneWeeksBefore(db: D1Database, cutoff: string): Promise<{ plans: number; checks: number }> {
   const plans = await db.prepare('DELETE FROM meal_plans WHERE week_of < ?').bind(cutoff).run();
   const checks = await db.prepare('DELETE FROM checks WHERE week_of < ?').bind(cutoff).run();

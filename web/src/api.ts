@@ -1,6 +1,9 @@
 import {
   ChecksSchema,
   HouseholdSchema,
+  type MembersView,
+  type MyInvitesView,
+  type UsageView,
   type CheckBulk,
   type CheckKind,
   type Checks,
@@ -245,4 +248,65 @@ export async function getFlyerStatus(): Promise<IngestStatus> {
 /** Searches Flipp now. Takes up to a minute. */
 export async function refreshFlyers(): Promise<IngestRunSummary> {
   return json(await authFetch(`${BASE}/flyers/refresh`, { method: 'POST' }), (raw) => raw as IngestRunSummary);
+}
+
+// ---- Households: members, invites, leaving, usage ----
+
+export async function getMembers(): Promise<MembersView> {
+  return json(await authFetch(`${BASE}/members`), (raw) => raw as MembersView);
+}
+
+export async function renameHousehold(name: string): Promise<{ name: string }> {
+  return json(
+    await authFetch(`${BASE}/household-name`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }),
+    (raw) => raw as { name: string },
+  );
+}
+
+/** Invites an address. `emailed` says whether the sign-in email went out. */
+export async function inviteMember(email: string): Promise<{ invite: { email: string; createdAt: string }; emailed: boolean }> {
+  return json(
+    await authFetch(`${BASE}/invites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }),
+    (raw) => raw as { invite: { email: string; createdAt: string }; emailed: boolean },
+  );
+}
+
+export async function cancelInvite(email: string): Promise<void> {
+  await ensureOk(await authFetch(`${BASE}/invites/${encodeURIComponent(email)}`, { method: 'DELETE' }));
+}
+
+export async function removeMember(email: string): Promise<void> {
+  await ensureOk(await authFetch(`${BASE}/members/${encodeURIComponent(email)}`, { method: 'DELETE' }));
+}
+
+/** Leaves the household. `deleted` says the household went with it (its owner was the last member). */
+export async function leaveHousehold(): Promise<{ deleted: boolean }> {
+  return json(await authFetch(`${BASE}/leave`, { method: 'POST' }), (raw) => raw as { deleted: boolean });
+}
+
+export async function getMyInvites(): Promise<MyInvitesView> {
+  return json(await authFetch(`${BASE}/my-invites`), (raw) => raw as MyInvitesView);
+}
+
+export async function acceptInvite(householdId: string): Promise<{ householdId: string; name: string; deleted: boolean }> {
+  return json(
+    await authFetch(`${BASE}/invites/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ householdId }),
+    }),
+    (raw) => raw as { householdId: string; name: string; deleted: boolean },
+  );
+}
+
+export async function getUsage(): Promise<UsageView> {
+  return json(await authFetch(`${BASE}/usage`), (raw) => raw as UsageView);
 }
