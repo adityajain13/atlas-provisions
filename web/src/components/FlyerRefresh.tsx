@@ -79,7 +79,7 @@ export function FlyerRefresh() {
   const errors = result?.errors ?? [];
 
   return (
-    <div className="mt-6 border-t border-line2 pt-4">
+    <div>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <span className="block text-[15px] text-paper">Flyers</span>

@@ -40,14 +40,18 @@ import {
 } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL, formatDays } from '../lib/labels';
 import {
+  MAX_FLIPP_NAMES,
   addCustomStore,
+  addFlippName,
   clampMaxStores,
+  enabledCount,
   groupPresets,
   maxStoresLimit,
   groupOf,
+  orderStores,
   presetsNotInList,
+  removeFlippName,
   storeFromPreset,
-  withFlippNames,
 } from '../lib/stores';
 import { useSession } from '../session';
 
@@ -912,8 +916,12 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
       }),
     [update],
   );
+  // One store row open at a time, and the add-store picker.
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const limit = maxStoresLimit(h.stores);
   const perTrip = clampMaxStores(h.maxStores, h.stores);
+  const rows = orderStores(h.stores);
 
   function setMax(n: number) {
     update((prev) => ({ ...prev, maxStores: clampMaxStores(n, prev.stores) }));
@@ -921,25 +929,46 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
 
   return (
     <Section title="Stores">
-      <PostalCodeField h={h} update={update} />
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
+        <div className="lg:w-64 lg:shrink-0">
+          <PostalCodeField h={h} update={update} />
+        </div>
+        <div className="min-w-0 flex-1 border-t border-line2 pt-4 lg:border-t-0 lg:pt-0">
+          <FlyerRefresh />
+        </div>
+      </div>
 
-      <div className="mt-6">
+      <div className="mt-8">
         <p className={eyebrow}>Your stores</p>
-        {h.stores.length === 0 && <p className="mt-2 text-[14px] text-muted">No stores yet. Add one below.</p>}
-        <ul className="mt-2">
-          {h.stores.map((s) => (
-            <StoreRow key={s.id} store={s} change={changeStores} />
-          ))}
-        </ul>
-        <FlyerRefresh />
-      </div>
-
-      <div className="mt-8">
-        <AddPresets stores={h.stores} change={changeStores} />
-      </div>
-
-      <div className="mt-8">
-        <AddCustomStore stores={h.stores} change={changeStores} />
+        {rows.length === 0 ? (
+          <p className="mt-2 text-[14px] text-muted">No stores yet. Add one below.</p>
+        ) : (
+          <>
+            <ul className="mt-2">
+              {rows.map((s) => (
+                <li key={s.id}>
+                  <StoreRow
+                    store={s}
+                    open={openId === s.id}
+                    onToggle={() => setOpenId((cur) => (cur === s.id ? null : s.id))}
+                    change={changeStores}
+                  />
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[13px] text-muted">
+              {`${enabledCount(h.stores)} of ${h.stores.length} stores enabled.`}
+            </p>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          aria-haspopup="dialog"
+          className={`mt-3 ${linkBtn}`}
+        >
+          + Add store
+        </button>
       </div>
 
       <div className="mt-8">
@@ -971,22 +1000,35 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
           {`We'll pick the cheapest combination of up to ${perTrip} of your enabled stores.`}
         </p>
       </div>
+
+      <StorePicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        stores={h.stores}
+        change={changeStores}
+      />
     </Section>
   );
 }
 
-function StoreRow({ store: s, change }: { store: Store; change: StoresUpdate }) {
+/** One store: a shop-here switch, the name and chain, a price-match pill, and an expandable editor. */
+function StoreRow({
+  store: s,
+  open,
+  onToggle,
+  change,
+}: {
+  store: Store;
+  open: boolean;
+  onToggle: () => void;
+  change: StoresUpdate;
+}) {
   const confirm = useConfirm();
-  const [editingFlipp, setEditingFlipp] = useState(false);
-  const [flippText, setFlippText] = useState((s.flippNames ?? []).join(', '));
+  const shopping = s.enabled;
+  const group = groupOf(s);
 
   function patch(p: Partial<Store>) {
     change((list) => list.map((x) => (x.id === s.id ? { ...x, ...p } : x)));
-  }
-
-  function setFlipp(text: string) {
-    setFlippText(text);
-    change((list) => list.map((x) => (x.id === s.id ? withFlippNames(x, text) : x)));
   }
 
   async function remove() {
@@ -999,131 +1041,259 @@ function StoreRow({ store: s, change }: { store: Store; change: StoresUpdate }) 
       }))
     )
       return;
+    if (open) onToggle();
     change((list) => list.filter((x) => x.id !== s.id));
   }
 
   return (
-    <li className="border-b border-line2 py-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-x-2">
-            <span className="text-[15px] text-paper">{s.name}</span>
-            {groupOf(s) && <span className="text-[12px] text-muted">{groupOf(s)}</span>}
-          </div>
-          {s.flippNames && s.flippNames.length > 0 && !editingFlipp && (
-            <p className="mt-0.5 truncate text-[12px] text-muted">Flipp: {s.flippNames.join(', ')}</p>
-          )}
-          <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-1">
-            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-[14px] text-paper">
-              <input
-                type="checkbox"
-                className="h-5 w-5 shrink-0"
-                checked={s.enabled}
-                onChange={(e) => patch({ enabled: e.target.checked })}
-              />
-              Shop here
-            </label>
-            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-[14px] text-paper">
-              <input
-                type="checkbox"
-                className="h-5 w-5 shrink-0"
-                checked={s.priceMatches}
-                onChange={(e) => patch({ priceMatches: e.target.checked })}
-              />
-              Price-matches
-            </label>
-          </div>
-          <div className="mt-1">
-            <Disclosure
-              variant="compact"
-              open={editingFlipp}
-              onToggle={() => setEditingFlipp((v) => !v)}
-              title="Flipp names"
-            >
-              <label className="block">
-                <span className="text-[12px] text-muted">Names on Flipp, comma-separated</span>
-                <input
-                  className={`${fieldCls} mt-1`}
-                  value={flippText}
-                  maxLength={200}
-                  placeholder="e.g. RCSS, Superstore"
-                  onChange={(e) => setFlipp(e.target.value)}
-                />
-              </label>
-            </Disclosure>
-          </div>
-        </div>
-        <button type="button" aria-label={`Remove ${s.name}`} onClick={remove} className={removeIconBtn}>
-          &times;
+    <Disclosure
+      open={open}
+      onToggle={onToggle}
+      lead={
+        <button
+          type="button"
+          role="switch"
+          aria-checked={shopping}
+          aria-label={`Shop at ${s.name}`}
+          onClick={() => patch({ enabled: !shopping })}
+          className="flex h-12 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb"
+        >
+          <span
+            aria-hidden="true"
+            className={`relative inline-block h-5 w-9 rounded-full transition-colors motion-reduce:transition-none ${
+              shopping ? 'bg-herb' : 'bg-edge'
+            }`}
+          >
+            <span
+              className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-paper transition-transform motion-reduce:transition-none ${
+                shopping ? 'translate-x-[18px]' : 'translate-x-0.5'
+              }`}
+            />
+          </span>
         </button>
-      </div>
-    </li>
+      }
+      title={
+        <>
+          <span className={shopping ? 'text-paper' : 'text-muted'}>{s.name}</span>
+          {group && <span className="ml-2 text-[12px] text-muted">{group}</span>}
+        </>
+      }
+      summary={
+        s.priceMatches ? (
+          <span className="inline-block rounded-full border border-herb/40 px-2 py-0.5 text-[11px] text-herbLight">
+            Price-matches
+          </span>
+        ) : undefined
+      }
+      remove={{ label: 'Remove store', onClick: () => void remove() }}
+    >
+      <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4">
+        <span className="min-w-0">
+          <span className="block text-[15px] text-paper">Price-matches</span>
+          <span className="block text-[12px] text-muted">Show price-match hints for this store.</span>
+        </span>
+        <input
+          type="checkbox"
+          className="h-5 w-5 shrink-0"
+          checked={s.priceMatches}
+          onChange={(e) => patch({ priceMatches: e.target.checked })}
+        />
+      </label>
+
+      <FlippNames store={s} change={change} />
+    </Disclosure>
   );
 }
 
-function AddPresets({ stores, change }: { stores: Store[]; change: StoresUpdate }) {
-  const [open, setOpen] = useState(false);
-  const groups = groupPresets(presetsNotInList(stores, STORE_PRESETS));
-  const count = groups.reduce((n, g) => n + g.presets.length, 0);
-  if (count === 0) return <p className="text-[14px] text-muted">Every store we know about is already in your list.</p>;
+/** The other names a store uses on Flipp: chips to remove, and an input to add one. */
+function FlippNames({ store: s, change }: { store: Store; change: StoresUpdate }) {
+  const [text, setText] = useState('');
+  const names = s.flippNames ?? [];
+  const full = names.length >= MAX_FLIPP_NAMES;
 
-  // On a phone the chips fold away behind a toggle when there are many; on desktop they always show.
-  const collapsible = count > 6;
-
-  function add(preset: StorePreset) {
-    change((list) => (list.some((x) => x.id === preset.id) ? list : [...list, storeFromPreset(preset)]));
+  function edit(fn: (x: Store) => Store) {
+    change((list) => list.map((x) => (x.id === s.id ? fn(x) : x)));
   }
 
-  const chips = (
-    <div className="flex flex-col gap-4">
-      {groups.map((g) => (
-        <div key={g.group}>
-          <p className="text-[12px] text-muted">{g.group}</p>
-          <ul className="mt-2 flex flex-wrap gap-2">
-            {g.presets.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  aria-label={`Add ${p.name}`}
-                  onClick={() => add(p)}
-                  className={`${chipBase} border-edge px-4 text-paper`}
-                >
-                  + {p.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
-
-  if (!collapsible) {
-    return (
-      <div>
-        <p className={eyebrow}>Add stores</p>
-        <div className="mt-3">{chips}</div>
-      </div>
-    );
+  function add() {
+    const name = text.trim();
+    setText('');
+    if (name) edit((x) => addFlippName(x, name));
   }
 
   return (
     <div>
-      <p className={`${eyebrow} hidden lg:block`}>Add stores</p>
-      <Disclosure
-        variant="compact"
-        open={open}
-        onToggle={() => setOpen((v) => !v)}
-        title="Add stores"
-        desktopAlwaysOpen
-      >
-        {chips}
-      </Disclosure>
+      <span className={eyebrow}>Names on Flipp</span>
+      <p className="mt-1 text-[12px] text-muted">Other names this store uses in flyers.</p>
+      {names.length > 0 && (
+        <ul className="mt-3 flex flex-wrap gap-2">
+          {names.map((n) => (
+            <li key={n} className={`${chipBase} gap-1 border-edge pl-4 pr-1 text-paper`}>
+              {n}
+              <button
+                type="button"
+                aria-label={`Remove ${n}`}
+                onClick={() => edit((x) => removeFlippName(x, n))}
+                className={removeIconBtn}
+              >
+                &times;
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3 flex gap-2">
+        <input
+          className={fieldCls}
+          placeholder={full ? `Up to ${MAX_FLIPP_NAMES} names` : 'Add a name'}
+          aria-label={`Add a Flipp name for ${s.name}`}
+          value={text}
+          maxLength={40}
+          disabled={full}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button type="button" onClick={add} disabled={full} className={`${addBtn} disabled:opacity-40`}>
+          Add
+        </button>
+      </div>
     </div>
   );
 }
 
-function AddCustomStore({ stores, change }: { stores: Store[]; change: StoresUpdate }) {
+/** Native dialog: a bottom sheet on a phone, a centred card on desktop. Presets to add, search, and a custom store. */
+function StorePicker({
+  open,
+  onClose,
+  stores,
+  change,
+}: {
+  open: boolean;
+  onClose: () => void;
+  stores: Store[];
+  change: StoresUpdate;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [query, setQuery] = useState('');
+  const [added, setAdded] = useState<string | null>(null);
+
+  useEffect(() => {
+    const d = ref.current;
+    if (!d) return;
+    if (open && !d.open) {
+      d.showModal();
+    } else if (!open && d.open) {
+      d.close();
+      setQuery('');
+      setAdded(null);
+    }
+  }, [open]);
+
+  // The "Added" line is brief.
+  useEffect(() => {
+    if (!added) return;
+    const t = window.setTimeout(() => setAdded(null), 2500);
+    return () => window.clearTimeout(t);
+  }, [added]);
+
+  const notListed = presetsNotInList(stores, STORE_PRESETS);
+  const q = query.trim().toLowerCase();
+  const groups = groupPresets(q ? notListed.filter((p) => p.name.toLowerCase().includes(q)) : notListed);
+
+  function addPreset(p: StorePreset) {
+    change((list) => (list.some((x) => x.id === p.id) ? list : [...list, storeFromPreset(p)]));
+    setAdded(p.name);
+  }
+
+  return (
+    <dialog
+      ref={ref}
+      aria-labelledby="store-picker-title"
+      onClose={onClose}
+      onClick={(e) => {
+        if (e.target === ref.current) onClose();
+      }}
+      className="m-0 inset-x-0 bottom-0 top-auto h-fit w-full max-w-none bg-transparent p-0 backdrop:bg-black/60 lg:m-auto lg:inset-0 lg:h-fit lg:w-[calc(100%-32px)] lg:max-w-[480px] [&_input:not([type=checkbox])]:bg-ink"
+    >
+      <div className="flex max-h-[85vh] flex-col rounded-t-2xl border border-b-0 border-edge bg-field lg:max-h-[80vh] lg:rounded-xl lg:border-b">
+        <div aria-hidden="true" className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-edge lg:hidden" />
+        <div className="flex shrink-0 items-center justify-between gap-4 px-5 pt-3 lg:pt-5">
+          <h2
+            id="store-picker-title"
+            className="font-display text-[20px] font-semibold tracking-[-0.01em] text-paper"
+          >
+            Add a store
+          </h2>
+          <button type="button" onClick={onClose} className={linkBtn}>
+            Close
+          </button>
+        </div>
+        <div className="shrink-0 px-5 pt-4">
+          <input
+            type="text"
+            className={fieldCls}
+            placeholder="Search stores"
+            aria-label="Search stores"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6">
+          <p role="status" aria-live="polite" className="h-5 pt-2 text-[13px] text-herbLight">
+            {added ? `Added ${added}` : ''}
+          </p>
+          {groups.length === 0 && (
+            <p className="text-[14px] text-muted">
+              {notListed.length === 0
+                ? 'Every store we know about is already in your list.'
+                : `No stores match "${query.trim()}".`}
+            </p>
+          )}
+          {groups.map((g) => (
+            <div key={g.group} className="mt-5 first:mt-0">
+              <p className={eyebrow}>{g.group}</p>
+              <ul className="mt-2">
+                {g.presets.map((p) => (
+                  <li key={p.id} className="flex min-h-12 items-center justify-between gap-3 border-b border-line2">
+                    <span className="min-w-0 truncate text-[15px] text-paper">{p.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Add ${p.name}`}
+                      onClick={() => addPreset(p)}
+                      className="h-11 shrink-0 rounded-lg border border-herb px-4 text-[14px] text-herbLight"
+                    >
+                      Add
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+
+          <div className="mt-6 border-t border-line2 pt-4">
+            <p className={eyebrow}>Not listed?</p>
+            <AddCustomStore stores={stores} change={change} onAdded={setAdded} />
+          </div>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function AddCustomStore({
+  stores,
+  change,
+  onAdded,
+}: {
+  stores: Store[];
+  change: StoresUpdate;
+  onAdded: (name: string) => void;
+}) {
   const [name, setName] = useState('');
   const [flipp, setFlipp] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -1140,15 +1310,15 @@ function AddCustomStore({ stores, change }: { stores: Store[]; change: StoresUpd
       const again = addCustomStore(list, name, flipp);
       return again.ok && again.store.id === store.id ? [...list, again.store] : list;
     });
+    onAdded(store.name);
     setName('');
     setFlipp('');
     setError(null);
   }
 
   return (
-    <form onSubmit={add} noValidate>
-      <p className={eyebrow}>Add another store</p>
-      <div className="mt-3 flex flex-col gap-2">
+    <form onSubmit={add} noValidate className="mt-3">
+      <div className="flex flex-col gap-2">
         <input
           className={fieldCls}
           placeholder="Store name"
@@ -1163,8 +1333,8 @@ function AddCustomStore({ stores, change }: { stores: Store[]; change: StoresUpd
         />
         <input
           className={fieldCls}
-          placeholder="Name on Flipp (if different)"
-          aria-label="Name on Flipp (if different)"
+          placeholder="Name on Flipp (optional)"
+          aria-label="Name on Flipp (optional)"
           value={flipp}
           maxLength={200}
           onChange={(e) => setFlipp(e.target.value)}

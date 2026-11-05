@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { STORE_PRESETS, defaultHousehold, type Store } from '@provisions/shared';
 import {
   addCustomStore,
+  addFlippName,
   clampMaxStores,
   groupOf,
   groupPresets,
   maxStoresLimit,
+  orderStores,
   parseFlippNames,
+  removeFlippName,
   presetsNotInList,
   storeFromPreset,
   withFlippNames,
@@ -149,5 +152,33 @@ describe('per-trip limit', () => {
     expect(clampMaxStores(2, one)).toBe(1);
     expect(clampMaxStores(0, one)).toBe(1);
     expect(clampMaxStores(3, [])).toBe(3);
+  });
+});
+
+describe('Flipp name editing', () => {
+  it('adds a name without repeating one already there, ignoring case', () => {
+    const s = store({ id: 'a', name: 'A', flippNames: ['AA'] });
+    expect(addFlippName(s, 'A2').flippNames).toEqual(['AA', 'A2']);
+    expect(addFlippName(s, 'aa').flippNames).toEqual(['AA']);
+    expect(addFlippName(store({ id: 'a', name: 'A' }), '  X ').flippNames).toEqual(['X']);
+  });
+
+  it('removes one name, ignoring case, and drops the list when none are left', () => {
+    const s = store({ id: 'a', name: 'A', flippNames: ['AA', 'A2'] });
+    expect(removeFlippName(s, 'aa').flippNames).toEqual(['A2']);
+    expect('flippNames' in removeFlippName({ ...s, flippNames: ['AA'] }, 'AA')).toBe(false);
+  });
+});
+
+describe('orderStores', () => {
+  it('lists the stores shopped at first, each group alphabetical, and does not change the input', () => {
+    const input = [
+      store({ id: 'z', name: 'Zehrs' }),
+      store({ id: 'm', name: 'Metro', enabled: true }),
+      store({ id: 'c', name: 'Costco', enabled: true }),
+      store({ id: 'f', name: 'Fortinos' }),
+    ];
+    expect(orderStores(input).map((s) => s.name)).toEqual(['Costco', 'Metro', 'Fortinos', 'Zehrs']);
+    expect(input[0]!.name).toBe('Zehrs');
   });
 });

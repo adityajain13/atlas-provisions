@@ -3,7 +3,7 @@
 import { STORE_GROUPS, STORE_PRESETS, slugifyName, type Store, type StoreGroup, type StorePreset } from '@provisions/shared';
 
 export const MAX_STORES_PER_TRIP = 5;
-const MAX_FLIPP_NAMES = 10;
+export const MAX_FLIPP_NAMES = 10;
 const MAX_NAME = 40;
 
 /** Presets that are not in the list yet. A preset counts as present when its id or its name (any case) is. */
@@ -99,6 +99,23 @@ export function groupOf(store: Store): StoreGroup | undefined {
   if (store.group) return store.group;
   const name = store.name.trim().toLowerCase();
   return STORE_PRESETS.find((p) => p.id === store.id || p.name.toLowerCase() === name)?.group;
+}
+
+/** Adds one Flipp name to a store. A name already there (ignoring case) is not repeated; the limit still applies. */
+export function addFlippName(store: Store, text: string): Store {
+  return withFlippNames(store, [...(store.flippNames ?? []), text].join(', '));
+}
+
+/** Removes one Flipp name from a store, matching ignoring case. */
+export function removeFlippName(store: Store, name: string): Store {
+  const key = name.toLowerCase();
+  const kept = (store.flippNames ?? []).filter((n) => n.toLowerCase() !== key);
+  return withFlippNames(store, kept.join(', '));
+}
+
+/** List order: stores shopped at first, then the rest. Each group is alphabetical by name. */
+export function orderStores(stores: Store[]): Store[] {
+  return [...stores].sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name));
 }
 
 export function enabledCount(stores: Store[]): number {
