@@ -57,7 +57,7 @@ Each signed-in address belongs to one household. The first address in a new hous
 - Access: an address may use the app if it is approved: on `ALLOWED_EMAILS`, on the app's access list, or an admin. Without that, it may use the app as a member of a household that has an approved owner, or with an invite from one. An approved address with no household gets its own.
 - App access: admins manage who may sign in in Household > App access. They give an address access, optionally emailing the sign-in link (through Resend, when `RESEND_API_KEY` is set), and remove it. Removing access signs the address out at once. An admin cannot remove their own access, nor an address set in Worker settings. Admins are the addresses in `ADMIN_EMAILS`; without it, they are the owners of household `h1`, the household that existing data moved into. A new deployment with no `h1` must set `ADMIN_EMAILS`, or no one can manage access.
 - Pantry, plans, ratings, ticks and the household document are per household. Flyer prices are per postal code. Price history and receipt matches are shared.
-- Monthly caps per household, counted in Toronto calendar months: plans (`PLAN_CAP_MONTHLY`, default 20), receipt scans (`RECEIPT_CAP_MONTHLY`, default 30) and prep refreshes (`PREP_CAP_MONTHLY`, default 30). The Household screen shows the counts.
+- Monthly caps per household, counted in Toronto calendar months: plans (`PLAN_CAP_MONTHLY`, default 20), receipt scans (`RECEIPT_CAP_MONTHLY`, default 30) and prep refreshes (`PREP_CAP_MONTHLY`, default 30). The Household screen shows the counts. A household with an admin in it has no caps: its use is still counted, and the screen says "(no limits)".
 
 ## Stack
 

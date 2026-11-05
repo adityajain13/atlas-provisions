@@ -85,8 +85,18 @@ export function usageLimitMessage(kind: UsageKind, cap: number, month: string): 
   return `This household has used its ${cap} ${label} for this month. Resets on ${longDate(nextMonthStart(month))}.`;
 }
 
-/** "This month: 3 of 20 plans · 2 of 30 receipt scans · 0 of 30 prep refreshes". */
-export function usageLine(counts: UsageCounts, caps: UsageCaps): string {
+/**
+ * "This month: 3 of 20 plans · 2 of 30 receipt scans · 0 of 30 prep refreshes". A household with no caps
+ * (an admin's) gets "This month: 3 plans · 2 receipt scans · 0 prep refreshes (no limits)".
+ */
+export function usageLine(counts: UsageCounts, caps: UsageCaps, unlimited = false): string {
+  if (unlimited) {
+    const parts = USAGE_KINDS.map((kind) => {
+      const label = counts[kind] === 1 ? USAGE_LABEL[kind].one : USAGE_LABEL[kind].many;
+      return `${counts[kind]} ${label}`;
+    });
+    return `This month: ${parts.join(' · ')} (no limits)`;
+  }
   const parts = USAGE_KINDS.map((kind) => {
     const label = caps[kind] === 1 ? USAGE_LABEL[kind].one : USAGE_LABEL[kind].many;
     return `${counts[kind]} of ${caps[kind]} ${label}`;
@@ -133,6 +143,8 @@ export interface UsageView {
   resetsOn: string;
   caps: UsageCaps;
   counts: UsageCounts;
+  /** True for a household with an admin member: its calls are counted but never refused. */
+  unlimited: boolean;
 }
 
 export interface InviteSummary {

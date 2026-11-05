@@ -154,3 +154,8 @@ export function bulkMessage(count: number, minutes: number | undefined): string 
   const cells = `${count} ${count === 1 ? 'cell' : 'cells'}`;
   return minutes === undefined ? `Cleared ${cells}` : `Set ${cells} to ${formatTimeCap(minutes)}`;
 }
+
+/** True when a scrolling list has rows below the visible part, so the menu shows its bottom fade. */
+export function hasMoreBelow(scrollTop: number, clientHeight: number, scrollHeight: number): boolean {
+  return scrollHeight - (scrollTop + clientHeight) > 2;
+}

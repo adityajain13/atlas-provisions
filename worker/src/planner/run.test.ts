@@ -200,6 +200,33 @@ describe('runPlanner', () => {
 
     expect(plan.issues.some((i) => i.check === 'never-buy' && i.severity === 'error')).toBe(true);
   });
+
+  it('sends never-buy names to the planner, and errors on a meal named after one', async () => {
+    const h = household({ itemRules: [{ id: 'r1', name: 'beef', rule: 'never' }] });
+    const req = request();
+    const cells = cellsOf(h, req);
+    const raw = planFor(cells, DEAL_ID, DEAL_UNIT_QTY);
+    raw.meals[0]!.name = 'Beef stir-fry';
+    const { client, seen } = fakeClient([raw]);
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [], maxAttempts: 1 });
+
+    expect(plan.issues.find((i) => i.check === 'never-buy')).toMatchObject({ severity: 'error' });
+    expect(seen[0]!.payload).toMatchObject({ neverBuyWords: ['beef'] });
+  });
+
+  it('plans a meal whose name only has the word inside another word, with no never-buy error', async () => {
+    const h = household({ itemRules: [{ id: 'r1', name: 'beef', rule: 'never' }] });
+    const req = request();
+    const cells = cellsOf(h, req);
+    const raw = planFor(cells, DEAL_ID, DEAL_UNIT_QTY);
+    raw.meals[0]!.name = 'Beefy chili';
+    const { client } = fakeClient([raw]);
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [], maxAttempts: 1 });
+
+    expect(plan.issues.some((i) => i.check === 'never-buy')).toBe(false);
+  });
 });
 
 describe('runPlanner: pantry and ratings', () => {

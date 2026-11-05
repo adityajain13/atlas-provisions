@@ -7,6 +7,7 @@ import type { MatchedItem } from './match';
 import { cheapest, collectOffers, packsFor, type Offer } from './offers';
 import { formatUseBy, subtractPantry, type PantryItem } from './pantry';
 import type { Deal } from './scoring';
+import { nameHasWord } from './itemRules';
 import { nutrientTotals, round2, unitLabel } from './units';
 
 const MACRO_DAYS = 7;
@@ -252,6 +253,7 @@ export interface ValidateContext {
   fixed: FixedCost;
   available: ReadonlySet<string>; // ingredient ids the planner was offered
   neverBuy: ReadonlySet<string>;
+  neverWords?: string[]; // never-buy names as typed, e.g. "beef": no meal name may contain them
   recentDinnerNames: string[];
   useFirst?: { ingredientId: string; expiresOn: string }[]; // pantry stock due soon, when use-it-up is on
   neverMeals?: string[]; // meal names rated 'never'
@@ -284,6 +286,23 @@ function checkIngredients(plan: MealPlan, ctx: ValidateContext): ValidationIssue
         });
       }
     }
+  }
+  return out;
+}
+
+/** A meal named after a never-buy word ("Beef stir-fry" for "beef") is planned around it, listed ingredients or not. */
+function checkNeverNames(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  const words = ctx.neverWords ?? [];
+  if (words.length === 0) return [];
+  const out: ValidationIssue[] = [];
+  for (const meal of plan.meals) {
+    const word = words.find((w) => nameHasWord(meal.name, w));
+    if (word === undefined) continue;
+    out.push({
+      check: 'never-buy',
+      severity: 'error',
+      message: `"${meal.name}" is built around ${word.toLowerCase()}, which is on the never-buy list. Plan a meal without it.`,
+    });
   }
   return out;
 }
@@ -607,6 +626,7 @@ function checkStoreCap(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] 
 export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   return [
     ...checkIngredients(plan, ctx),
+    ...checkNeverNames(plan, ctx),
     ...checkAllergens(plan, ctx),
     ...checkCoverage(plan, ctx),
     ...checkBudget(plan),

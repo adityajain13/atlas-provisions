@@ -6,6 +6,7 @@ import { API, OWNER, PARTNER, call, count, householdOf, householdWith, json, row
 
 const H = API;
 const FRIEND = 'friend@example.com';
+const ADMIN = 'admin@example.com';
 const NOW = '2026-11-05T17:00:00Z';
 const KEY = { ANTHROPIC_API_KEY: 'test-key' };
 const ALLOW_BOTH = { ALLOWED_EMAILS: `${OWNER},${PARTNER}` };
@@ -459,6 +460,33 @@ describe('monthly caps', () => {
     const { env, cookies } = await setup([OWNER], { PLAN_CAP_MONTHLY: 'twenty', RECEIPT_CAP_MONTHLY: '-1' });
     const usage = (await (await get('/usage', cookies[OWNER]!, env)).json()) as { caps: object };
     expect(usage.caps).toEqual({ plan: 20, receipt: 30, prep: 30 });
+  });
+
+  it('never refuses a household with an admin in it, still counts its calls, and says it has no limits', async () => {
+    const fetchMock = vi.fn(async () => claudeReply());
+    vi.stubGlobal('fetch', fetchMock);
+    const { raw, env, cookies } = await setup([ADMIN, PARTNER], {
+      ADMIN_EMAILS: ADMIN,
+      ALLOWED_EMAILS: PARTNER,
+      ...KEY,
+      PLAN_CAP_MONTHLY: '1',
+    });
+    await householdWith(raw, env, cookies[ADMIN]!, ADMIN, household());
+    await householdWith(raw, env, cookies[PARTNER]!, PARTNER, household());
+
+    expect((await send('POST', '/plan', planReq, cookies[ADMIN]!, env)).status).toBe(200);
+    expect((await send('POST', '/plan', planReq, cookies[ADMIN]!, env)).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Both calls are still counted: one usage row for the household, with the total.
+    expect(rows(raw, "SELECT count FROM usage WHERE household_id = ? AND kind = 'plan'", householdOf(raw, ADMIN))).toEqual([{ count: 2 }]);
+    const adminUsage = (await (await get('/usage', cookies[ADMIN]!, env)).json()) as { unlimited: boolean; counts: object; caps: object };
+    expect(adminUsage).toMatchObject({ unlimited: true, counts: { plan: 2, receipt: 0, prep: 0 }, caps: { plan: 1, receipt: 30, prep: 30 } });
+
+    // The partner's household has no admin, so it stops at its cap as before.
+    expect((await send('POST', '/plan', planReq, cookies[PARTNER]!, env)).status).toBe(200);
+    expect((await send('POST', '/plan', planReq, cookies[PARTNER]!, env)).status).toBe(429);
+    const partnerUsage = (await (await get('/usage', cookies[PARTNER]!, env)).json()) as { unlimited: boolean };
+    expect(partnerUsage.unlimited).toBe(false);
   });
 });
 

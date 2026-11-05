@@ -54,6 +54,28 @@ describe('each quantities', () => {
     expect(SYSTEM_PROMPT).toContain('never slices or servings');
     expect(SYSTEM_PROMPT).toContain('two people having toast all week is 1 loaf, not 7');
   });
+
+  it('sends the never-buy names to the planner, and tells it not to build a meal around them', () => {
+    const household: Household = { ...defaultHousehold() };
+    const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false };
+    const { cells, fixed } = expandWeek(household, request);
+    const payload = buildPayload({
+      household,
+      request,
+      cells,
+      fixed,
+      fixedCost: noFixed,
+      available: [],
+      neverBuy: ['ground-beef'],
+      neverBuyWords: ['beef'],
+      recentDinnerNames: [],
+    });
+    expect(payload.neverBuyWords).toEqual(['beef']);
+    expect(SYSTEM_PROMPT).toContain("Never plan a meal built around a word in `neverBuyWords` (e.g. 'beef' rules out a beef stir-fry)");
+    // Without the field, the payload still has an empty list.
+    const bare = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
+    expect(bare.neverBuyWords).toEqual([]);
+  });
 });
 
 describe('buildPayload', () => {

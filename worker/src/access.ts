@@ -73,6 +73,16 @@ export async function isAdmin(db: D1Database, env: AccessEnv, email: string): Pr
   return row !== null;
 }
 
+/** Whether any member of the household is an admin. Such a household has no usage caps. */
+export async function householdHasAdmin(db: D1Database, env: AccessEnv, householdId: string): Promise<boolean> {
+  const { results } = await db
+    .prepare('SELECT email FROM household_members WHERE household_id = ?')
+    .bind(householdId)
+    .all<{ email: string }>();
+  for (const m of results) if (await isAdmin(db, env, m.email)) return true;
+  return false;
+}
+
 /** Whether the address is approved: on ALLOWED_EMAILS, in the app's list, or an admin. */
 export async function isApproved(db: D1Database, env: AccessEnv, email: string): Promise<boolean> {
   const e = normEmail(email);

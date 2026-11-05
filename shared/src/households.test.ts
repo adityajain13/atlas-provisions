@@ -72,6 +72,16 @@ describe('usage messages', () => {
       'This month: 1 of 1 plan · 0 of 30 receipt scans · 0 of 30 prep refreshes',
     );
   });
+
+  it('says there are no limits for a household with no caps, with singular labels for one', () => {
+    const caps = { plan: 20, receipt: 30, prep: 30 };
+    expect(usageLine({ plan: 3, receipt: 2, prep: 0 }, caps, true)).toBe(
+      'This month: 3 plans · 2 receipt scans · 0 prep refreshes (no limits)',
+    );
+    expect(usageLine({ plan: 1, receipt: 1, prep: 0 }, caps, true)).toBe(
+      'This month: 1 plan · 1 receipt scan · 0 prep refreshes (no limits)',
+    );
+  });
 });
 
 describe('addresses and names', () => {

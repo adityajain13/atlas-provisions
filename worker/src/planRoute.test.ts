@@ -139,3 +139,34 @@ describe('Sunday plan weeks', () => {
 });
 
 
+
+describe('never-buy rules on POST /plan', () => {
+  it('blocks every ingredient a never-buy name covers, less the un-ticked ones, and sends the names', async () => {
+    const { raw, env, cookies } = await setup([OWNER], KEYED);
+    await householdWith(
+      raw,
+      env,
+      cookies[OWNER]!,
+      OWNER,
+      household({
+        itemRules: [
+          { id: 'r1', name: 'corn', rule: 'never', except: ['canned-corn'] },
+          { id: 'r2', name: 'oats', rule: 'never' },
+          { id: 'r3', name: 'eggs', rule: 'always' },
+        ],
+      }),
+    );
+    const fetchMock = stubClaude(claudeInput());
+
+    const res = await call(`${H}/plan`, json('POST', REQUEST, cookies[OWNER]), env);
+
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(JSON.parse(fetchMock.mock.calls[0]![1].body as string).messages[0].content) as {
+      neverBuy: string[];
+      neverBuyWords: string[];
+    };
+    expect(sent.neverBuy).toEqual(expect.arrayContaining(['corn-cobs', 'frozen-corn', 'corn-tortillas', 'tortilla-chips', 'rolled-oats']));
+    expect(sent.neverBuy).not.toContain('canned-corn');
+    expect(sent.neverBuyWords).toEqual(['corn', 'oats']);
+  });
+});
