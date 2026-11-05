@@ -119,6 +119,8 @@ export const ItemRuleSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1, 'Item name is required').max(60),
   rule: z.enum(['always', 'never']),
+  // Ingredient ids the household un-ticked from a never-buy name. Optional, so stored rules without it still parse.
+  except: z.array(z.string().min(1)).optional(),
 });
 export type ItemRule = z.infer<typeof ItemRuleSchema>;
 
@@ -211,3 +213,4 @@ export * from './receipt';
 export * from './flipp';
 export * from './checks';
 export * from './households';
+export * from './itemRules';

@@ -121,6 +121,23 @@ describe('validate: unknown-ingredient and never-buy', () => {
     const issues = validate(planOf(cleanMeals()), ctxOf({ neverBuy: new Set(['broccoli']) }));
     expect(checksOf(issues)).toContain('never-buy');
   });
+
+  it('flags a meal named after a never-buy word, though no listed ingredient is on the list', () => {
+    const meals = cleanMeals().map((m) => (m.id === 'mon-dinner' ? { ...m, name: 'BEEF stir-fry' } : m));
+    const issues = validate(planOf(meals), ctxOf({ neverWords: ['beef'] }));
+    expect(issues.find((i) => i.check === 'never-buy')).toMatchObject({ severity: 'error' });
+    expect(issues.find((i) => i.check === 'never-buy')?.message).toContain('BEEF stir-fry');
+  });
+
+  it('does not flag a name that only contains the word inside another word', () => {
+    const meals = cleanMeals().map((m) => (m.id === 'mon-dinner' ? { ...m, name: 'Beefy chili' } : m));
+    expect(checksOf(validate(planOf(meals), ctxOf({ neverWords: ['beef'] })))).not.toContain('never-buy');
+  });
+
+  it('checks no names when no never-buy words are set', () => {
+    const meals = cleanMeals().map((m) => (m.id === 'mon-dinner' ? { ...m, name: 'Beef stir-fry' } : m));
+    expect(checksOf(validate(planOf(meals), ctxOf()))).not.toContain('never-buy');
+  });
 });
 
 describe('validate: allergen', () => {

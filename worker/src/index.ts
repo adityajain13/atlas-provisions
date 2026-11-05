@@ -14,8 +14,9 @@ import {
   PLAN_WINDOW_MESSAGE,
   isPlannableWeek,
   isSundayIso,
+  alwaysBuyId,
+  blockedIds,
   matchFlyerItem,
-  matchIngredient,
   newId,
   planReceiptCommit,
   planWeekOf,
@@ -73,6 +74,7 @@ import { requireSession, type SessionVars } from './authMiddleware';
 import { householdRoutes } from './householdRoutes';
 import { accessRoutes } from './accessRoutes';
 import { capMessage, recordUsage } from './usage';
+import { householdHasAdmin } from './access';
 
 type Env = AuthEnv & {
   ASSETS: Fetcher;
@@ -161,20 +163,20 @@ async function loadDeals(
 
   const history = await priceHistory(env.DB, addDaysIso(date, -56));
 
-  // Item rules name foods in free text. Map each to an ingredient id, skipping names that do not match.
-  const ruleIds = (rule: 'always' | 'never') =>
-    household.itemRules
-      .filter((r) => r.rule === rule)
-      .map((r) => matchIngredient(r.name)?.ingredientId)
-      .filter((id): id is string => id !== undefined);
-  const neverBuy = ruleIds('never');
+  // Item rules name foods in free text. A never-buy name blocks every ingredient it covers, less the ones the
+  // household un-ticked. An always-buy name keeps its single best match.
+  const itemRules = (rule: 'always' | 'never') => household.itemRules.filter((r) => r.rule === rule);
+  const neverBuy = [...new Set(itemRules('never').flatMap(blockedIds))];
+  const alwaysBuy = itemRules('always')
+    .map((r) => alwaysBuyId(r.name))
+    .filter((id): id is string => id !== undefined);
 
   const allergens = [...new Set(household.people.flatMap((p) => p.allergies))];
 
   const deals = scoreDeals(matched, {
     history,
     neverBuy,
-    alwaysBuy: ruleIds('always'),
+    alwaysBuy,
     allergens,
     shoppingDate: date,
     householdSize: Math.max(1, household.people.length),
@@ -185,6 +187,8 @@ async function loadDeals(
 
 /** A 429 for a household that has used up a monthly cap, or null when it may go ahead. */
 async function overCap(env: Env, householdId: string, kind: 'plan' | 'receipt' | 'prep'): Promise<Response | null> {
+  // An admin's household is never refused. Its calls are still counted in recordUsage.
+  if (await householdHasAdmin(env.DB, env, householdId)) return null;
   const today = torontoDate();
   const message = await capMessage(env.DB, householdId, kind, usageCapsFrom(env), usageMonth(today));
   return message ? new Response(message, { status: 429 }) : null;

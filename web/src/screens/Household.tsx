@@ -43,6 +43,14 @@ import {
   saveHousehold,
 } from '../api';
 import { accessOutcome, accessSourceLabel, inviteOutcome, leaveCopy, removeAccessCopy, roleLabel } from '../lib/members';
+import {
+  EMPTY_EXPANSION_TEXT,
+  NO_MATCH_TEXT,
+  alwaysMatchName,
+  exceptAfter,
+  neverChipLabel,
+  neverExpansion,
+} from '../lib/itemRules';
 import { FlyerRefresh } from '../components/FlyerRefresh';
 import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { Header } from '../components/Header';
@@ -415,7 +423,7 @@ function MembersSection() {
       )}
 
       {actionError && <p className={`mt-3 text-[13px] ${ERROR_TEXT}`}>{actionError}</p>}
-      {usage && <p className="mt-6 text-[13px] text-muted">{usageLine(usage.counts, usage.caps)}</p>}
+      {usage && <p className="mt-6 text-[13px] text-muted">{usageLine(usage.counts, usage.caps, usage.unlimited)}</p>}
 
       <div className="mt-6 border-t border-line pt-4">
         <button type="button" onClick={() => void leave()} className={linkBtn}>
@@ -1782,6 +1790,13 @@ function ItemRulesSection({ h, update }: { h: Household; update: Update }) {
   );
 }
 
+/** The rule with its except list replaced. An empty list is left off, so the stored rule stays as it was. */
+function withExcept(rule: ItemRule, except: string[] | undefined): ItemRule {
+  const next: ItemRule = { id: rule.id, name: rule.name, rule: rule.rule };
+  if (except) next.except = except;
+  return next;
+}
+
 function RuleList({
   title,
   rule,
@@ -1794,7 +1809,13 @@ function RuleList({
   update: Update;
 }) {
   const [text, setText] = useState('');
+  // Never-buy names open one at a time, to show the ingredients they cover.
+  const [openId, setOpenId] = useState<string | null>(null);
   const items = h.itemRules.filter((r) => r.rule === rule);
+
+  function removeRule(id: string) {
+    update((prev) => ({ ...prev, itemRules: prev.itemRules.filter((r) => r.id !== id) }));
+  }
 
   function add() {
     const name = text.trim();
@@ -1809,23 +1830,92 @@ function RuleList({
   return (
     <div>
       <p className={eyebrow}>{title}</p>
-      <ul className="mt-2 flex flex-wrap gap-2">
-        {items.map((item) => (
-          <li key={item.id} className={`${chipBase} gap-1 border-edge pl-4 pr-1 text-paper`}>
-            {item.name}
-            <button
-              type="button"
-              aria-label={`Remove ${item.name}`}
-              onClick={() =>
-                update((prev) => ({ ...prev, itemRules: prev.itemRules.filter((r) => r.id !== item.id) }))
-              }
-              className={removeIconBtn}
-            >
-              &times;
-            </button>
-          </li>
-        ))}
-      </ul>
+      {rule === 'never' ? (
+        <ul className="mt-2 space-y-2">
+          {items.map((item) => {
+            const expansion = neverExpansion(item);
+            const blocked = expansion.filter((e) => e.blocked).length;
+            const isOpen = openId === item.id;
+            return (
+              <li key={item.id}>
+                <Disclosure
+                  variant="compact"
+                  open={isOpen}
+                  onToggle={() => setOpenId(isOpen ? null : item.id)}
+                  title={<span className={`${chipBase} border-edge px-4 text-paper`}>{neverChipLabel(item.name, blocked)}</span>}
+                >
+                  {expansion.length === 0 ? (
+                    <p className="text-[13px] text-muted">{EMPTY_EXPANSION_TEXT}</p>
+                  ) : (
+                    <>
+                      <p className="mb-1 text-[12px] text-muted">Ticked ingredients are blocked. Untick one to allow it.</p>
+                      <ul>
+                        {expansion.map((e) => (
+                          <li key={e.id}>
+                            <label className="flex min-h-11 items-center gap-3 text-[15px] text-paper">
+                              <input
+                                type="checkbox"
+                                checked={e.blocked}
+                                onChange={(ev) => {
+                                  const nowBlocked = ev.target.checked;
+                                  update((prev) => ({
+                                    ...prev,
+                                    itemRules: prev.itemRules.map((r) =>
+                                      r.id === item.id ? withExcept(r, exceptAfter(r.except, e.id, nowBlocked)) : r,
+                                    ),
+                                  }));
+                                }}
+                                className="h-5 w-5 accent-herb"
+                              />
+                              {e.name}
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenId(null);
+                        removeRule(item.id);
+                      }}
+                      className="min-h-11 text-[14px] text-[#D98C7A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb"
+                    >
+                      Remove {item.name}
+                    </button>
+                  </div>
+                </Disclosure>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <ul className="mt-2 flex flex-wrap gap-2">
+          {items.map((item) => {
+            const matched = alwaysMatchName(item.name);
+            return (
+              <li key={item.id} className={`${chipBase} gap-1 border-edge pl-4 pr-1 text-paper`}>
+                {item.name}
+                {matched ? (
+                  <span className="text-muted">&rarr; {matched}</span>
+                ) : (
+                  <span className={ERROR_TEXT}>{NO_MATCH_TEXT}</span>
+                )}
+                <button
+                  type="button"
+                  aria-label={`Remove ${item.name}`}
+                  onClick={() => removeRule(item.id)}
+                  className={removeIconBtn}
+                >
+                  &times;
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <div className="mt-3 flex gap-2">
         <input
           className={fieldCls}

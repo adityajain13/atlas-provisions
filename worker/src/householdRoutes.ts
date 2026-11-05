@@ -13,7 +13,7 @@ import {
   type MyInvitesView,
   type UsageView,
 } from '@provisions/shared';
-import { householdDeleteStatements } from './access';
+import { householdDeleteStatements, householdHasAdmin } from './access';
 import { sendMail, type MailEnv } from './mail';
 import { BASE, normEmail } from './authCore';
 import type { AuthMiddlewareEnv, SessionVars } from './authMiddleware';
@@ -69,6 +69,7 @@ householdRoutes.get('/usage', async (c) => {
     resetsOn: nextMonthStart(month),
     caps: usageCapsFrom(c.env),
     counts: await readUsage(c.env.DB, c.get('householdId'), month),
+    unlimited: await householdHasAdmin(c.env.DB, c.env, c.get('householdId')),
   };
   return c.json(view);
 });

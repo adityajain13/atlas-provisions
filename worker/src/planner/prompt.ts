@@ -19,6 +19,7 @@ export const SYSTEM_PROMPT = [
   'Fill ONLY the meals in `slots`; each lists who eats it. Scale quantities to that headcount. Do not plan `fixedMeals`.',
   'Use ONLY ingredient ids from `available`. Basic seasonings, oil, salt, pepper and common dried spices are assumed on hand; do not list them.',
   'Never use `neverBuy`. Never use an ingredient containing a listed allergen for a meal eaten by that person (`allergies` maps person id to allergens).',
+  "Never plan a meal built around a word in `neverBuyWords` (e.g. 'beef' rules out a beef stir-fry) even if no listed ingredient contains it.",
   'Prefer `useFirst` and pantry/fixed-meal leftovers, then higher-scored deals. Respect packQty: plan to use most of each pack bought.',
   'Chain leftovers: at least 2 dinners should produce a later lunch (set makesLeftoversFor / usesLeftoversFrom with meal ids). A leftover meal\'s ingredients list is empty and activeMinutes 5.',
   'Include each craving at least once and tag it \'craving\'.',
@@ -179,6 +180,7 @@ export interface PayloadInput {
   pantryUseFirst?: string[]; // ingredient ids from pantry stock due soon
   favourites?: string[]; // meal names the household has liked
   avoid?: string[]; // meal names to skip, from ratings
+  neverBuyWords?: string[]; // never-buy names as typed, e.g. "beef"
 }
 
 export interface PlannerPayload {
@@ -190,6 +192,7 @@ export interface PlannerPayload {
   remainingBudget: number;
   cravings: string[];
   neverBuy: string[];
+  neverBuyWords: string[];
   equipment: string[];
   varietyRules: { key: string; label: string }[];
   available: AvailableItem[];
@@ -230,6 +233,7 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
     remainingBudget: Math.max(0, Math.round((request.budget - input.fixedCost.cost) * 100) / 100),
     cravings: request.cravings,
     neverBuy: input.neverBuy,
+    neverBuyWords: input.neverBuyWords ?? [],
     equipment: household.equipment.filter((e) => e.owned).map((e) => e.name),
     varietyRules: VARIETY_RULES.filter((r) => household.varietyRules[r.key] === true).map((r) => ({ key: r.key, label: r.label })),
     available: input.available,

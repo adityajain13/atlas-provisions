@@ -25,6 +25,7 @@ import {
   commonCap,
   dayCells,
   formatTimeCap,
+  hasMoreBelow,
   moveCell,
   parseCustomCap,
   rectCells,
@@ -374,11 +375,14 @@ function CapMenu({
   onClose: (returnFocus: boolean) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const customRef = useRef<HTMLInputElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
   const [customText, setCustomText] = useState('');
   const [customError, setCustomError] = useState<string | null>(null);
+  // Rows below the visible part of the list: shows the bottom fade.
+  const [more, setMore] = useState(false);
 
   const common = commonCap(caps, menu.cells);
   const current = common.mixed ? undefined : common.minutes;
@@ -404,11 +408,18 @@ function CapMenu({
     setPos({ top, left });
   }, [menu, customOpen]);
 
+  function syncMore() {
+    const el = listRef.current;
+    setMore(el ? hasMoreBelow(el.scrollTop, el.clientHeight, el.scrollHeight) : false);
+  }
+
+  // On open, the current value is scrolled to the middle of the list and focused. The page does not move.
   useEffect(() => {
-    const el = ref.current;
-    const target =
-      el?.querySelector<HTMLElement>('[aria-checked="true"]') ?? el?.querySelector<HTMLElement>('[data-cap-item]');
-    target?.focus({ preventScroll: true });
+    const list = listRef.current;
+    const current = list?.querySelector<HTMLElement>('[aria-checked="true"]');
+    if (list && current) list.scrollTop = current.offsetTop - (list.clientHeight - current.offsetHeight) / 2;
+    (current ?? list?.querySelector<HTMLElement>('[data-cap-item]'))?.focus({ preventScroll: true });
+    syncMore();
   }, [menu]);
 
   useEffect(() => {
@@ -426,10 +437,13 @@ function CapMenu({
     return () => document.removeEventListener('pointerdown', down);
   }, [menu, onClose]);
 
-  // The desktop popover follows its cell, so scrolling or resizing closes it.
+  // The desktop popover follows its cell, so scrolling the page or resizing closes it. Scrolling its own list does not.
   useEffect(() => {
     if (!menu.desktop) return;
-    const close = () => onClose(false);
+    const close = (e: Event) => {
+      if (e.target instanceof Node && ref.current?.contains(e.target)) return;
+      onClose(false);
+    };
     window.addEventListener('scroll', close, true);
     window.addEventListener('resize', close);
     return () => {
@@ -474,9 +488,11 @@ function CapMenu({
   }
 
   const phone = !menu.desktop;
+  // Only the list scrolls. The title and current value stay above it, and Custom... stays last in it.
   const panel = phone
-    ? 'fixed inset-x-0 bottom-0 z-30 max-h-[85vh] overflow-y-auto rounded-t-2xl border border-b-0 border-edge bg-field pb-[env(safe-area-inset-bottom)]'
-    : 'fixed z-30 max-h-[calc(100vh-32px)] w-72 overflow-y-auto rounded-xl border border-edge bg-field shadow-lg';
+    ? 'fixed inset-x-0 bottom-0 z-30 max-h-[85vh] rounded-t-2xl border border-b-0 border-edge bg-field pb-[env(safe-area-inset-bottom)]'
+    : 'fixed z-30 max-h-[calc(100vh-32px)] w-72 rounded-xl border border-edge bg-field shadow-lg';
+  const rowH = phone ? 'h-11' : 'h-10';
 
   return (
     <>
@@ -494,41 +510,55 @@ function CapMenu({
           <p className="text-[15px] font-medium text-paper">{menu.title}</p>
           <p className="text-[12px] text-muted">{subtitle}</p>
         </div>
-        <div role="menu" aria-label="Time cap" className="pb-2">
-          {capOptions(current).map((value) => {
-            const on = !common.mixed && value === common.minutes;
-            return (
-              <button
-                key={value ?? 'none'}
-                type="button"
-                role="menuitemradio"
-                aria-checked={on}
-                data-cap-item
-                onClick={() => onPick(value)}
-                className={`flex h-11 w-full items-center justify-between px-4 text-left text-[15px] hover:bg-chip/50 focus-visible:bg-chip/60 focus-visible:outline-none ${
-                  on ? 'text-herbLight' : 'text-paper'
-                }`}
-              >
-                <span>{value === undefined ? 'No cap' : formatTimeCap(value)}</span>
-                {on && (
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-                    <path d="M3 8.5l3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            role="menuitem"
-            data-cap-item
-            aria-expanded={customOpen}
-            aria-controls="cap-custom-form"
-            onClick={() => setCustomOpen((v) => !v)}
-            className="flex h-11 w-full items-center px-4 text-left text-[15px] text-paper hover:bg-chip/50 focus-visible:bg-chip/60 focus-visible:outline-none"
+        <div className="relative">
+          <div
+            ref={listRef}
+            role="menu"
+            aria-label="Time cap"
+            onScroll={syncMore}
+            className={`relative overflow-y-auto ${phone ? 'max-h-[50vh]' : 'max-h-72'}`}
           >
-            Custom&hellip;
-          </button>
+            {capOptions(current).map((value) => {
+              const on = !common.mixed && value === common.minutes;
+              return (
+                <button
+                  key={value ?? 'none'}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={on}
+                  data-cap-item
+                  onClick={() => onPick(value)}
+                  className={`flex ${rowH} w-full items-center justify-between px-4 text-left text-[15px] hover:bg-chip/50 focus-visible:bg-chip/60 focus-visible:outline-none ${
+                    on ? 'text-herbLight' : 'text-paper'
+                  }`}
+                >
+                  <span>{value === undefined ? 'No cap' : formatTimeCap(value)}</span>
+                  {on && (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                      <path d="M3 8.5l3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              role="menuitem"
+              data-cap-item
+              aria-expanded={customOpen}
+              aria-controls="cap-custom-form"
+              onClick={() => setCustomOpen((v) => !v)}
+              className={`flex ${rowH} w-full items-center px-4 text-left text-[15px] text-paper hover:bg-chip/50 focus-visible:bg-chip/60 focus-visible:outline-none`}
+            >
+              Custom&hellip;
+            </button>
+          </div>
+          {more && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-field to-transparent"
+            />
+          )}
         </div>
         {customOpen && (
           <form

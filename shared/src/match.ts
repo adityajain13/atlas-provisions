@@ -103,7 +103,7 @@ export function foldToken(t: string): string {
 }
 
 /** The folded words of a name or alias. Hyphens separate words ("bone-in" is "bone in"). */
-function tokensOf(s: string): string[] {
+export function tokensOf(s: string): string[] {
   return foldText(s)
     .replace(/[^\p{L}\p{N}\s-]+/gu, ' ')
     .replace(/-/g, ' ')
@@ -113,7 +113,7 @@ function tokensOf(s: string): string[] {
 }
 
 /** True when `seq` appears in `tokens` as consecutive words. */
-function containsSeq(tokens: string[], seq: string[]): boolean {
+export function containsSeq(tokens: string[], seq: string[]): boolean {
   if (seq.length === 0 || seq.length > tokens.length) return false;
   for (let i = 0; i <= tokens.length - seq.length; i++) {
     if (seq.every((t, j) => tokens[i + j] === t)) return true;

@@ -78,6 +78,8 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
   const today = input.today ?? torontoDate();
   const pantry = usableItems(input.pantry ?? [], today);
   const ratings = input.ratings ?? { favourites: [], avoid: [], never: [] };
+  // Never-buy names as typed. The planner must not build a meal around one, listed ingredient or not.
+  const neverWords = household.itemRules.filter((r) => r.rule === 'never').map((r) => r.name);
   const dueSoon = request.useItUp ? expiringSoon(pantry, today) : [];
 
   const { cells, fixed: placements } = expandWeek(household, request);
@@ -122,6 +124,7 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
         fixed: fixedCost,
         available: availableIds,
         neverBuy: new Set(neverBuy),
+        neverWords,
         recentDinnerNames,
         useFirst: dueSoon.map((i) => ({ ingredientId: i.ingredientId, expiresOn: i.expiresOn })),
         neverMeals: ratings.never,
@@ -140,6 +143,7 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
     fixedCost,
     available,
     neverBuy,
+    neverBuyWords: neverWords,
     recentDinnerNames,
     pantryUseFirst: dueSoon.map((i) => i.ingredientId),
     favourites: ratings.favourites,

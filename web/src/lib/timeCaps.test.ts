@@ -19,6 +19,7 @@ import {
   spokenCap,
   weekendCells,
   weeknightDinnerCells,
+  hasMoreBelow,
 } from './timeCaps';
 
 const withCaps = (timeCaps: Household['timeCaps']): Household => ({ ...defaultHousehold(), timeCaps });
@@ -169,5 +170,19 @@ describe('bulkMessage', () => {
     expect(bulkMessage(7, 30)).toBe('Set 7 cells to 30 min');
     expect(bulkMessage(1, 120)).toBe('Set 1 cell to 2 h');
     expect(bulkMessage(21, undefined)).toBe('Cleared 21 cells');
+  });
+});
+
+describe('hasMoreBelow', () => {
+  it('is true while rows are hidden below the visible part', () => {
+    expect(hasMoreBelow(0, 288, 600)).toBe(true);
+    expect(hasMoreBelow(200, 288, 600)).toBe(true);
+  });
+
+  it('is false at the bottom, or when the list fits', () => {
+    expect(hasMoreBelow(312, 288, 600)).toBe(false);
+    expect(hasMoreBelow(0, 288, 200)).toBe(false);
+    // A sub-pixel gap at the bottom does not count.
+    expect(hasMoreBelow(310, 288, 600)).toBe(false);
   });
 });
