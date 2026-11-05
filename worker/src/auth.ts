@@ -126,15 +126,16 @@ async function storeLoginCode(env: AuthEnv, email: string): Promise<{ code: stri
 }
 
 async function sendLoginMail(env: AuthEnv, email: string, code: string, link: string): Promise<void> {
+  const href = link.replace(/&/g, '&amp;');
   await sendMail(env, {
     fromName: 'Atlas Provisions',
     to: email,
     subject: 'Your Atlas Provisions sign-in code',
     text: `Your login code is ${code}\n\nOr sign in on this device with one tap:\n${link}\n\nThe code expires in ${CODE_TTL_MINUTES} minutes. If you didn't ask for this, ignore it.`,
-    html: `<div style="font-family:system-ui,sans-serif;max-width:420px">
-<p>Your login code:</p>
-<p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:8px 0">${code}</p>
-<p><a href="${link}" style="display:inline-block;background:#1f9d55;color:#fff;padding:10px 18px;border-radius:999px;text-decoration:none;font-weight:600">Sign in on this device</a></p>
-<p style="color:#6b716d;font-size:13px">Expires in ${CODE_TTL_MINUTES} minutes. If you didn't ask for this, ignore it.</p></div>`,
+    html: `<div style="font-family:system-ui,sans-serif;max-width:420px;color:#1c1f1d">
+<p style="margin:0 0 8px">Your login code:</p>
+<p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:8px 0;color:#1c1f1d">${code}</p>
+<p style="margin:16px 0"><a href="${href}" style="display:inline-block;background:#1c1f1d;color:#ffffff;padding:10px 18px;border-radius:999px;text-decoration:none;font-weight:600">Sign in on this device</a></p>
+<p style="color:#6b716d;font-size:13px;margin:0">Expires in ${CODE_TTL_MINUTES} minutes. If you didn't ask for this, ignore it.</p></div>`,
   });
 }
