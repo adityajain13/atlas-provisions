@@ -1,14 +1,19 @@
 // Flyer import: read the flyers of the household's stores, store their items, and record the matched prices.
 // When the flyers give nothing, search Flipp by name instead. One request budget covers the whole run.
 import {
+  HouseholdSchema,
   collapseIssues,
   expandFlyerItem,
   fallbackSearchTerms,
   matchFlyerItem,
   newId,
+  normalizePostalCode,
+  planWeekOf,
+  retentionCutoff,
   torontoDate,
   type FlyerItem,
   type FlyerUsed,
+  type Household,
   type IngestIssue,
   type IngestMode,
   type IngestRunSummary,
@@ -16,7 +21,7 @@ import {
   type StoreCount,
   type StoreMatchInput,
 } from '@provisions/shared';
-import { insertFlyerItems, insertIngestRun, loadHousehold, recordPrices } from './db';
+import { insertFlyerItems, insertIngestRun, pruneWeeksBefore, recordPrices } from './db';
 import {
   BUDGET_STOP_MESSAGE,
   createFlippClient,
@@ -37,8 +42,11 @@ const UNMATCHED_SAMPLE = 15;
 const MAX_ERRORS = 20;
 const SAMPLE_SIZE = 3;
 const CONCURRENCY = 4;
+/** A postal code can be refreshed by hand at most this often. */
+export const REFRESH_COOLDOWN_MS = 10 * 60_000;
 
-const notRun = (message: string): IngestRunSummary => ({
+/** The summary for a run that did not start, such as a household with no postal code. */
+export const notRunSummary = (message: string): IngestRunSummary => ({
   ok: false,
   mode: 'flyers',
   terms: 0,
@@ -114,26 +122,25 @@ async function importFlyers(
   };
 }
 
+/** A household's enabled stores, as the flyer matcher takes them. */
+export function enabledStores(household: Household): StoreMatchInput[] {
+  return household.stores.filter((s) => s.enabled).map((s) => ({ name: s.name, flippNames: s.flippNames }));
+}
+
 /**
- * One import run. Does nothing (and writes no run row) without a postal code or an enabled store.
- * Otherwise it writes the flyer items, records prices for the ones that match an ingredient, and
- * writes an ingest_runs row. ok is true when at least one request got a usable answer.
+ * One import run for a postal code: the flyers of the given stores, or a search when they give nothing. Writes
+ * the flyer items for the postal code, records prices for the ones that match an ingredient, and writes an
+ * ingest_runs row. ok is true when at least one request got a usable answer.
  */
 export async function runIngest(
   env: IngestEnv,
+  postal: string,
+  stores: StoreMatchInput[],
   fetchImpl: typeof fetch = fetch,
   opts: Partial<FlippOptions> = {},
 ): Promise<IngestRunSummary> {
-  const household = await loadHousehold(env.DB);
-  if (!household.postalCode) return notRun('Add a postal code in Household first.');
-  const stores = household.stores
-    .filter((s) => s.enabled)
-    .map((s) => ({ name: s.name, flippNames: s.flippNames }));
-  if (stores.length === 0) return notRun('Turn on at least one store in Household first.');
-
   const startedAt = new Date().toISOString();
   const today = torontoDate();
-  const postal = household.postalCode;
   const client = createFlippClient(fetchImpl, opts);
   const issues: IngestIssue[] = [];
 
@@ -157,7 +164,7 @@ export async function runIngest(
   }
 
   const expanded = imported.kept.flatMap(expandFlyerItem);
-  await insertFlyerItems(env.DB, expanded);
+  await insertFlyerItems(env.DB, postal, expanded);
 
   const matched: MatchedItem[] = [];
   const unmatched: string[] = [];
@@ -174,7 +181,7 @@ export async function runIngest(
   const errors = collapseIssues(issues, mode === 'search' ? 'searches' : 'requests').slice(0, MAX_ERRORS - (stopped ? 1 : 0));
   if (stopped) errors.push(BUDGET_STOP_MESSAGE);
   const ok = client.successes > 0;
-  await insertIngestRun(env.DB, {
+  await insertIngestRun(env.DB, postal, {
     id: newId(),
     startedAt,
     finishedAt,
@@ -203,4 +210,120 @@ export async function runIngest(
     unmatchedSample: [...new Set(unmatched)].slice(0, UNMATCHED_SAMPLE),
     errors,
   };
+}
+
+// ---- The Sunday job and per-postal-code scheduling ----
+
+/** A postal code with at least one enabled store, and the stores of every household that uses it. */
+export interface PostalTarget {
+  postal: string;
+  stores: StoreMatchInput[];
+}
+
+/**
+ * Every postal code that a household with an enabled store uses. A household whose stored document does not
+ * parse is skipped, so one bad row cannot stop the others from being refreshed.
+ */
+export async function postalTargets(db: D1Database): Promise<PostalTarget[]> {
+  const { results } = await db.prepare('SELECT id, data FROM households').all<{ id: string; data: string }>();
+  const byPostal = new Map<string, Map<string, Set<string>>>();
+  for (const row of results) {
+    let parsed: ReturnType<typeof HouseholdSchema.safeParse>;
+    try {
+      parsed = HouseholdSchema.safeParse(JSON.parse(row.data));
+    } catch {
+      continue;
+    }
+    if (!parsed.success) continue;
+    const postal = parsed.data.postalCode ? normalizePostalCode(parsed.data.postalCode) : null;
+    const enabled = parsed.data.stores.filter((s) => s.enabled);
+    if (!postal || enabled.length === 0) continue;
+    const merged = byPostal.get(postal) ?? new Map<string, Set<string>>();
+    for (const store of enabled) {
+      const names = merged.get(store.name) ?? new Set<string>();
+      for (const flipp of store.flippNames ?? []) names.add(flipp);
+      merged.set(store.name, names);
+    }
+    byPostal.set(postal, merged);
+  }
+  return [...byPostal].map(([postal, merged]) => ({
+    postal,
+    stores: [...merged].map(([name, names]) => (names.size > 0 ? { name, flippNames: [...names] } : { name })),
+  }));
+}
+
+export interface PostalStatus {
+  /** Start time of the latest run of any kind, or null when there is none. */
+  lastAttempt: string | null;
+  /** A run for this postal code succeeded since the week started. */
+  fresh: boolean;
+}
+
+/** Each postal code's latest attempt and whether it succeeded since `weekStart` (a YYYY-MM-DD Sunday). */
+export async function postalStatus(db: D1Database, weekStart: string): Promise<Map<string, PostalStatus>> {
+  const { results } = await db
+    .prepare(
+      `SELECT postal_code, MAX(started_at) AS last_attempt,
+              MAX(CASE WHEN ok = 1 AND started_at >= ? THEN 1 ELSE 0 END) AS fresh
+       FROM ingest_runs WHERE postal_code IS NOT NULL GROUP BY postal_code`,
+    )
+    .bind(weekStart)
+    .all<{ postal_code: string; last_attempt: string | null; fresh: number }>();
+  return new Map(
+    results.map((r) => [r.postal_code, { lastAttempt: r.last_attempt, fresh: r.fresh === 1 }] as const),
+  );
+}
+
+/**
+ * The postal code to refresh next: the one that is not fresh this week and was attempted longest ago (never
+ * attempted sorts first). Ordering by the latest attempt, not the latest success, means one postal code that
+ * always fails cannot keep the others from being refreshed.
+ */
+export function pickStalestPostal(
+  targets: PostalTarget[],
+  status: Map<string, PostalStatus>,
+): PostalTarget | undefined {
+  const stale = targets.filter((t) => !status.get(t.postal)?.fresh);
+  stale.sort((a, b) => {
+    const byAttempt = (status.get(a.postal)?.lastAttempt ?? '').localeCompare(status.get(b.postal)?.lastAttempt ?? '');
+    return byAttempt || a.postal.localeCompare(b.postal);
+  });
+  return stale[0];
+}
+
+/**
+ * The hourly Sunday job. Refreshes the one postal code that is stale this week, if there is one. Old plans and
+ * ticks are deleted in the last run of the day (23:00 UTC), or on any run that has nothing to refresh.
+ */
+export async function runScheduledIngest(
+  env: IngestEnv,
+  now: Date = new Date(),
+  fetchImpl: typeof fetch = fetch,
+  opts: Partial<FlippOptions> = {},
+): Promise<{ postal: string | null; summary: IngestRunSummary | null; pruned: { plans: number; checks: number } | null }> {
+  const targets = await postalTargets(env.DB);
+  const next = pickStalestPostal(targets, await postalStatus(env.DB, planWeekOf(now)));
+  if (!next) {
+    return { postal: null, summary: null, pruned: await pruneWeeksBefore(env.DB, retentionCutoff(now)) };
+  }
+  let summary: IngestRunSummary | null = null;
+  let pruned: { plans: number; checks: number } | null = null;
+  try {
+    summary = await runIngest(env, next.postal, next.stores, fetchImpl, opts);
+  } finally {
+    if (now.getUTCHours() === 23) pruned = await pruneWeeksBefore(env.DB, retentionCutoff(now));
+  }
+  return { postal: next.postal, summary, pruned };
+}
+
+/** Minutes left before a manual refresh of this postal code is allowed. Zero when it is allowed now. */
+export async function refreshWaitMinutes(db: D1Database, postal: string, now: Date): Promise<number> {
+  const last = await db
+    .prepare('SELECT started_at FROM ingest_runs WHERE postal_code = ? ORDER BY started_at DESC LIMIT 1')
+    .bind(postal)
+    .first<{ started_at: string }>();
+  if (!last) return 0;
+  const elapsed = now.getTime() - Date.parse(last.started_at);
+  if (!Number.isFinite(elapsed) || elapsed >= REFRESH_COOLDOWN_MS) return 0;
+  return Math.max(1, Math.ceil((REFRESH_COOLDOWN_MS - Math.max(0, elapsed)) / 60_000));
 }

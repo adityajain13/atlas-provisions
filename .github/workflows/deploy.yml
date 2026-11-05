@@ -53,6 +53,12 @@ jobs:
           if [ -z "$ID" ]; then echo "::error::Could not find or create the D1 database"; exit 1; fi
           sed -i "s/REPLACE_WITH_D1_ID/$ID/" wrangler.jsonc
 
+      - name: Record restore point
+        if: steps.check.outputs.ok == 'true'
+        # D1 Time Travel keeps point-in-time history. If a migration goes wrong, restore with:
+        #   npx wrangler d1 time-travel restore atlas-provisions --bookmark=<bookmark below>
+        run: npx wrangler d1 time-travel info atlas-provisions || echo "::warning::Could not read a Time Travel bookmark"
+
       - name: Apply migrations
         if: steps.check.outputs.ok == 'true'
         run: npx wrangler d1 migrations apply atlas-provisions --remote
@@ -60,3 +66,16 @@ jobs:
       - name: Build and deploy
         if: steps.check.outputs.ok == 'true'
         run: npm run deploy
+
+      - name: Row counts
+        if: steps.check.outputs.ok == 'true'
+        # Counts only, never row contents: this log is public.
+        run: |
+          npx wrangler d1 execute atlas-provisions --remote --json --command "SELECT
+            (SELECT COUNT(*) FROM households) AS households,
+            (SELECT COUNT(*) FROM household_members) AS members,
+            (SELECT COUNT(*) FROM household_members WHERE role = 'owner') AS owners,
+            (SELECT COUNT(*) FROM pantry_items) AS pantry,
+            (SELECT COUNT(*) FROM meal_plans) AS plans,
+            (SELECT COUNT(*) FROM checks) AS checks,
+            (SELECT COUNT(*) FROM meal_ratings) AS ratings" | jq -c '.[0].results[0]'

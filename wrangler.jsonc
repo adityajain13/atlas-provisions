@@ -23,7 +23,10 @@
   // Secrets (set with `npx wrangler secret put NAME`, or in the Cloudflare dashboard):
   //   ALLOWED_EMAILS     comma-separated emails allowed to sign in. Nobody can sign in without it.
   //   ANTHROPIC_API_KEY  Claude API key (planner, receipts)
-  //   RESEND_API_KEY     optional: sign-in mail via Resend (domain adityajain.ca verified there)
-  "triggers": { "crons": ["0 11 * * SUN"] },
+  //   RESEND_API_KEY     optional: sign-in mail via Resend (domain adityajain.ca verified there). Also sends invites.
+  // Monthly caps per household (whole numbers; default 20 plans, 30 receipt scans, 30 prep refreshes). Set as
+  // vars or secrets: PLAN_CAP_MONTHLY, RECEIPT_CAP_MONTHLY, PREP_CAP_MONTHLY.
+  // Hourly on Sundays (UTC). Each run refreshes the flyers of one postal code that is stale this week.
+  "triggers": { "crons": ["0 * * * SUN"] },
   "routes": [{ "pattern": "adityajain.ca/provisions*", "zone_name": "adityajain.ca" }]
 }

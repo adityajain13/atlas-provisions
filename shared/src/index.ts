@@ -210,3 +210,4 @@ export * from './prep';
 export * from './receipt';
 export * from './flipp';
 export * from './checks';
+export * from './households';

@@ -48,6 +48,16 @@ Atlas Provisions plans a household's week of home-cooked meals around local groc
 5. **Validate.** The plan is checked in code. A failed check, such as a plan over budget or an allergen in a dish, is fed back to the model for another attempt, up to 3 attempts. A plan with errors is shown with the errors listed.
 6. **List.** The saved plan becomes a shopping list: quantities are rounded up to whole packs, pantry stock is taken off first, and each item is placed at its cheapest enabled store.
 
+## Households
+
+Each signed-in address belongs to one household. The first address in a new household is its owner.
+
+- Owners invite people by email. The invitee signs in with that address and joins the household as a member. Invites can be withdrawn, and a member can leave.
+- An owner cannot leave while others remain, and there is no way to hand over ownership yet.
+- Access: an address may use the app if it is on `ALLOWED_EMAILS`, is a member, or has an invite. An allow-listed address with no household gets its own.
+- Pantry, plans, ratings, ticks and the household document are per household. Flyer prices are per postal code. Price history and receipt matches are shared.
+- Monthly caps per household, counted in Toronto calendar months: plans (`PLAN_CAP_MONTHLY`, default 20), receipt scans (`RECEIPT_CAP_MONTHLY`, default 30) and prep refreshes (`PREP_CAP_MONTHLY`, default 30). The Household screen shows the counts.
+
 ## Stack
 
 - Web: React, Vite, Tailwind CSS, React Router.
@@ -83,6 +93,12 @@ Worker secrets (Cloudflare dashboard: Workers & Pages > atlas-provisions > Setti
 
 `MAIL_FROM` and `PLANNER_MODEL` are variables in `wrangler.jsonc`.
 
+Migration `0008_households.sql` changes live data. It moves every existing row into one household, `h1`, makes each address that has a session a member (the earliest is owner), and rebuilds `meal_plans`, `checks` and `flyer_items` with new primary keys. The old `household` table is left in place and unused. Before deploying to production:
+
+- Export the database: `npx wrangler d1 export atlas-provisions --remote --output backup.sql`.
+- Check that `ALLOWED_EMAILS` lists every address that should keep access. Membership is granted by sessions, so an address removed from `ALLOWED_EMAILS` keeps access while it is a member.
+- Deploying runs the migration before the new Worker is live. For a few minutes the old Worker can run against the new tables, and its `ON CONFLICT(week_of)` upserts for plans and ticks fail. Deploy in a quiet period.
+
 ## Flyer import
 
 Flyer prices come from Flipp, the flyer site. Flipp's public web app uses an unofficial JSON search endpoint, which is not a supported API, so the import is written defensively: any missing field is skipped, and a failed search is recorded instead of stopping the run. If Flipp changes its response, the run reports errors and the matched count drops to zero; the latest run's errors and a sample of raw items are kept in the `ingest_runs` table.
@@ -92,7 +108,7 @@ Flyer prices come from Flipp, the flyer site. Flipp's public web app uses an uno
 - If that gives nothing, it falls back to a search by name, with at most 30 terms: meat, seafood, eggs and tofu first, then common produce.
 - All requests in one run share a budget of 45, under Cloudflare's free-plan limit of 50 subrequests per run. Requests past it are not sent, and the run notes that it stopped early.
 - Each run records its mode, the flyers it used, the raw item count, and a sample of three raw items. `GET /provisions/api/flyers/status?debug=1` returns the sample and the flyers of the latest run.
-- The Worker runs the import every Sunday at 11:00 UTC (6 to 7 am in Toronto), from the cron trigger in `wrangler.jsonc`.
+- The Worker runs the import hourly on Sundays (cron `0 * * * SUN` in `wrangler.jsonc`). Each run imports one postal code: the one that was tried longest ago, across all households, so every household's postal code gets its turn.
 - The Household Stores section has a Flyers row with the last update and a Refresh flyers button, which runs the import on demand and reports what it found.
 - Requests go out at most four at a time, spaced 250 ms apart, with a 10 second timeout, and a 429 or 5xx is retried once (each retry counts against the budget).
 - This is for personal use. Flipp's terms of use are not reviewed here.
@@ -139,4 +155,3 @@ wrangler.jsonc
 - A Claude fallback for flyer lines the alias matcher cannot place.
 - Use the confirmed item matches from receipts when reading new receipts.
 - More protein variety in the shortlist. Scoring keeps 8 items per category, which can leave out chicken and beef for a whole week.
-- Multiple households.
