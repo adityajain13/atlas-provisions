@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inviteOutcome, joinDecision, leaveCopy, roleLabel } from './members';
+import { accessOutcome, accessSourceLabel, inviteOutcome, joinDecision, leaveCopy, removeAccessCopy, roleLabel } from './members';
 
 describe('roleLabel', () => {
   it('names the two roles', () => {
@@ -46,5 +46,41 @@ describe('joinDecision', () => {
     const d = joinDecision({ name: 'Home', role: 'member', memberCount: 3 }, target);
     expect(d).toMatchObject({ canJoin: true, danger: false, confirmLabel: 'Join' });
     expect(d.message).toBe('You will leave Home. The others in it keep it.');
+  });
+});
+
+describe('accessSourceLabel', () => {
+  it('says where each kind of access comes from', () => {
+    expect(accessSourceLabel('app')).toBe('Added in app');
+    expect(accessSourceLabel('settings')).toBe('From Worker settings');
+    expect(accessSourceLabel('admin')).toBe('Admin');
+  });
+});
+
+describe('accessOutcome', () => {
+  it('confirms the access, and says when an asked-for email did not go out', () => {
+    expect(accessOutcome('new@example.com', true, true)).toBe('Gave access to new@example.com. Sent them an email.');
+    expect(accessOutcome('new@example.com', true, false)).toBe(
+      "Gave access to new@example.com. The email wasn't sent; tell them to sign in.",
+    );
+  });
+
+  it('does not mention email when none was asked for', () => {
+    expect(accessOutcome('new@example.com', false, false)).toBe('Gave access to new@example.com.');
+  });
+});
+
+describe('removeAccessCopy', () => {
+  it('asks to remove the address, and says they are signed out', () => {
+    expect(removeAccessCopy('new@example.com', false)).toEqual({
+      title: 'Remove new@example.com?',
+      message: "They're signed out right away. They can only get back in if someone invites them to their household.",
+      confirmLabel: 'Remove',
+    });
+  });
+
+  it('offers to delete their household only when they own one', () => {
+    expect(removeAccessCopy('new@example.com', true).checkbox).toBe('Also delete their household and its data');
+    expect(removeAccessCopy('new@example.com', false)).not.toHaveProperty('checkbox');
   });
 });
