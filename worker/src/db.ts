@@ -1,7 +1,11 @@
 // Thin D1 access. Not unit tested: the logic lives in shared/ and is tested there.
 import {
+  CHECK_KINDS,
   HouseholdSchema,
   defaultHousehold,
+  type CheckBulk,
+  type CheckKind,
+  type Checks,
   type FlyerUsed,
   type Household,
   type IngestMode,
@@ -452,4 +456,73 @@ export async function flyerCountsForDate(db: D1Database, date: string): Promise<
     .bind(date, date)
     .all<{ store: string; n: number }>();
   return results.map((r) => ({ store: r.store, count: r.n }));
+}
+
+// ---- Shopping and prep ticks (migration 0007) ----
+
+interface CheckRow {
+  kind: CheckKind;
+  item_id: string;
+  checked: number;
+  updated_at: string;
+}
+
+/** Every tick saved for the week. updatedAt is the latest write, or null when nothing is saved. */
+export async function loadChecks(db: D1Database, weekOf: string): Promise<Checks> {
+  const { results } = await db
+    .prepare('SELECT kind, item_id, checked, updated_at FROM checks WHERE week_of = ?')
+    .bind(weekOf)
+    .all<CheckRow>();
+  const out: Checks = { list: {}, prep: {}, updatedAt: null };
+  for (const r of results) {
+    out[r.kind][r.item_id] = r.checked === 1;
+    if (out.updatedAt === null || r.updated_at > out.updatedAt) out.updatedAt = r.updated_at;
+  }
+  return out;
+}
+
+/** Sets one tick. The latest write wins, and the row records who and when. */
+export async function setCheck(
+  db: D1Database,
+  weekOf: string,
+  kind: CheckKind,
+  itemId: string,
+  checked: boolean,
+  updatedBy: string,
+  updatedAt: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO checks (week_of, kind, item_id, checked, updated_at, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(week_of, kind, item_id) DO UPDATE SET
+         checked = excluded.checked, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+    )
+    .bind(weekOf, kind, itemId, checked ? 1 : 0, updatedAt, updatedBy)
+    .run();
+}
+
+/** One-time move of ticks from a browser. Items already saved for the week are left alone. Returns the count sent. */
+export async function insertMissingChecks(
+  db: D1Database,
+  weekOf: string,
+  bulk: CheckBulk,
+  updatedBy: string,
+  updatedAt: string,
+): Promise<number> {
+  const stmts: D1PreparedStatement[] = [];
+  for (const kind of CHECK_KINDS) {
+    for (const [itemId, checked] of Object.entries(bulk[kind] ?? {})) {
+      stmts.push(
+        db
+          .prepare(
+            'INSERT OR IGNORE INTO checks (week_of, kind, item_id, checked, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?)',
+          )
+          .bind(weekOf, kind, itemId, checked ? 1 : 0, updatedAt, updatedBy),
+      );
+    }
+  }
+  // Batches stay small, so a long list is never one oversized request.
+  for (let i = 0; i < stmts.length; i += 50) await db.batch(stmts.slice(i, i + 50));
+  return stmts.length;
 }

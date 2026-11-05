@@ -26,7 +26,11 @@ export type Rateable = {
   personIds: string[]; // real household members eating it
 };
 
+// A planned meal another meal links to, shown as "Mon dinner".
+export type MealRef = { id: string; label: string };
+
 export type ViewMeal = {
+  id?: string; // planned meals only
   slot: Slot;
   who: string;
   name: string;
@@ -35,6 +39,10 @@ export type ViewMeal = {
   fixed?: boolean;
   tags: ViewTag[];
   rateable?: Rateable;
+  // A leftover meal. from is the meal it reuses, or null when that meal is not in the plan.
+  leftover?: { from: MealRef | null };
+  // The meals that eat this meal's leftovers, in week order.
+  makes?: MealRef[];
 };
 
 export type ViewDay = {
@@ -152,12 +160,12 @@ function tagsOf(meal: PlannedMeal, cravings: string[]): ViewTag[] {
     const c = craving(meal, cravings);
     tags.push({ kind: 'craving', text: c ? `Craving: ${c.toLowerCase()}` : 'Craving' });
   }
-  if (meal.usesLeftoversFrom) tags.push({ kind: 'leftover', text: 'Leftovers' });
   for (const raw of meal.tags) {
     const t = raw.trim();
     const lower = t.toLowerCase();
     if (!t || lower === 'craving' || SLOT_WORDS.has(lower)) continue;
-    if (meal.usesLeftoversFrom && LEFTOVER_WORD.test(t)) continue;
+    // A leftover meal says so in its own line, so its Leftovers tag is not repeated as a pill.
+    if (LEFTOVER_WORD.test(t)) continue;
     const text = t.charAt(0).toUpperCase() + t.slice(1);
     if (tags.some((x) => x.text.toLowerCase() === text.toLowerCase())) continue;
     tags.push({ kind: 'deal', text });
@@ -180,6 +188,25 @@ function detailOf(meal: PlannedMeal): string {
   return `${names.slice(0, 4).join(', ')}, and ${names.length - 4} more`;
 }
 
+const refOf = (m: PlannedMeal): MealRef => ({ id: m.id, label: `${DAY_SHORT[m.day]} ${m.slot}` });
+
+/** The leftover links of a planned meal: what it reuses, and which meals eat its leftovers. */
+function leftoverLinks(plan: MealPlan, meal: PlannedMeal): Pick<ViewMeal, 'leftover' | 'makes'> {
+  const byId = new Map(plan.meals.map((m) => [m.id, m]));
+  const isLeftover = Boolean(meal.usesLeftoversFrom) || meal.tags.some((t) => LEFTOVER_WORD.test(t.trim()));
+  const from = meal.usesLeftoversFrom ? byId.get(meal.usesLeftoversFrom) : undefined;
+
+  const eaters = new Set<string>();
+  if (meal.makesLeftoversFor && byId.has(meal.makesLeftoversFor)) eaters.add(meal.makesLeftoversFor);
+  for (const m of plan.meals) if (m.usesLeftoversFrom === meal.id) eaters.add(m.id);
+  const makes = plan.meals.filter((m) => eaters.has(m.id)).map(refOf);
+
+  return {
+    ...(isLeftover ? { leftover: { from: from ? refOf(from) : null } } : {}),
+    ...(makes.length > 0 ? { makes } : {}),
+  };
+}
+
 export function planToWeek(plan: MealPlan, people: Map<string, string>): ViewWeek {
   const prices = unitPrices(plan.list);
   const days: ViewDay[] = DAYS.map((key, i) => {
@@ -188,6 +215,7 @@ export function planToWeek(plan: MealPlan, people: Map<string, string>): ViewWee
       .map((m) => ({
         slot: m.slot,
         meal: {
+          id: m.id,
           slot: m.slot,
           who: eatersLabel(m.eaters, people),
           name: m.name,
@@ -195,6 +223,7 @@ export function planToWeek(plan: MealPlan, people: Map<string, string>): ViewWee
           cost: mealCost(m, prices),
           tags: tagsOf(m, plan.request.cravings),
           ...rateableOf(m, people),
+          ...leftoverLinks(plan, m),
         },
       }));
     const fixed: { slot: Slot; meal: ViewMeal }[] = plan.fixedMeals

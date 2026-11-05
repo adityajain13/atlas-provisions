@@ -1,5 +1,9 @@
 import {
+  ChecksSchema,
   HouseholdSchema,
+  type CheckBulk,
+  type CheckKind,
+  type Checks,
   type IngestRunSummary,
   type IngestStatus,
   PantryItemSchema,
@@ -198,6 +202,35 @@ export async function commitReceipt(input: ReceiptCommit): Promise<ReceiptCommit
       body: JSON.stringify(input),
     }),
     (raw) => raw as ReceiptCommitResult,
+  );
+}
+
+// ---- Shopping and prep ticks (shared across the household) ----
+
+/** Every tick saved for the week. */
+export async function getChecks(weekOf: string): Promise<Checks> {
+  return json(await authFetch(`${BASE}/checks/${weekOf}`), (raw) => ChecksSchema.parse(raw));
+}
+
+/** Sets one tick. Last write wins. */
+export async function setCheck(weekOf: string, kind: CheckKind, itemId: string, checked: boolean): Promise<void> {
+  await ensureOk(
+    await authFetch(`${BASE}/checks/${weekOf}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, itemId, checked }),
+    }),
+  );
+}
+
+/** Moves ticks saved in this browser before they synced. Items the server already has are left alone. */
+export async function bulkChecks(weekOf: string, body: CheckBulk): Promise<void> {
+  await ensureOk(
+    await authFetch(`${BASE}/checks/${weekOf}/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   );
 }
 

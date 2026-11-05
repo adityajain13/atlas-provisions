@@ -153,4 +153,9 @@ describe('buildPayload', () => {
     expect(SYSTEM_PROMPT).toContain("never the meal slot name");
     expect(SYSTEM_PROMPT).toContain('Do not estimate prices');
   });
+
+  it('system prompt says meal names carry no portion counts', () => {
+    expect(SYSTEM_PROMPT).toContain('Meal names describe the dish only');
+    expect(SYSTEM_PROMPT).toContain("'(2 portions)'");
+  });
 });

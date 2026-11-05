@@ -8,8 +8,10 @@ import {
   type PlannedMeal,
   type RatingKind,
 } from '@provisions/shared';
-import type { ViewMeal, ViewTag } from '../lib/planView';
+import { Fragment } from 'react';
+import type { MealRef, ViewMeal, ViewTag } from '../lib/planView';
 import { SLOT_LABEL } from '../lib/labels';
+import { ReturnIcon } from './Icons';
 
 export const RATING_OPTIONS: { value: RatingKind; label: string }[] = [
   { value: 'up', label: 'Liked' },
@@ -32,10 +34,12 @@ type Props = {
   ratingError: string | null;
   onRate: (value: RatingKind) => void;
   onClose: () => void;
+  // Opens another planned meal, from a leftover link.
+  onOpenMeal: (id: string) => void;
 };
 
 /** Desktop side panel with the whole meal: ingredients, steps, tags and the rating buttons. */
-export default function MealDetail({ day, meal, planned, rating, ratingError, onRate, onClose }: Props) {
+export default function MealDetail({ day, meal, planned, rating, ratingError, onRate, onClose, onOpenMeal }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
   // Read through a ref so a parent re-render does not refocus the close button.
   const onCloseRef = useRef(onClose);
@@ -83,6 +87,30 @@ export default function MealDetail({ day, meal, planned, rating, ratingError, on
           {meal.fixed ? 'Fixed meal' : meal.detail}
           {cost && <span> &middot; {cost}</span>}
         </p>
+
+        {meal.leftover && (
+          <p className="mt-3 flex items-center gap-2 text-[14px] text-herbLight">
+            <ReturnIcon size={16} />
+            {meal.leftover.from ? (
+              <span>
+                Leftovers from <MealLink reference={meal.leftover.from} onOpen={onOpenMeal} />
+              </span>
+            ) : (
+              'Leftovers'
+            )}
+          </p>
+        )}
+        {meal.makes && (
+          <p className="mt-2 text-[14px] text-muted">
+            Makes{' '}
+            {meal.makes.map((r, i) => (
+              <Fragment key={r.id}>
+                {i > 0 && ', '}
+                <MealLink reference={r} onOpen={onOpenMeal} />
+              </Fragment>
+            ))}
+          </p>
+        )}
 
         {meal.tags.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2">
@@ -147,5 +175,17 @@ export default function MealDetail({ day, meal, planned, rating, ratingError, on
         )}
       </section>
     </div>
+  );
+}
+
+function MealLink({ reference, onOpen }: { reference: MealRef; onOpen: (id: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(reference.id)}
+      className="text-paper underline underline-offset-2 hover:text-herbLight"
+    >
+      {reference.label}
+    </button>
   );
 }

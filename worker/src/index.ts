@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import {
+  CheckBulkSchema,
+  CheckPutSchema,
   HouseholdSchema,
   INGREDIENT_BY_ID,
   PantryCreateSchema,
@@ -32,12 +34,14 @@ import historyFixture from '../fixtures/history-sample.json';
 import {
   commitReceiptRows,
   currentFlyerItems,
+  insertMissingChecks,
   deletePantryItem,
   flyerCountsForDate,
   insertFlyerItems,
   insertPantryItem,
   insertPriceHistory,
   latestIngestRun,
+  loadChecks,
   loadHousehold,
   loadPantry,
   loadPantryItem,
@@ -46,6 +50,7 @@ import {
   plansBetween,
   priceHistory,
   savePlan,
+  setCheck,
   updatePantryItem,
   upsertRating,
   type HistoryInsert,
@@ -56,7 +61,7 @@ import { attachPrep } from './planner/prep';
 import { runPlanner } from './planner/run';
 import { MAX_RECEIPT_IMAGE_CHARS, parseReceiptImage } from './receipts';
 import { authRoutes, type AuthEnv } from './auth';
-import { requireSession } from './authMiddleware';
+import { requireSession, type SessionVars } from './authMiddleware';
 
 type Env = AuthEnv & {
   ASSETS: Fetcher;
@@ -70,7 +75,7 @@ type Env = AuthEnv & {
 const API = '/provisions/api';
 const DEFAULT_PLANNER_MODEL = 'claude-sonnet-5-5';
 const DEFAULT_PREP_MODEL = 'claude-haiku-5-5';
-export const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env; Variables: SessionVars }>();
 
 // Sign-in is required for every API route except health and /auth/* (checked in the middleware).
 app.use(`${API}/*`, requireSession);
@@ -368,6 +373,50 @@ app.get(`${API}/plan/:weekOf`, async (c) => {
   const plan = await loadPlan(c.env.DB, weekOf);
   if (!plan) return c.text('No plan for this week', 404);
   return c.json(plan);
+});
+
+// ---- Shopping and prep ticks, shared across the household ----
+
+// Every tick saved for the week.
+app.get(`${API}/checks/:weekOf`, async (c) => {
+  const weekOf = c.req.param('weekOf');
+  if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
+  return c.json(await loadChecks(c.env.DB, weekOf));
+});
+
+// Sets one tick. Last write wins; the row records the signed-in address and the time.
+app.put(`${API}/checks/:weekOf`, async (c) => {
+  const weekOf = c.req.param('weekOf');
+  if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const parsed = CheckPutSchema.safeParse(body);
+  if (!parsed.success) return c.text(formatZod(parsed.error), 400);
+
+  const updatedAt = new Date().toISOString();
+  await setCheck(c.env.DB, weekOf, parsed.data.kind, parsed.data.itemId, parsed.data.checked, c.get('email'), updatedAt);
+  return c.json({ updatedAt });
+});
+
+// One-time move of ticks saved in a browser before they synced. Never overwrites a saved tick.
+app.post(`${API}/checks/:weekOf/bulk`, async (c) => {
+  const weekOf = c.req.param('weekOf');
+  if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const parsed = CheckBulkSchema.safeParse(body);
+  if (!parsed.success) return c.text(formatZod(parsed.error), 400);
+
+  const received = await insertMissingChecks(c.env.DB, weekOf, parsed.data, c.get('email'), new Date().toISOString());
+  return c.json({ received });
 });
 
 // ---- Receipts (milestone 3B) ----
