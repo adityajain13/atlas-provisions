@@ -98,6 +98,8 @@ export interface ListItem {
   usedIn: string[]; // planned meal ids and fixed placement ids
   priceMatch?: { fromStore: string; pricePerUnit: number };
   needed?: number; // unpriced items only: base units the plan needs, since packs are 0
+  // Unpriced items an enabled store sells, but not one of the chosen stores: the cheapest of them.
+  cheapestElsewhere?: { store: string; price: number };
 }
 
 export interface ValidationIssue {
@@ -115,6 +117,7 @@ export interface ValidationIssue {
     | 'equipment'
     | 'use-it-up'
     | 'never-again'
+    | 'store-cap'
     | 'prep';
   severity: 'error' | 'warning';
   message: string; // written as an instruction to the planner

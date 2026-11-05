@@ -8,6 +8,7 @@ import {
   type MealPlan,
   type PlannedMeal,
   type Slot,
+  SLOTS,
 } from '@provisions/shared';
 import { headlineName } from './headline';
 import { DAY_SHORT } from './labels';
@@ -74,6 +75,7 @@ export type ViewItem = {
   qty: string;
   price: number;
   note?: { kind: 'match' | 'used'; text: string };
+  elsewhere?: string; // unpriced items: where the cheapest enabled store sells it
 };
 
 const SLOT_ORDER: Record<Slot, number> = { breakfast: 0, lunch: 1, dinner: 2 };
@@ -137,16 +139,28 @@ function craving(meal: PlannedMeal, cravings: string[]): string | undefined {
   return cravings.find((c) => name.includes(c.toLowerCase()));
 }
 
+const SLOT_WORDS = new Set<string>(SLOTS);
+const LEFTOVER_WORD = /^leftovers?$/i;
+
+/**
+ * The pills a meal shows. A tag that only repeats the slot ("dinner") is dropped, and so is a
+ * "leftover" tag when the Leftovers pill already says it. Repeated pills are shown once.
+ */
 function tagsOf(meal: PlannedMeal, cravings: string[]): ViewTag[] {
   const tags: ViewTag[] = [];
-  if (meal.tags.includes('craving')) {
+  if (meal.tags.some((t) => t.trim().toLowerCase() === 'craving')) {
     const c = craving(meal, cravings);
     tags.push({ kind: 'craving', text: c ? `Craving: ${c.toLowerCase()}` : 'Craving' });
   }
   if (meal.usesLeftoversFrom) tags.push({ kind: 'leftover', text: 'Leftovers' });
-  for (const t of meal.tags) {
-    if (t === 'craving') continue;
-    tags.push({ kind: 'deal', text: t.charAt(0).toUpperCase() + t.slice(1) });
+  for (const raw of meal.tags) {
+    const t = raw.trim();
+    const lower = t.toLowerCase();
+    if (!t || lower === 'craving' || SLOT_WORDS.has(lower)) continue;
+    if (meal.usesLeftoversFrom && LEFTOVER_WORD.test(t)) continue;
+    const text = t.charAt(0).toUpperCase() + t.slice(1);
+    if (tags.some((x) => x.text.toLowerCase() === text.toLowerCase())) continue;
+    tags.push({ kind: 'deal', text });
   }
   return tags;
 }
@@ -277,6 +291,9 @@ export function planToList(plan: MealPlan): { weekOf: string; stores: string[]; 
           const text = usedNote(plan, item);
           return text ? { kind: 'used' as const, text } : undefined;
         })();
+    const elsewhere = item.cheapestElsewhere
+      ? `Cheapest at ${item.cheapestElsewhere.store}: $${item.cheapestElsewhere.price.toFixed(2)}`
+      : undefined;
     return {
       id: item.ingredientId,
       store: item.store,
@@ -285,6 +302,7 @@ export function planToList(plan: MealPlan): { weekOf: string; stores: string[]; 
       qty,
       price: item.total,
       ...(note ? { note } : {}),
+      ...(elsewhere ? { elsewhere } : {}),
     };
   });
 
