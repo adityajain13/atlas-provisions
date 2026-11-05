@@ -6,21 +6,10 @@ import { NoPlan } from '../components/NoPlan';
 import { Page } from '../components/Page';
 import { SaveStatus, useSaveScope } from '../components/SaveStatus';
 import { eyebrow } from '../components/ui';
+import { useChecks } from '../lib/useChecks';
 import { LIST_CATEGORY_ORDER, planToList, type ViewItem } from '../lib/planView';
 
 type View = { weekOf: string; stores: string[]; items: ViewItem[] };
-
-function readChecked(key: string): Set<string> {
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return new Set();
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((x): x is string => typeof x === 'string'));
-  } catch {
-    return new Set();
-  }
-}
 
 type State =
   | { status: 'loading' }
@@ -78,33 +67,14 @@ export default function List() {
 }
 
 function ListBody({ view }: { view: View }) {
-  const storageKey = `provisions:list:${view.weekOf}`;
-  const [checked, setChecked] = useState<Set<string>>(() => readChecked(storageKey));
-  // Ticks live in this browser only, so the pill says so.
-  useSaveScope('local', true);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify([...checked]));
-    } catch {
-      // Storage unavailable (private window or blocked). The list still works in memory.
-    }
-  }, [checked, storageKey]);
+  const { checks, toggle, ready } = useChecks(view.weekOf);
+  useSaveScope('sync', ready);
 
   const items = view.items;
   // Only real stores get a column. Items no store sells are listed separately, without a price.
   const stores = view.stores.filter((s) => s !== 'Unpriced');
   const unpriced = items.filter((i) => i.store === 'Unpriced');
   const total = items.reduce((sum, i) => sum + i.price, 0);
-
-  function toggle(id: string) {
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
 
   return (
     <Page>
@@ -113,7 +83,7 @@ function ListBody({ view }: { view: View }) {
         title="Shopping list"
         status={<SaveStatus />}
       />
-      <p className="mt-2 text-[12px] text-muted">Saved on this device. Ticks don&apos;t sync between devices.</p>
+      <p className="mt-2 text-[12px] text-muted">Shared with everyone in your household.</p>
 
       {items.length === 0 && <p className="mt-10 text-[14px] text-muted">Nothing to buy.</p>}
 
@@ -140,7 +110,7 @@ function ListBody({ view }: { view: View }) {
                   <p className={eyebrow}>{category}</p>
                   <ul className="mt-2">
                     {rows.map((item) => (
-                      <ListRow key={item.id} item={item} done={checked.has(item.id)} onToggle={() => toggle(item.id)} showPrice />
+                      <ListRow key={item.id} item={item} done={checks.list[item.id] === true} onToggle={() => toggle('list', item.id)} showPrice />
                     ))}
                   </ul>
                 </div>
@@ -157,7 +127,7 @@ function ListBody({ view }: { view: View }) {
           <p className="mt-1 text-[13px] text-muted">{"Buy anywhere; prices weren't in this week's flyers."}</p>
           <ul className="mt-4">
             {unpriced.map((item) => (
-              <ListRow key={item.id} item={item} done={checked.has(item.id)} onToggle={() => toggle(item.id)} showPrice={false} />
+              <ListRow key={item.id} item={item} done={checks.list[item.id] === true} onToggle={() => toggle('list', item.id)} showPrice={false} />
             ))}
           </ul>
         </section>

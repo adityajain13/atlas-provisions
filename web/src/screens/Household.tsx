@@ -141,13 +141,13 @@ export default function HouseholdScreen() {
             <ScheduleSection h={h} update={update} />
             <PrepSection h={h} update={update} />
             <FixedMealsSection h={h} update={update} />
+            <ItemRulesSection h={h} update={update} />
           </div>
           <div className="lg:flex lg:flex-col lg:gap-12">
             <AllergiesSection h={h} />
             <EquipmentSection h={h} update={update} />
             <VarietySection h={h} update={update} />
             <StoresSection h={h} update={update} />
-            <ItemRulesSection h={h} update={update} />
           </div>
         </div>
       )}

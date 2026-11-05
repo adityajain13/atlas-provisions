@@ -122,14 +122,26 @@ describe('planToWeek: tags and headline', () => {
     expect(week.days[0]!.meals[0]!.tags.map((t) => t.text)).toEqual(['Quick']);
   });
 
-  it('drops a leftover tag when the Leftovers pill already shows', () => {
-    const week = weekWith([meal('Chili', 'dinner', ['leftovers', 'quick'], 'm0')]);
-    expect(week.days[0]!.meals[0]!.tags.map((t) => t.text)).toEqual(['Leftovers', 'Quick']);
+  it('shows no Leftovers pill on a leftover meal: its own line says so', () => {
+    const week = weekWith([meal('Chili', 'dinner', ['leftovers', 'quick'], 'sun-lunch')]);
+    expect(week.days[0]!.meals[0]!.tags.map((t) => t.text)).toEqual(['Quick']);
   });
 
-  it('keeps a leftover tag when no leftovers are used', () => {
+  it('marks a meal tagged Leftovers as a leftover meal even without a source', () => {
     const week = weekWith([meal('Chili', 'dinner', ['Leftovers'])]);
-    expect(week.days[0]!.meals[0]!.tags.map((t) => t.text)).toEqual(['Leftovers']);
+    expect(week.days[0]!.meals[0]!.leftover).toEqual({ from: null });
+    expect(week.days[0]!.meals[0]!.tags).toEqual([]);
+  });
+
+  it('names the source meal and the meals that eat its leftovers', () => {
+    const source = { ...meal('Chili', 'dinner', []), id: 'mon-dinner', day: 'mon', makesLeftoversFor: 'tue-lunch' } as PlannedMeal;
+    const leftover = { ...meal('Chili lunch', 'lunch', []), id: 'tue-lunch', day: 'tue', usesLeftoversFrom: 'mon-dinner' } as PlannedMeal;
+    const week = weekWith([source, leftover]);
+    const mon = week.days.find((d) => d.key === 'mon')!.meals[0]!;
+    const tue = week.days.find((d) => d.key === 'tue')!.meals[0]!;
+    expect(mon.makes).toEqual([{ id: 'tue-lunch', label: 'Tue lunch' }]);
+    expect(tue.leftover).toEqual({ from: { id: 'mon-dinner', label: 'Mon dinner' } });
+    expect(tue.makes).toBeUndefined();
   });
 
   it('shows each pill once', () => {

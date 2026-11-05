@@ -62,3 +62,13 @@ export function RefreshIcon() {
     </Svg>
   );
 }
+
+/** A return arrow: marks a meal made from leftovers. */
+export function ReturnIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Svg size={size}>
+      <path d="M9 10l-5 5 5 5" />
+      <path d="M20 4v7a4 4 0 0 1-4 4H4" />
+    </Svg>
+  );
+}

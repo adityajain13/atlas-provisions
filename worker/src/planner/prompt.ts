@@ -22,6 +22,7 @@ export const SYSTEM_PROMPT = [
   'Chain leftovers: at least 2 dinners should produce a later lunch (set makesLeftoversFor / usesLeftoversFrom with meal ids). A leftover meal\'s ingredients list is empty and activeMinutes 5.',
   'Include each craving at least once and tag it \'craving\'.',
   "Tags are short descriptors like 'craving', 'vegetarian', 'quick' — never the meal slot name.",
+  'Meal names describe the dish only: no portion counts or notes like \'(2 portions)\' or \'x2\'.',
   'Balanced dinners: a protein, a vegetable, a grain or starch. Weeknight dinners are 40 active minutes or fewer unless a slot has maxMinutes, which is a hard cap.',
   'Use only methods possible with `equipment`.',
   'Respect `varietyRules` that are true. Avoid `avoid` meals; you may reuse `favourites`.',

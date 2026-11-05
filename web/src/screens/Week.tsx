@@ -16,12 +16,13 @@ import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { PrepArticle } from '../components/PrepArticle';
 import MealDetail, { RATING_OPTIONS, TAG_TONE } from '../components/MealDetail';
-import { RefreshIcon } from '../components/Icons';
+import { RefreshIcon, ReturnIcon } from '../components/Icons';
 import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { NoPlan } from '../components/NoPlan';
 import { secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
 import { defaultDay, planToWeek, type Rateable, type ViewMeal, type ViewWeek } from '../lib/planView';
+import { useChecks } from '../lib/useChecks';
 
 const RING = 'outline-none focus-visible:ring-2 focus-visible:ring-herb';
 
@@ -65,6 +66,8 @@ export default function Week() {
   const [openMeal, setOpenMeal] = useState<{ day: Day; meal: ViewMeal } | null>(null);
   const closeMeal = useCallback(() => setOpenMeal(null), []);
   useSaveScope('sync', source.status === 'plan');
+  // One set of ticks for both prep checklists (phone and desktop), so they never disagree.
+  const { checks, toggle } = useChecks(source.status === 'plan' ? source.plan.weekOf : null);
 
   useEffect(() => {
     let alive = true;
@@ -109,6 +112,16 @@ export default function Week() {
 
   const plan: MealPlan = source.plan;
   const week = planToWeek(plan, names);
+  // Leftover links point at other planned meals. Opening one swaps the side panel to it.
+  const openMealById = (id: string) => {
+    for (const d of week.days) {
+      const meal = d.meals.find((m) => m.id === id);
+      if (meal) {
+        setOpenMeal({ day: d.key, meal });
+        return;
+      }
+    }
+  };
   const todayIso = torontoDate();
   const selected = picked ?? defaultDay(week.weekOf, todayIso);
   const day = week.days.find((d) => d.key === selected) ?? week.days[0]!;
@@ -231,10 +244,13 @@ export default function Week() {
         </div>
 
         <div className="mt-6 space-y-6">
-          {plan && prep && <PrepArticle plan={plan} prep={prep} />}
+          {plan && prep && <PrepArticle plan={plan} prep={prep} ticked={checks.prep} onToggle={(id) => toggle('prep', id)} />}
           {mobileWarning}
           {day.meals.map((m) => (
-            <article key={`${m.slot}-${m.name}`} className="border-t border-line pt-4">
+            <article
+              key={`${m.slot}-${m.name}`}
+              className={m.leftover ? 'rounded-lg border border-edge p-4' : 'border-t border-line pt-4'}
+            >
               <div className="flex items-center justify-between">
                 <span className="text-[11px] uppercase tracking-[0.14em] text-muted">
                   {SLOT_LABEL[m.slot]} &middot; {m.who}
@@ -243,14 +259,20 @@ export default function Week() {
                   {m.fixed ? 'Fixed' : m.cost !== null ? `$${m.cost.toFixed(2)}` : ''}
                 </span>
               </div>
+              {m.leftover && (
+                <div className="mt-2">
+                  <LeftoverLine meal={m} />
+                </div>
+              )}
               <h3
-                className={`mt-2 font-display font-medium text-paper ${
+                className={`mt-2 font-display font-medium ${m.leftover ? 'text-paper/80' : 'text-paper'} ${
                   m.slot === 'dinner' ? 'text-[24px] leading-[1.2]' : 'text-[20px] leading-[1.25]'
                 }`}
               >
                 {m.name}
               </h3>
               <p className="mt-1 text-[13px] text-muted">{m.detail}</p>
+              {m.makes && <MakesLine meal={m} className="mt-1 block text-[12px] text-muted" />}
               {m.tags.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {m.tags.map((t) => (
@@ -393,7 +415,7 @@ export default function Week() {
 
           {hasDeskSide && (
             <div className="mt-8 min-w-0 space-y-6">
-              {plan && deskPrep && <PrepArticle plan={plan} prep={deskPrep} framed />}
+              {plan && deskPrep && <PrepArticle plan={plan} prep={deskPrep} ticked={checks.prep} onToggle={(id) => toggle('prep', id)} framed />}
               {deskWarning}
             </div>
           )}
@@ -404,6 +426,7 @@ export default function Week() {
             day={openMeal.day}
             meal={openMeal.meal}
             planned={plannedFor(plan, openMeal.day, openMeal.meal)}
+            onOpenMeal={openMealById}
             rating={openMeal.meal.rateable ? ratingFor(ratings, openMeal.meal.rateable) : null}
             ratingError={ratingError}
             onRate={(value) => {
@@ -451,6 +474,23 @@ function shortPill(text: string): string {
   return text.length > 24 ? `${text.slice(0, 23).trimEnd()}…` : text;
 }
 
+/** "From Mon dinner" for a leftover meal, with a return arrow. Plain "Leftovers" when its source is not in the plan. */
+function LeftoverLine({ meal }: { meal: ViewMeal }) {
+  if (!meal.leftover) return null;
+  return (
+    <span className="flex items-center gap-1.5 text-[12px] text-herbLight">
+      <ReturnIcon />
+      {meal.leftover.from ? `From ${meal.leftover.from.label}` : 'Leftovers'}
+    </span>
+  );
+}
+
+/** "Makes Tue lunch, Wed lunch" for a meal whose leftovers are eaten later. */
+function MakesLine({ meal, className }: { meal: ViewMeal; className: string }) {
+  if (!meal.makes) return null;
+  return <span className={className}>Makes {meal.makes.map((r) => r.label).join(', ')}</span>;
+}
+
 function MealCell({ meal, onOpen }: { meal: ViewMeal; onOpen: () => void }) {
   const meta = [meal.who, meal.fixed ? 'Fixed' : meal.cost !== null ? `$${meal.cost.toFixed(2)}` : null]
     .filter(Boolean)
@@ -461,15 +501,19 @@ function MealCell({ meal, onOpen }: { meal: ViewMeal; onOpen: () => void }) {
       onClick={onOpen}
       title={meal.name}
       className={`${RING} flex min-h-[112px] w-full min-w-0 flex-1 flex-col rounded-lg border p-3 text-left hover:border-edge ${
-        meal.fixed ? 'border-line2 bg-ink' : 'border-line2 bg-field'
+        meal.fixed ? 'border-line2 bg-ink' : meal.leftover ? 'border-edge bg-transparent' : 'border-line2 bg-field'
       }`}
     >
+      {meal.leftover && <LeftoverLine meal={meal} />}
       <span
-        className={`line-clamp-3 break-normal text-[15px] font-medium leading-[1.25] [overflow-wrap:normal] hyphens-none ${meal.fixed ? 'text-muted' : 'text-paper'}`}
+        className={`line-clamp-3 break-normal text-[15px] font-medium leading-[1.25] [overflow-wrap:normal] hyphens-none ${
+          meal.fixed ? 'text-muted' : meal.leftover ? 'text-paper/80' : 'text-paper'
+        } ${meal.leftover ? 'mt-1.5' : ''}`}
       >
         {meal.name}
       </span>
       {meta && <span className="mt-auto pt-2 text-[12px] text-muted">{meta}</span>}
+      {meal.makes && <MakesLine meal={meal} className="mt-1 block text-[12px] text-muted" />}
       {meal.tags.length > 0 && (
         <span className="mt-2 flex flex-wrap gap-1">
           {meal.tags.slice(0, 2).map((t) => (
