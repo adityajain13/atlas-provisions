@@ -144,7 +144,7 @@ describe('buildPayload', () => {
     expect(schema.required).toEqual(['meals', 'notes']);
     const prep = schema.properties.prep;
     expect(prep.required).toEqual(['day', 'steps']);
-    expect(prep.properties.steps.items.required).toEqual(['id', 'task', 'minutes', 'forMeals']);
+    expect(prep.properties.steps.items.required).toEqual(['task', 'minutes', 'forMeals', 'day', 'storage']);
     expect(prep.properties.steps.items.properties.forMeals.type).toBe('array');
   });
 

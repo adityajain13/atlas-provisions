@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  DAY_LONG,
   SLOTS,
-  planWeekOf,
   torontoDate,
   type Day,
   type MealPlan,
@@ -14,11 +14,14 @@ import {
 import { errorMessage, getHousehold, getPlan, getRatings, regeneratePrep, saveRating } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
-import { PrepArticle } from '../components/PrepArticle';
+import { PrepBoard, PrepToday } from '../components/PrepArticle';
+import { prepAnchor, stepsOnDay } from '../lib/prepView';
 import MealDetail, { RATING_OPTIONS, TAG_TONE } from '../components/MealDetail';
 import { RefreshIcon, ReturnIcon } from '../components/Icons';
 import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { NoPlan } from '../components/NoPlan';
+import WeekSwitcher from '../components/WeekSwitcher';
+import { planLabel, useViewedWeek, viewWindow, weekOffset } from '../lib/week';
 import { secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
 import { defaultDay, planToWeek, type Rateable, type ViewMeal, type ViewWeek } from '../lib/planView';
@@ -52,6 +55,12 @@ function plannedFor(plan: MealPlan | null, day: Day, meal: ViewMeal): PlannedMea
 }
 
 export default function Week() {
+  const { weekOf, current, go } = useViewedWeek();
+  // Keyed by week: switching weeks starts a fresh load, day pick and open meal.
+  return <WeekScreen key={weekOf} weekOf={weekOf} current={current} go={go} />;
+}
+
+function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; go: (weekOf: string) => void }) {
   // Null until the reader picks a day: then the default (today, or Sunday) applies.
   const [picked, setPicked] = useState<Day | null>(null);
   const { track } = useSaveStatus();
@@ -71,7 +80,6 @@ export default function Week() {
 
   useEffect(() => {
     let alive = true;
-    const weekOf = planWeekOf(new Date());
     Promise.all([getPlan(weekOf), getHousehold().catch(() => null), getRatings().catch(() => [] as Rating[])])
       .then(([plan, household, saved]) => {
         if (!alive) return;
@@ -86,12 +94,18 @@ export default function Week() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [weekOf]);
+
+  const window = viewWindow(current);
+  const switcher = <WeekSwitcher weekOf={weekOf} current={current} first={window.first} last={window.last} onChange={go} />;
+  // A week that has passed cannot be planned, so it gets no plan button.
+  const past = weekOffset(weekOf, current) < 0;
 
   if (source.status === 'loading') {
     return (
       <Page>
         <Header title="Your week" />
+        <div className="mt-6">{switcher}</div>
         <p className="mt-10 text-[14px] text-muted">Loading&hellip;</p>
       </Page>
     );
@@ -101,10 +115,11 @@ export default function Week() {
     return (
       <Page>
         <Header title="Your week" />
+        <div className="mt-6">{switcher}</div>
         {source.status === 'error' ? (
           <p className="mt-10 text-[14px] text-muted">Could not load this week&apos;s plan: {source.error}</p>
         ) : (
-          <NoPlan />
+          <NoPlan weekOf={weekOf} current={current} />
         )}
       </Page>
     );
@@ -127,7 +142,10 @@ export default function Week() {
   const day = week.days.find((d) => d.key === selected) ?? week.days[0]!;
   const pct = week.budget > 0 ? Math.min(100, (week.spent / week.budget) * 100) : 0;
   const errors = plan?.issues.filter((i) => i.severity === 'error') ?? [];
-  const prep = plan?.prep && plan.prep.day === selected ? plan.prep : null;
+  // Warnings that are not errors, such as estimated prices for a week whose flyers are not out yet.
+  const notes = plan?.issues.filter((i) => i.severity === 'warning' && (i.check === 'prices' || i.check === 'prep-timing')) ?? [];
+  // Desktop: jump the page to a day's prep group.
+  const scrollToPrep = (day: Day) => document.getElementById(prepAnchor(day))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const prepWarning =
     plan && !plan.prep && prepDay === selected ? (plan.issues.find((i) => i.check === 'prep')?.message ?? null) : null;
 
@@ -189,17 +207,18 @@ export default function Week() {
       <div className="lg:hidden">
         <Header
           size="lg"
-          subtitle={<>Week of {week.label}</>}
           status={<SaveStatus />}
           action={
-            <Link
-              to="/plan"
-              aria-label="Plan this week"
-              title="Plan this week"
-              className="flex h-11 w-11 items-center justify-center rounded-full border border-edge text-muted"
-            >
-              <RefreshIcon />
-            </Link>
+            past ? undefined : (
+              <Link
+                to={`/plan?week=${weekOf}`}
+                aria-label={planLabel(weekOf, current, true)}
+                title={planLabel(weekOf, current, true)}
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-edge text-muted"
+              >
+                <RefreshIcon />
+              </Link>
+            )
           }
           title={
             <>
@@ -209,6 +228,7 @@ export default function Week() {
             </>
           }
         />
+        <div className="mt-4">{switcher}</div>
 
         {errors.length > 0 && (
           <div className="mt-6 rounded-lg border border-edge px-4 py-3">
@@ -220,6 +240,11 @@ export default function Week() {
             </ul>
           </div>
         )}
+        {notes.map((i) => (
+          <p key={i.message} className="mt-6 text-[13px] text-muted">
+            {i.message}
+          </p>
+        ))}
 
         <BudgetBlock week={week} pct={pct} className="mt-8" />
 
@@ -244,7 +269,16 @@ export default function Week() {
         </div>
 
         <div className="mt-6 space-y-6">
-          {plan && prep && <PrepArticle plan={plan} prep={prep} ticked={checks.prep} onToggle={(id) => toggle('prep', id)} />}
+          {plan?.prep && stepsOnDay(plan.prep, day.key).length > 0 && (
+            <PrepToday
+              plan={plan}
+              prep={plan.prep}
+              day={day.key}
+              heading={isoPlus(week.weekOf, week.days.indexOf(day)) === todayIso ? 'Prep today' : `Prep for ${DAY_LONG[day.key]}`}
+              ticked={checks.prep}
+              onToggle={(id) => toggle('prep', id)}
+            />
+          )}
           {mobileWarning}
           {day.meals.map((m) => (
             <article
@@ -310,20 +344,20 @@ export default function Week() {
 
         {ratingError && <p className="mt-6 text-[13px] text-[#D98C7A]">Could not save rating: {ratingError}</p>}
 
-        <Link to="/plan" className={`mt-10 w-full ${secondaryBtn}`}>
-          Plan next week
-        </Link>
+        {!past && (
+          <Link to={`/plan?week=${weekOf}`} className={`mt-10 w-full ${secondaryBtn}`}>
+            {planLabel(weekOf, current, true)}
+          </Link>
+        )}
       </div>
 
       {/* Desktop layout: the whole week as a grid. */}
       <div className="hidden lg:block">
         <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between xl:gap-10">
           <div className="min-w-0">
-            <p className="text-[13px] text-muted">
-              Week of {week.label}
-            </p>
+            {switcher}
             <div className="lg:flex lg:items-baseline lg:gap-4">
-              <h1 className="mt-2 font-display text-[44px] font-semibold leading-[1.05] tracking-[-0.02em] text-paper">
+              <h1 className="mt-4 font-display text-[44px] font-semibold leading-[1.05] tracking-[-0.02em] text-paper">
                 {day.dayLabel},
                 <br />
                 {day.headline}
@@ -335,13 +369,15 @@ export default function Week() {
           </div>
           <div className="flex items-end gap-4 xl:shrink-0">
             <BudgetBlock week={week} pct={pct} className="min-w-0 flex-1 xl:w-[300px] xl:flex-none" />
-            <Link
-              to="/plan"
-              className={`${RING} flex h-11 shrink-0 items-center gap-2 rounded-lg border border-edge px-4 text-[14px] text-paper hover:border-muted`}
-            >
-              <RefreshIcon />
-              Plan this week
-            </Link>
+            {!past && (
+              <Link
+                to={`/plan?week=${weekOf}`}
+                className={`${RING} flex h-11 shrink-0 items-center gap-2 rounded-lg border border-edge px-4 text-[14px] text-paper hover:border-muted`}
+              >
+                <RefreshIcon />
+                {planLabel(weekOf, current, true)}
+              </Link>
+            )}
           </div>
         </div>
 
@@ -355,6 +391,11 @@ export default function Week() {
             </ul>
           </div>
         )}
+        {notes.map((i) => (
+          <p key={i.message} className="mt-6 text-[13px] text-muted">
+            {i.message}
+          </p>
+        ))}
 
         <div className="mt-8 min-w-0">
           <div className="min-w-0">
@@ -363,9 +404,10 @@ export default function Week() {
               {week.days.map((d, i) => {
                 const active = d.key === selected;
                 const isToday = isoPlus(week.weekOf, i) === todayIso;
+                const hasPrep = plan?.prep ? stepsOnDay(plan.prep, d.key).length > 0 : false;
                 return (
+                  <div key={d.key} className="flex min-w-0 flex-col items-stretch gap-1">
                   <button
-                    key={d.key}
                     type="button"
                     aria-pressed={active}
                     aria-current={isToday ? 'date' : undefined}
@@ -381,6 +423,17 @@ export default function Week() {
                     <span className="uppercase tracking-[0.1em]">{DAY_SHORT[d.key]}</span>
                     <span className="text-[20px] font-semibold leading-none tabular-nums">{d.dateNum}</span>
                   </button>
+                  {hasPrep && (
+                    <button
+                      type="button"
+                      onClick={() => scrollToPrep(d.key)}
+                      className={`${RING} flex min-h-6 items-center justify-center gap-1.5 rounded text-[11px] text-herbLight hover:text-paper`}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-herb" aria-hidden="true" />
+                      Prep
+                    </button>
+                  )}
+                  </div>
                 );
               })}
 
@@ -415,7 +468,7 @@ export default function Week() {
 
           {hasDeskSide && (
             <div className="mt-8 min-w-0 space-y-6">
-              {plan && deskPrep && <PrepArticle plan={plan} prep={deskPrep} ticked={checks.prep} onToggle={(id) => toggle('prep', id)} framed />}
+              {plan && deskPrep && <PrepBoard plan={plan} prep={deskPrep} ticked={checks.prep} onToggle={(id) => toggle('prep', id)} />}
               {deskWarning}
             </div>
           )}

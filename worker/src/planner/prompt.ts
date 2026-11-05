@@ -12,6 +12,7 @@ import {
   type SlotCell,
   type ValidationIssue,
 } from '@provisions/shared';
+import { PREP_RULES, PREP_STEP_PROPERTIES } from './prep';
 
 export const SYSTEM_PROMPT = [
   'You plan a week of home-cooked meals for a budget-conscious household in Ontario, Canada.',
@@ -29,8 +30,8 @@ export const SYSTEM_PROMPT = [
   'Quantities are in each ingredient\'s `unit`, as the total for that meal. Do not estimate prices; code computes cost.',
   'For `each` ingredients, qty counts packages or pieces as sold (see eachMeans), never slices or servings: two people having toast all week is 1 loaf, not 7.',
   'If `feedback` is present, the previous plan broke these checks. Fix every error listed there and keep what already worked.',
-  'Batch prep: when `prepDay` is set, also return `prep` for that day: cook ahead what keeps (grains, proteins, sauces), wash and chop, marinate, with active minutes and how to store each step.',
-  'Only prep what keeps until it is eaten: respect each ingredient\'s `shelfLifeDays`. Link each prep step to the meal ids it serves in `forMeals`. Keep prep under 90 minutes total when possible.',
+  'Batch prep: when `prepDay` is set, also return `prep` for that day, following the prep rules below.',
+  ...PREP_RULES.map((rule) => `Prep rule: ${rule}`),
   'If `prepDay` is null, omit `prep`.',
   'Return the plan only via the submit_plan tool.',
 ].join('\n');
@@ -80,18 +81,8 @@ export const SUBMIT_PLAN_TOOL = {
             maxItems: 30,
             items: {
               type: 'object',
-              properties: {
-                id: { type: 'string' },
-                task: { type: 'string', description: 'What to do, e.g. "Cook a tray of chicken thighs"' },
-                minutes: { type: 'number', description: 'Active minutes for this step' },
-                forMeals: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Meal ids from this same submission that this step serves',
-                },
-                storage: { type: 'string', description: 'How to store it and until when, e.g. "fridge, 3 days"' },
-              },
-              required: ['id', 'task', 'minutes', 'forMeals'],
+              properties: PREP_STEP_PROPERTIES,
+              required: ['task', 'minutes', 'forMeals', 'day', 'storage'],
             },
           },
         },

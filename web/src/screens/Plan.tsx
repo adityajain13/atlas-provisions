@@ -4,21 +4,25 @@ import {
   DAYS,
   DAY_LONG,
   SLOTS,
+  WEEKS_AHEAD,
   addDaysIso,
-  planWeekOf,
+  addWeeks,
   type Day,
   type FixedMeal,
   type Household,
   type Slot,
   type WeekOverride,
 } from '@provisions/shared';
-import { errorMessage, generatePlan, getHousehold } from '../api';
+import { errorMessage, generatePlan, getHousehold, getPlan } from '../api';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { Section } from '../components/Section';
-import { addBtn, chipBase, chipTone, ctaBtn, eyebrow, fieldCls, removeIconBtn } from '../components/ui';
+import WeekSwitcher from '../components/WeekSwitcher';
+import { useConfirm } from '../components/ConfirmDialog';
+import { addBtn, chipBase, ctaBtn, eyebrow, fieldCls, removeIconBtn, secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
+import { existingNote, planTitle, replaceTitle, useViewedWeek, weekOffset } from '../lib/week';
 
 export default function Plan() {
   const [household, setHousehold] = useState<Household | null>(null);
@@ -35,6 +39,12 @@ export default function Plan() {
   // Inputs are not saved until the plan is generated, so the pill says so.
   useSaveScope('plan', household !== null);
   const navigate = useNavigate();
+  const confirm = useConfirm();
+  const { weekOf, current, go } = useViewedWeek();
+  // Whether the viewed week already has a saved plan. Null while it is being read.
+  const [hasPlan, setHasPlan] = useState<boolean | null>(null);
+  const past = weekOffset(weekOf, current) < 0;
+  const range = { first: current, last: addWeeks(current, WEEKS_AHEAD) };
 
   useEffect(() => {
     getHousehold()
@@ -42,11 +52,24 @@ export default function Plan() {
       .catch((e: unknown) => setLoadError(errorMessage(e)));
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    setHasPlan(null);
+    getPlan(weekOf)
+      .then((plan) => {
+        if (alive) setHasPlan(plan !== null);
+      })
+      .catch(() => {
+        if (alive) setHasPlan(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [weekOf]);
+
   const people = household?.people ?? [];
   const maxCount = people.length + 2;
   const budgetValue = budget ?? (household ? String(household.defaultBudget) : '');
-  // The plan week this grid is for: Sunday first, so each column carries its date.
-  const weekOf = planWeekOf(new Date());
 
   function defaultCount(day: Day, slot: Slot): number {
     if (!household) return 0;
@@ -93,18 +116,28 @@ export default function Plan() {
       setGenerateError('Budget must be between $1 and $2,000.');
       return;
     }
+    if (hasPlan) {
+      const replace = await confirm({
+        title: replaceTitle(weekOf, current),
+        message: 'The saved meals and shopping list for that week are replaced.',
+        confirmLabel: 'Replace',
+        cancelLabel: 'Keep it',
+        danger: true,
+      });
+      if (!replace) return;
+    }
     setGenerating(true);
     setGenerateError(null);
     try {
       const request = {
-        weekOf: planWeekOf(new Date()),
+        weekOf,
         budget: budgetNumber,
         cravings,
         overrides: buildOverrides(),
         useItUp,
       };
-      await track(generatePlan(request), () => generatePlan(request));
-      navigate('/');
+      await track(generatePlan(request), () => generatePlan(request), { busy: 'Planning…' });
+      navigate(`/?week=${weekOf}`);
     } catch (e) {
       setGenerateError(errorMessage(e));
       setGenerating(false);
@@ -125,9 +158,37 @@ export default function Plan() {
     }
   }
 
+  if (past) {
+    return (
+      <Page>
+        <Header title={planTitle(weekOf, current)} status={<SaveStatus />} />
+        <div className="mt-6">
+          <WeekSwitcher weekOf={weekOf} current={current} first={range.first} last={range.last} onChange={go} />
+        </div>
+        <section className="mt-10 border-t border-line pt-6">
+          <h2 className="font-display text-[24px] font-semibold tracking-[-0.01em] text-paper">Past weeks can&apos;t be planned</h2>
+          <p className="mt-2 text-[14px] text-muted">
+            That week has already passed. You can still see what was planned for it.
+          </p>
+          <Link to={`/?week=${weekOf}`} className={`mt-6 ${secondaryBtn}`}>
+            View that week
+          </Link>
+        </section>
+      </Page>
+    );
+  }
+
   return (
     <Page>
-      <Header title="Plan this week" status={<SaveStatus />} />
+      <Header title={planTitle(weekOf, current)} status={<SaveStatus />} />
+      <div className="mt-6">
+        <WeekSwitcher weekOf={weekOf} current={current} first={range.first} last={range.last} onChange={go} />
+      </div>
+      {hasPlan && (
+        <p className="mt-6 text-[13px] text-muted">
+          {existingNote(weekOf, current)} Generating replaces it.
+        </p>
+      )}
 
       {/* Phone: one column in this order. Desktop: budget, cravings and options on the left, who's eating on the right. */}
       <div className="lg:mt-12 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] lg:items-start lg:gap-x-12 lg:gap-y-12">

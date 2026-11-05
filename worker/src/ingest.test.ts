@@ -229,7 +229,8 @@ describe('Worker default export', () => {
     expect(waitUntil).toHaveBeenCalledTimes(1);
     const promise = waitUntil.mock.calls[0]![0] as Promise<{ ok: boolean; errors: string[] }>;
     await expect(promise).resolves.toMatchObject({ ok: false, errors: ['Add a postal code in Household first.'] });
-    expect(writes).toEqual([]);
+    // The import writes nothing; the same job then deletes the plans and ticks past retention.
+    expect(writes.map((w) => w.sql)).toEqual(['DELETE FROM meal_plans WHERE week_of < ?', 'DELETE FROM checks WHERE week_of < ?']);
   });
 
   it('still serves fetch through the Hono app', async () => {

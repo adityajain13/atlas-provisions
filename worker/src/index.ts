@@ -11,17 +11,23 @@ import {
   ReceiptCommitSchema,
   defaultExpiry,
   defaultHousehold,
+  PLAN_WINDOW_MESSAGE,
+  isPlannableWeek,
   isSundayIso,
   matchFlyerItem,
   matchIngredient,
   newId,
   planReceiptCommit,
+  planWeekOf,
   ratingSignals,
+  retentionCutoff,
   recentDinnerNames,
   addDaysIso,
   scoreDeals,
   torontoDate,
   type Deal,
+  type IngestRunSummary,
+  type PriceSource,
   type FlyerItem,
   type Household,
   type MatchedItem,
@@ -34,6 +40,8 @@ import historyFixture from '../fixtures/history-sample.json';
 import {
   commitReceiptRows,
   currentFlyerItems,
+  overlappingFlyerItems,
+  pruneWeeksBefore,
   insertMissingChecks,
   deletePantryItem,
   flyerCountsForDate,
@@ -88,6 +96,22 @@ function formatZod(error: ZodError): string {
 }
 
 /**
+ * The flyer items that price a week starting on `weekOf`. The flyers valid that Sunday come first. When
+ * none are out yet, the flyers that overlap the week are used, and then the flyers valid today.
+ */
+async function flyerItemsFor(
+  db: D1Database,
+  weekOf: string,
+  today: string,
+): Promise<{ items: FlyerItem[]; source: PriceSource }> {
+  const onDay = await currentFlyerItems(db, weekOf);
+  if (onDay.length > 0) return { items: onDay, source: 'week' };
+  const overlap = await overlappingFlyerItems(db, weekOf, addDaysIso(weekOf, 6));
+  if (overlap.length > 0) return { items: overlap, source: 'overlap' };
+  return { items: await currentFlyerItems(db, today), source: 'current' };
+}
+
+/**
  * Matched and scored flyer items for a shopping date, from enabled stores. Used by /deals and the
  * planner. Also returns the household and the never-buy ingredient ids. The planner passes the
  * plan week's Sunday, so the week is priced from the flyers valid that day.
@@ -95,9 +119,16 @@ function formatZod(error: ZodError): string {
 async function loadDeals(
   env: Env,
   date: string,
-): Promise<{ household: Household; matched: MatchedItem[]; unmatched: string[]; deals: Deal[]; neverBuy: string[] }> {
+): Promise<{
+  household: Household;
+  matched: MatchedItem[];
+  unmatched: string[];
+  deals: Deal[];
+  neverBuy: string[];
+  priceSource: PriceSource;
+}> {
   const household = await loadHousehold(env.DB);
-  const flyerItems = await currentFlyerItems(env.DB, date);
+  const { items: flyerItems, source: priceSource } = await flyerItemsFor(env.DB, date, torontoDate());
 
   // Only enabled stores count. If none are enabled, every store in the flyer is used.
   const enabled = new Set(household.stores.filter((s) => s.enabled).map((s) => s.name));
@@ -132,7 +163,7 @@ async function loadDeals(
     householdSize: Math.max(1, household.people.length),
   });
 
-  return { household, matched, unmatched, deals, neverBuy };
+  return { household, matched, unmatched, deals, neverBuy, priceSource };
 }
 
 app.get(`${API}/health`, (c) => c.json({ ok: true }));
@@ -206,9 +237,10 @@ app.post(`${API}/plan`, async (c) => {
   const parsed = PlanRequestSchema.safeParse(body);
   if (!parsed.success) return c.text(formatZod(parsed.error), 400);
   const request = parsed.data;
+  if (!isPlannableWeek(request.weekOf, new Date())) return c.text(PLAN_WINDOW_MESSAGE, 400);
 
   try {
-    const { household, matched, deals, neverBuy } = await loadDeals(c.env, request.weekOf);
+    const { household, matched, deals, neverBuy, priceSource } = await loadDeals(c.env, request.weekOf);
     // Plans starting up to 21 days before the week can hold dinners in the 14-day window.
     const earlier = await plansBetween(c.env.DB, addDaysIso(request.weekOf, -21), request.weekOf);
     const today = torontoDate();
@@ -227,6 +259,15 @@ app.post(`${API}/plan`, async (c) => {
       today,
       client: anthropicClient(apiKey, c.env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
     });
+    plan.priceSource = priceSource;
+    // Next week's flyers are often not out yet; the plan says its prices are estimates.
+    if (priceSource === 'current' && request.weekOf > planWeekOf(new Date())) {
+      plan.issues.push({
+        check: 'prices',
+        severity: 'warning',
+        message: "Prices are estimates from the current flyer; next week's flyers aren't out yet.",
+      });
+    }
     await savePlan(c.env.DB, plan);
     return c.json(plan);
   } catch (e) {
@@ -477,10 +518,19 @@ app.all('*', async (c) => {
   return res;
 });
 
+// The Sunday job: refresh the flyers, then delete plans and ticks past the retention window.
+export async function runSunday(env: Env): Promise<IngestRunSummary> {
+  try {
+    return await runIngest(env);
+  } finally {
+    await pruneWeeksBefore(env.DB, retentionCutoff(new Date()));
+  }
+}
+
 // The Sunday cron (wrangler.jsonc) refreshes the flyers. Fetch serves the Hono app as before.
 export default {
   fetch: (request: Request, env: Env, ctx: ExecutionContext) => app.fetch(request, env, ctx),
   scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runIngest(env));
+    ctx.waitUntil(runSunday(env));
   },
 };

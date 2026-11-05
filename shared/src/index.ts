@@ -2,7 +2,21 @@ import { z } from 'zod';
 
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
 import { STORE_GROUPS, STORE_PRESETS, slugifyName } from './stores';
-export { DAYS, SLOTS, DAY_LONG, isWeeknight, type Day, type Slot } from './calendar';
+export {
+  DAYS,
+  SLOTS,
+  DAY_LONG,
+  PLAN_RETENTION_WEEKS,
+  WEEKS_AHEAD,
+  WEEKS_BACK,
+  addWeeks,
+  isSunday,
+  isWeeknight,
+  weekRangeLabel,
+  weekShortRange,
+  type Day,
+  type Slot,
+} from './calendar';
 export * from './stores';
 
 export const UNITS = ['g', 'kg', 'ml', 'l', 'each'] as const;

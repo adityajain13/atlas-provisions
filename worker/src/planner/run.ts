@@ -16,6 +16,7 @@ import {
   type PantryItem,
   type PlannedMeal,
   type PlanRequest,
+  prepTimingIssues,
   type PrepPlan,
   type RatingSignals,
   type RawPlan,
@@ -165,8 +166,13 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
   const kept = best!;
   kept.attempts = attempts;
   if (household.prepDay) {
-    if (bestPrep) kept.prep = bestPrep;
-    else kept.issues = [...kept.issues, PREP_MISSING];
+    if (bestPrep) {
+      kept.prep = bestPrep;
+      // Timing breaches are warnings on the prep, never errors: they do not trigger a retry.
+      kept.issues = [...kept.issues, ...prepTimingIssues(bestPrep, kept.meals)];
+    } else {
+      kept.issues = [...kept.issues, PREP_MISSING];
+    }
   }
   return kept;
 }

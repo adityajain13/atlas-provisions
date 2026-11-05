@@ -299,8 +299,8 @@ describe('runPlanner: prep in the same call', () => {
     expect(plan.prep).toEqual({
       day: 'sun',
       steps: [
-        { id: 'prep-1', task: 'Cook rice', minutes: 20, forMeals: ['m0'], storage: 'fridge, 4 days' },
-        { id: 'prep-2', task: 'Chop onion', minutes: 5, forMeals: ['m1'] },
+        { id: 'prep-1', task: 'Cook rice', minutes: 20, forMeals: ['m0'], day: 'sun', storage: { method: 'fridge', how: '', keepsDays: 4 } },
+        { id: 'prep-2', task: 'Chop onion', minutes: 5, forMeals: ['m1'], day: 'sun' },
       ],
       totalMinutes: 25,
     });

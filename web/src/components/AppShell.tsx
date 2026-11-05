@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
+import { addWeeks, planWeekOf } from '@provisions/shared';
 import { Brand } from './Header';
 import { TABS } from './TabBar';
 import { useSession } from '../session';
@@ -37,7 +38,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </nav>
 
         <Link
-          to="/plan"
+          to={`/plan?week=${addWeeks(planWeekOf(new Date()), 1)}`}
           className={`mt-6 flex h-11 items-center justify-center rounded-lg bg-herb text-[14px] font-medium text-ink hover:bg-herbLight ${RING} focus-visible:ring-offset-2 focus-visible:ring-offset-ink`}
         >
           Plan next week

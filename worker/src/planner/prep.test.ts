@@ -64,8 +64,15 @@ describe('generatePrep', () => {
 
     expect(out.day).toBe('sun');
     expect(out.steps).toEqual([
-      { id: 'prep-1', task: 'Cook a tray of chicken thighs', minutes: 12, forMeals: ['thu-dinner'], storage: 'fridge, 3 days' },
-      { id: 'prep-2', task: 'Chop onions', minutes: 5, forMeals: ['fri-lunch'] },
+      {
+        id: 'prep-1',
+        task: 'Cook a tray of chicken thighs',
+        minutes: 12,
+        forMeals: ['thu-dinner'],
+        day: 'sun',
+        storage: { method: 'fridge', how: '', keepsDays: 3 },
+      },
+      { id: 'prep-2', task: 'Chop onions', minutes: 5, forMeals: ['fri-lunch'], day: 'sun' },
     ]);
     expect(out.totalMinutes).toBe(17);
   });
@@ -75,7 +82,7 @@ describe('generatePrep', () => {
     await generatePrep(plan(), 'sun', client);
 
     const [system, payload] = submitPrep.mock.calls[0] as unknown as [string, ReturnType<typeof buildPrepPayload>];
-    expect(system).toContain('batch-prep list for Sunday');
+    expect(system).toContain('mostly for Sunday');
     expect(system).toBe(prepSystemPrompt('sun'));
     expect(payload.prepDay).toBe('Sunday');
     expect(payload.meals[0]).toMatchObject({ id: 'thu-dinner', day: 'Thursday', slot: 'dinner' });

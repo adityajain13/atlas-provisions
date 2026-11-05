@@ -11,6 +11,7 @@ import {
   type IngestMode,
   type IngestStatus,
 } from '@provisions/shared';
+import { readStoredPlan } from '@provisions/shared';
 import type {
   FlyerItem,
   HistoryPoint,
@@ -73,6 +74,19 @@ export async function insertFlyerItems(
   return items.length;
 }
 
+function flyerFromRow(r: FlyerRow): FlyerItem {
+  return {
+    id: r.id,
+    store: r.store,
+    rawName: r.raw_name,
+    priceText: r.price_text,
+    sizeText: r.size_text ?? undefined,
+    validFrom: r.valid_from,
+    validTo: r.valid_to,
+    source: r.source,
+  };
+}
+
 // Shopping happens on Sunday, so the week is priced from the flyers valid that day.
 /** Flyer items valid on `date` (valid_from <= date <= valid_to). */
 export async function currentFlyerItems(db: D1Database, date: string): Promise<FlyerItem[]> {
@@ -90,6 +104,15 @@ export async function currentFlyerItems(db: D1Database, date: string): Promise<F
     validTo: r.valid_to,
     source: r.source,
   }));
+}
+
+/** Flyer items whose validity overlaps [from, to]: they start on or before to and end on or after from. */
+export async function overlappingFlyerItems(db: D1Database, from: string, to: string): Promise<FlyerItem[]> {
+  const { results } = await db
+    .prepare('SELECT * FROM flyer_items WHERE valid_from <= ? AND valid_to >= ?')
+    .bind(to, from)
+    .all<FlyerRow>();
+  return results.map(flyerFromRow);
 }
 
 export async function priceHistory(db: D1Database, sinceDate: string): Promise<HistoryPoint[]> {
@@ -154,7 +177,7 @@ export async function plansBetween(db: D1Database, fromWeek: string, beforeWeek:
 export async function loadPlan(db: D1Database, weekOf: string): Promise<MealPlan | null> {
   const row = await db.prepare('SELECT data FROM meal_plans WHERE week_of = ?').bind(weekOf).first<{ data: string }>();
   if (!row) return null;
-  return JSON.parse(row.data) as MealPlan;
+  return readStoredPlan(JSON.parse(row.data) as MealPlan) as MealPlan;
 }
 
 /** Insert or replace the plan for its week. */
@@ -525,4 +548,13 @@ export async function insertMissingChecks(
   // Batches stay small, so a long list is never one oversized request.
   for (let i = 0; i < stmts.length; i += 50) await db.batch(stmts.slice(i, i + 50));
   return stmts.length;
+}
+
+// ---- Retention (the Sunday job) ----
+
+/** Deletes plans and ticks for weeks starting before `cutoff`. Returns how many rows went. */
+export async function pruneWeeksBefore(db: D1Database, cutoff: string): Promise<{ plans: number; checks: number }> {
+  const plans = await db.prepare('DELETE FROM meal_plans WHERE week_of < ?').bind(cutoff).run();
+  const checks = await db.prepare('DELETE FROM checks WHERE week_of < ?').bind(cutoff).run();
+  return { plans: plans.meta.changes ?? 0, checks: checks.meta.changes ?? 0 };
 }
