@@ -61,6 +61,7 @@ import {
   secondaryBtn,
 } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL, formatDays } from '../lib/labels';
+import { TimeCapGrid } from '../components/TimeCapGrid';
 import {
   MAX_FLIPP_NAMES,
   addCustomStore,
@@ -616,22 +617,6 @@ function setEating(h: Household, personId: string, day: Day, slot: Slot, value: 
   };
 }
 
-// Busy-night caps in minutes. Tapping a cap moves to the next step; past 45 it clears.
-const TIME_CAP_STEPS: (number | undefined)[] = [undefined, 15, 30, 45];
-
-function nextCap(current: number | undefined): number | undefined {
-  return TIME_CAP_STEPS[(TIME_CAP_STEPS.indexOf(current) + 1) % TIME_CAP_STEPS.length];
-}
-
-function setTimeCap(h: Household, day: Day, slot: Slot, minutes: number | undefined): Household {
-  const dayCaps = { ...(h.timeCaps[day] ?? {}) };
-  if (minutes === undefined) delete dayCaps[slot];
-  else dayCaps[slot] = minutes;
-  const timeCaps = { ...h.timeCaps, [day]: dayCaps };
-  if (Object.keys(dayCaps).length === 0) delete timeCaps[day];
-  return { ...h, timeCaps };
-}
-
 function allOn(): Record<string, Record<string, boolean>> {
   return Object.fromEntries(DAYS.map((d) => [d, Object.fromEntries(SLOTS.map((s) => [s, true]))]));
 }
@@ -913,39 +898,9 @@ function TimeCaps({ h, update }: { h: Household; update: Update }) {
     <div className="mt-8 border-t border-line2 pt-4">
       <p className="text-[14px] text-paper">Time caps</p>
       <p className="mt-1 text-[13px] text-muted">
-        Busy nights: meals in capped slots stay under that many minutes.
+        Busy nights: meals in capped slots stay under that many minutes. Tap a meal, a row or a day to set it.
       </p>
-      <div className="mt-4 grid grid-cols-[76px_repeat(7,minmax(0,1fr))] gap-1.5">
-        <span />
-        {DAYS.map((d) => (
-          <span key={d} className="text-center text-[11px] text-muted" aria-hidden="true">
-            {DAY_SHORT[d]}
-          </span>
-        ))}
-        {SLOTS.map((slot) => (
-          <Fragment key={slot}>
-            <span className="flex items-center text-[12px] text-muted" aria-hidden="true">
-              {SLOT_LABEL[slot]}
-            </span>
-            {DAYS.map((day) => {
-              const cap = h.timeCaps[day]?.[slot];
-              return (
-                <button
-                  key={day}
-                  type="button"
-                  aria-label={`${DAY_LONG[day]} ${SLOT_LABEL[slot].toLowerCase()}, ${cap ? `${cap} minute cap` : 'no cap'}`}
-                  onClick={() => update((prev) => setTimeCap(prev, day, slot, nextCap(prev.timeCaps[day]?.[slot])))}
-                  className={`flex h-11 items-center justify-center rounded-md border text-[12px] ${
-                    cap ? 'border-herb text-herbLight' : 'border-edge text-muted'
-                  }`}
-                >
-                  {cap ? `${cap}m` : '\u2014'}
-                </button>
-              );
-            })}
-          </Fragment>
-        ))}
-      </div>
+      <TimeCapGrid h={h} update={update} />
     </div>
   );
 }

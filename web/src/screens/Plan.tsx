@@ -22,6 +22,7 @@ import WeekSwitcher from '../components/WeekSwitcher';
 import { useConfirm } from '../components/ConfirmDialog';
 import { addBtn, chipBase, ctaBtn, eyebrow, fieldCls, removeIconBtn, secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
+import { formatTimeCap, spokenCap } from '../lib/timeCaps';
 import { existingNote, planTitle, replaceTitle, useViewedWeek, weekOffset } from '../lib/week';
 
 export default function Plan() {
@@ -288,13 +289,15 @@ export default function Plan() {
                       key={key}
                       type="button"
                       onClick={() => cycle(key)}
-                      aria-label={`${dayName}, ${eating}${cap ? `, ${cap} minute cap` : ''}`}
+                      aria-label={`${dayName}, ${eating}${cap ? `, ${spokenCap(cap)}` : ''}`}
                       className={`flex h-11 flex-col items-center justify-center rounded-md border text-[15px] lg:h-12 ${
                         changed ? 'border-herb text-herbLight' : 'border-edge text-paper'
                       }`}
                     >
                       {value === 0 ? <span className="text-[13px] text-muted">Out</span> : value}
-                      {cap !== undefined && <span className="text-[10px] leading-none text-muted">{cap}m</span>}
+                      {cap !== undefined && (
+                        <span className="whitespace-nowrap text-[10px] leading-none text-muted">{formatTimeCap(cap)}</span>
+                      )}
                     </button>
                   );
                 })}
