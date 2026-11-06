@@ -50,8 +50,10 @@ authRoutes.post('/request', async (c) => {
   const prev = await c.env.DB.prepare('SELECT created_at FROM login_codes WHERE email = ?')
     .bind(email)
     .first<{ created_at: number }>();
+  // A code went out moments ago (often from another device): don't send another or error,
+  // just let them enter the code from that email.
   if (prev && Date.now() - prev.created_at < RESEND_AFTER_MS) {
-    return c.json({ error: 'Code just sent — check your inbox' }, 429, NO_STORE);
+    return c.json({ ok: true, alreadySent: true }, 200, NO_STORE);
   }
 
   const { code, linkToken } = await storeLoginCode(c.env, email);

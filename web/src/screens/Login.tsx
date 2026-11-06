@@ -17,6 +17,7 @@ export default function Login() {
   const [step, setStep] = useState<Step>('email');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [alreadySent, setAlreadySent] = useState(false);
   // The worker sends ?expired=1 when a one-tap link is old or already used
   const [error, setError] = useState<string | null>(
     params.get('expired') ? 'That link expired or was already used.' : null,
@@ -26,7 +27,8 @@ export default function Login() {
     setBusy(true);
     setError(null);
     try {
-      await requestLoginCode(email.trim());
+      const r = await requestLoginCode(email.trim());
+      setAlreadySent(r.alreadySent);
       setStep('code');
     } catch (err) {
       setError(navigator.onLine ? errorMessage(err) : "You're offline");
@@ -105,7 +107,9 @@ export default function Login() {
               Sign in
             </button>
             <p className="text-[13px] text-muted">
-              Check your email for a code. It expires in {CODE_MINUTES} minutes.
+              {alreadySent
+                ? 'A code was sent to this email less than a minute ago. Use the code from that email.'
+                : `Check your email for a code. It expires in ${CODE_MINUTES} minutes.`}
             </p>
             <div className="flex items-center justify-between text-[14px]">
               <button type="button" onClick={useDifferentEmail} className="min-h-11 text-muted hover:text-paper">

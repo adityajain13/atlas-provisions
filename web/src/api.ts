@@ -59,14 +59,16 @@ export async function fetchSession(): Promise<{ email: string } | null> {
   return (await ensureOk(res)).json() as Promise<{ email: string }>;
 }
 
-export async function requestLoginCode(email: string): Promise<void> {
-  await ensureOk(
-    await authFetch(`${BASE}/auth/request`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    }),
-  );
+/** `alreadySent` means a code went out moments ago (maybe from another device); use that one. */
+export async function requestLoginCode(email: string): Promise<{ alreadySent: boolean }> {
+  const res = await authFetch(`${BASE}/auth/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  await ensureOk(res);
+  const body = (await res.json().catch(() => ({}))) as { alreadySent?: unknown };
+  return { alreadySent: body.alreadySent === true };
 }
 
 export async function verifyLoginCode(email: string, code: string): Promise<{ email: string }> {
