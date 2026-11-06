@@ -103,6 +103,7 @@ import { tntSyncRoutes } from './tntSyncRoutes';
 import { tntLocations } from './tntSync';
 import { capMessage, recordUsage } from './usage';
 import { householdHasAdmin } from './access';
+import { storeSyncReadings } from './storeSync';
 import { SITE_BUDGET, SITE_PRICE_DAYS, SCHEDULED_SUBREQUEST_LIMIT, cachedLocations, runScheduledSite, runSitePrices, siteStatus, siteTargets, siteWaitMinutes } from './sitePrices';
 import { rankStores, originPoint, type Candidate } from './locationSearch';
 
@@ -664,6 +665,13 @@ app.get(`${API}/site-prices/status`, async (c) => {
   const householdId = c.get('householdId');
   const household = await loadHousehold(c.env.DB, householdId);
   return c.json(await siteStatus(c.env.DB, householdId, household, new Date(), c.req.query('debug') === '1'));
+});
+
+// When each price source last read each store (its flyers, regular prices and T&T prices). The app works out the state.
+app.get(`${API}/stores/sync`, async (c) => {
+  const householdId = c.get('householdId');
+  const household = await loadHousehold(c.env.DB, householdId);
+  return c.json({ stores: await storeSyncReadings(c.env.DB, householdId, household, new Date()) });
 });
 
 // ---- Pantry (milestone 3A) ----

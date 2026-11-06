@@ -30,7 +30,7 @@ export function timeAgo(iso: string, now = Date.now()): string {
 }
 
 /** The Flyers row in Household's Stores section: last update, a refresh button, and the result of the last run. */
-export function FlyerRefresh() {
+export function FlyerRefresh({ onDone }: { onDone?: () => void }) {
   const { track } = useSaveStatus();
   const [status, setStatus] = useState<IngestStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -63,6 +63,7 @@ export function FlyerRefresh() {
     } finally {
       setRunning(false);
       load();
+      onDone?.();
     }
   }
 

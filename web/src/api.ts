@@ -18,6 +18,7 @@ import {
   type Checks,
   type IngestRunSummary,
   type IngestStatus,
+  type StoreSyncMap,
   PantryItemSchema,
   RatingSchema,
   type Household,
@@ -432,6 +433,12 @@ export interface StoreBranchReply {
 
 export async function searchStoreBranches(q: string, near: string): Promise<StoreBranchReply> {
   return json(await authFetch(`${BASE}/site-stores/search?${siteQuery(q, near)}`), (raw) => raw as StoreBranchReply);
+}
+
+/** When each price source last read each of the household's stores (flyers, regular prices, T&T), keyed by store id. */
+export async function getStoreSync(): Promise<StoreSyncMap> {
+  const body = await json(await authFetch(`${BASE}/stores/sync`), (raw) => raw as { stores: StoreSyncMap });
+  return body.stores;
 }
 
 export async function getSitePriceStatus(): Promise<SiteStatus> {

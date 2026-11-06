@@ -34,6 +34,7 @@ export {
 export * from './stores';
 export * from './tnt';
 export * from './geo';
+export * from './storeSync';
 
 export const UNITS = ['g', 'kg', 'ml', 'l', 'each'] as const;
 export type Unit = (typeof UNITS)[number];
