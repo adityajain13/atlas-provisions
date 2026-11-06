@@ -230,6 +230,25 @@ export function buildList(
     });
   }
 
+  // Custom fixed-meal items have no catalogue entry, so no store sells them: they go in the unpriced group as typed.
+  for (const c of fixed.customNeeds ?? []) {
+    items.push({
+      ingredientId: `custom:${c.name.toLowerCase()}|${c.unit}`,
+      name: c.name,
+      label: c.name,
+      category: 'pantry',
+      store: 'Unpriced',
+      packs: 0,
+      packQty: 0,
+      packPrice: 0,
+      total: 0,
+      usedIn: [...new Set(c.usedIn)],
+      needed: Number(c.qty.toFixed(3)),
+      qtyText: `${Number(c.qty.toFixed(2))} ${c.unit}`,
+      custom: true,
+    });
+  }
+
   const storeTotal = new Map<string, number>();
   for (const it of items) storeTotal.set(it.store, (storeTotal.get(it.store) ?? 0) + it.total);
   return items.sort((a, b) => {
@@ -598,7 +617,8 @@ function checkVariety(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
 
 function checkUnpriced(plan: MealPlan): ValidationIssue[] {
   return plan.list
-    .filter((i) => i.store === 'Unpriced' && !i.cheapestElsewhere)
+    // A custom fixed-meal item is not in the catalogue, so its missing price is already warned about with the fixed meal.
+    .filter((i) => i.store === 'Unpriced' && !i.cheapestElsewhere && !i.custom)
     .map((i) => ({
       check: 'unknown-ingredient' as const,
       severity: 'warning' as const,

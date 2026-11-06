@@ -3,20 +3,21 @@
 export const HOUSEHOLD_ROLES = ['owner', 'member'] as const;
 export type HouseholdRole = (typeof HOUSEHOLD_ROLES)[number];
 
-export const USAGE_KINDS = ['plan', 'receipt', 'prep'] as const;
+export const USAGE_KINDS = ['plan', 'receipt', 'prep', 'swap'] as const;
 export type UsageKind = (typeof USAGE_KINDS)[number];
 
 export type UsageCaps = Record<UsageKind, number>;
 export type UsageCounts = Record<UsageKind, number>;
 
 /** Monthly caps when the matching env var is unset or not a whole number. */
-export const DEFAULT_USAGE_CAPS: UsageCaps = { plan: 20, receipt: 30, prep: 30 };
+export const DEFAULT_USAGE_CAPS: UsageCaps = { plan: 20, receipt: 30, prep: 30, swap: 60 };
 
 /** Env var names for the caps, as set on the Worker. */
 export const USAGE_CAP_ENV: Record<UsageKind, string> = {
   plan: 'PLAN_CAP_MONTHLY',
   receipt: 'RECEIPT_CAP_MONTHLY',
   prep: 'PREP_CAP_MONTHLY',
+  swap: 'SWAP_CAP_MONTHLY',
 };
 
 /** A cap from an env var: a whole number of zero or more. Anything else keeps the fallback. */
@@ -30,6 +31,7 @@ export interface UsageCapEnv {
   PLAN_CAP_MONTHLY?: string;
   RECEIPT_CAP_MONTHLY?: string;
   PREP_CAP_MONTHLY?: string;
+  SWAP_CAP_MONTHLY?: string;
 }
 
 export function usageCapsFrom(env: UsageCapEnv): UsageCaps {
@@ -37,6 +39,7 @@ export function usageCapsFrom(env: UsageCapEnv): UsageCaps {
     plan: parseCap(env.PLAN_CAP_MONTHLY, DEFAULT_USAGE_CAPS.plan),
     receipt: parseCap(env.RECEIPT_CAP_MONTHLY, DEFAULT_USAGE_CAPS.receipt),
     prep: parseCap(env.PREP_CAP_MONTHLY, DEFAULT_USAGE_CAPS.prep),
+    swap: parseCap(env.SWAP_CAP_MONTHLY, DEFAULT_USAGE_CAPS.swap),
   };
 }
 
@@ -77,6 +80,7 @@ const USAGE_LABEL: Record<UsageKind, { one: string; many: string }> = {
   plan: { one: 'plan', many: 'plans' },
   receipt: { one: 'receipt scan', many: 'receipt scans' },
   prep: { one: 'prep refresh', many: 'prep refreshes' },
+  swap: { one: 'swap', many: 'swaps' },
 };
 
 /** Shown when a household has used up a monthly cap. */

@@ -1,4 +1,4 @@
-// Monthly usage per household: plans, prep refreshes and receipt scans. Counted after a call succeeds, and
+// Monthly usage per household: plans, prep refreshes, receipt scans and meal swaps. Counted after a call succeeds, and
 // checked before the next one starts. The caps come from env vars (see shared/src/households.ts).
 import {
   USAGE_KINDS,
@@ -13,7 +13,7 @@ export async function readUsage(db: D1Database, householdId: string, month: stri
     .prepare('SELECT kind, count FROM usage WHERE household_id = ? AND month = ?')
     .bind(householdId, month)
     .all<{ kind: UsageKind; count: number }>();
-  const counts: UsageCounts = { plan: 0, receipt: 0, prep: 0 };
+  const counts = Object.fromEntries(USAGE_KINDS.map((kind) => [kind, 0])) as UsageCounts;
   for (const r of results) if (USAGE_KINDS.includes(r.kind)) counts[r.kind] = r.count;
   return counts;
 }

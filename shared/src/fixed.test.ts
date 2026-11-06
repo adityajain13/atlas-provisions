@@ -97,3 +97,55 @@ describe('costFixedMeals', () => {
     expect(r.issues.some((i) => i.message.includes('No enabled store sells'))).toBe(true);
   });
 });
+
+describe('costFixedMeals: ingredients not in the catalogue', () => {
+  const customMeal: FixedMeal = {
+    ...yogurtMeal,
+    ingredients: [{ name: 'Fruit cup', qty: 250, unit: 'g' }],
+  };
+
+  it('returns them as customNeeds, summed over placements and eaters, without a cost', () => {
+    const r = costFixedMeals(placements, household([customMeal]), [], []);
+    expect(r.cost).toBe(0);
+    expect(r.listItems).toEqual([]);
+    expect(r.customNeeds).toEqual([
+      { name: 'Fruit cup', qty: 1000, unit: 'g', usedIn: ['yogurt@thu-breakfast', 'yogurt@fri-breakfast'] },
+    ]);
+  });
+
+  it('sums lowercase name and unit together, and keeps different units apart', () => {
+    const meal: FixedMeal = {
+      ...yogurtMeal,
+      personIds: ['ann'],
+      ingredients: [
+        { name: 'Fruit cup', qty: 100, unit: 'g' },
+        { name: 'fruit CUP', qty: 1, unit: 'kg' },
+        { name: 'fruit cup', qty: 50, unit: 'g' },
+      ],
+    };
+    const one: FixedPlacement[] = [placements[0]!];
+    const r = costFixedMeals(one, household([meal]), [], []);
+    expect(r.customNeeds).toEqual([
+      { name: 'Fruit cup', qty: 300, unit: 'g', usedIn: ['yogurt@thu-breakfast'] },
+      { name: 'fruit CUP', qty: 2, unit: 'kg', usedIn: ['yogurt@thu-breakfast'] },
+    ]);
+  });
+
+  it('warns with the plain-language message and still names the item', () => {
+    const r = costFixedMeals(placements, household([customMeal]), [], []);
+    expect(r.issues).toHaveLength(1);
+    expect(r.issues[0]).toMatchObject({ check: 'unknown-ingredient', severity: 'warning' });
+    expect(r.issues[0]!.message).toBe(`"Fruit cup" isn't in the catalogue, so it's on the list without a price.`);
+  });
+
+  it('does not list a custom item that has no quantity', () => {
+    const meal: FixedMeal = { ...yogurtMeal, ingredients: [{ name: 'Fruit cup', qty: 0, unit: 'g' }] };
+    const r = costFixedMeals(placements, household([meal]), [], []);
+    expect(r.customNeeds).toEqual([]);
+  });
+
+  it('leaves catalogue ingredients out of customNeeds', () => {
+    const r = costFixedMeals(placements, household([yogurtMeal]), [], [matched('greek-yogurt', 'No Frills', 5, 1)]);
+    expect(r.customNeeds).toEqual([]);
+  });
+});

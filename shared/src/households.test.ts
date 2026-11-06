@@ -26,11 +26,12 @@ describe('parseCap', () => {
 
 describe('usageCapsFrom', () => {
   it('reads the three env vars, with defaults of 20, 30 and 30', () => {
-    expect(usageCapsFrom({})).toEqual({ plan: 20, receipt: 30, prep: 30 });
-    expect(usageCapsFrom({ PLAN_CAP_MONTHLY: '5', RECEIPT_CAP_MONTHLY: '0', PREP_CAP_MONTHLY: 'x' })).toEqual({
+    expect(usageCapsFrom({})).toEqual({ plan: 20, receipt: 30, prep: 30, swap: 60 });
+    expect(usageCapsFrom({ PLAN_CAP_MONTHLY: '5', RECEIPT_CAP_MONTHLY: '0', PREP_CAP_MONTHLY: 'x', SWAP_CAP_MONTHLY: '7' })).toEqual({
       plan: 5,
       receipt: 0,
       prep: 30,
+      swap: 7,
     });
   });
 });
@@ -65,21 +66,21 @@ describe('usage messages', () => {
   });
 
   it('lists the month’s use against the caps', () => {
-    expect(usageLine({ plan: 3, receipt: 2, prep: 0 }, { plan: 20, receipt: 30, prep: 30 })).toBe(
-      'This month: 3 of 20 plans · 2 of 30 receipt scans · 0 of 30 prep refreshes',
+    expect(usageLine({ plan: 3, receipt: 2, prep: 0, swap: 0 }, { plan: 20, receipt: 30, prep: 30, swap: 60 })).toBe(
+      'This month: 3 of 20 plans · 2 of 30 receipt scans · 0 of 30 prep refreshes · 0 of 60 swaps',
     );
-    expect(usageLine({ plan: 1, receipt: 0, prep: 0 }, { plan: 1, receipt: 30, prep: 30 })).toBe(
-      'This month: 1 of 1 plan · 0 of 30 receipt scans · 0 of 30 prep refreshes',
+    expect(usageLine({ plan: 1, receipt: 0, prep: 0, swap: 1 }, { plan: 1, receipt: 30, prep: 30, swap: 1 })).toBe(
+      'This month: 1 of 1 plan · 0 of 30 receipt scans · 0 of 30 prep refreshes · 1 of 1 swap',
     );
   });
 
   it('says there are no limits for a household with no caps, with singular labels for one', () => {
-    const caps = { plan: 20, receipt: 30, prep: 30 };
-    expect(usageLine({ plan: 3, receipt: 2, prep: 0 }, caps, true)).toBe(
-      'This month: 3 plans · 2 receipt scans · 0 prep refreshes (no limits)',
+    const caps = { plan: 20, receipt: 30, prep: 30, swap: 60 };
+    expect(usageLine({ plan: 3, receipt: 2, prep: 0, swap: 4 }, caps, true)).toBe(
+      'This month: 3 plans · 2 receipt scans · 0 prep refreshes · 4 swaps (no limits)',
     );
-    expect(usageLine({ plan: 1, receipt: 1, prep: 0 }, caps, true)).toBe(
-      'This month: 1 plan · 1 receipt scan · 0 prep refreshes (no limits)',
+    expect(usageLine({ plan: 1, receipt: 1, prep: 0, swap: 1 }, caps, true)).toBe(
+      'This month: 1 plan · 1 receipt scan · 0 prep refreshes · 1 swap (no limits)',
     );
   });
 });

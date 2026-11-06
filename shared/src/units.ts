@@ -35,6 +35,13 @@ export function nutrientTotals(
   };
 }
 
+/** The unit a household most likely measures an ingredient in when it is picked: grams for kg, ml for l, each for each. */
+export function defaultInputUnit(baseUnit: BaseUnit): InputUnit {
+  if (baseUnit === 'kg') return 'g';
+  if (baseUnit === 'l') return 'ml';
+  return 'each';
+}
+
 export function unitLabel(baseUnit: BaseUnit): string {
   return baseUnit === 'l' ? 'L' : baseUnit;
 }

@@ -13,6 +13,19 @@ import { LIST_CATEGORY_ORDER, planToList, type ViewItem } from '../lib/planView'
 
 type View = { weekOf: string; stores: string[]; items: ViewItem[] };
 
+/**
+ * The list view of a plan. Custom fixed-meal items show the quantity as typed ("750 g"), since the
+ * catalogue unit that planToList would use does not apply to them.
+ */
+function listView(plan: MealPlan): View {
+  const view = planToList(plan);
+  const typed = new Map(plan.list.filter((i) => i.custom && i.qtyText).map((i) => [i.ingredientId, i.qtyText!]));
+  return {
+    ...view,
+    items: view.items.map((item) => (typed.has(item.id) ? { ...item, qty: typed.get(item.id)! } : item)),
+  };
+}
+
 type State =
   | { status: 'loading' }
   | { status: 'plan'; view: View }
@@ -33,7 +46,7 @@ function ListScreen({ weekOf, current, go }: { weekOf: string; current: string; 
     getPlan(weekOf)
       .then((plan: MealPlan | null) => {
         if (!alive) return;
-        setState(plan ? { status: 'plan', view: planToList(plan) } : { status: 'none' });
+        setState(plan ? { status: 'plan', view: listView(plan) } : { status: 'none' });
       })
       .catch((e: unknown) => {
         if (alive) setState({ status: 'error', error: errorMessage(e) });

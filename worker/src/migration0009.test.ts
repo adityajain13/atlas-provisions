@@ -36,8 +36,9 @@ describe('migration 0009 on a fresh database', () => {
     ).toThrow(/UNIQUE|constraint/i);
   });
 
-  it('is the last migration on disk', () => {
-    expect(migrationFiles().at(-1)?.name).toBe(MIGRATION);
+  it('is followed by the swap migration, which is now the last on disk', () => {
+    expect(migrationFiles().at(-2)?.name).toBe(MIGRATION);
+    expect(migrationFiles().at(-1)?.name).toBe('0010_swap.sql');
   });
 });
 

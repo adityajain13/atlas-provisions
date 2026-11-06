@@ -8,6 +8,8 @@ import {
   PantryPatchSchema,
   PlanRequestSchema,
   RatingInputSchema,
+  SwapRequestSchema,
+  readStoredPlan,
   ReceiptCommitSchema,
   defaultExpiry,
   defaultHousehold,
@@ -31,9 +33,11 @@ import {
   type FlyerItem,
   type Household,
   type MatchedItem,
+  type MealPlan,
   type PantryItem,
   type PriceSource,
   type Rating,
+  type UsageKind,
 } from '@provisions/shared';
 import type { ZodError } from 'zod';
 import flyerFixture from '../fixtures/flyer-sample.json';
@@ -54,12 +58,14 @@ import {
   loadPantry,
   loadPantryItem,
   loadPlan,
+  loadPlanData,
   loadRatings,
   plansBetween,
   priceHistory,
   saveHouseholdDocument,
   savePlan,
   setCheck,
+  undoPlan,
   updatePantryItem,
   upsertRating,
   type HistoryInsert,
@@ -68,6 +74,7 @@ import { anthropicClient, anthropicPrepClient } from './planner/claude';
 import { enabledStores, notRunSummary, refreshWaitMinutes, runIngest, runScheduledIngest } from './ingest';
 import { attachPrep } from './planner/prep';
 import { runPlanner } from './planner/run';
+import { runSwap } from './planner/swap';
 import { MAX_RECEIPT_IMAGE_CHARS, parseReceiptImage } from './receipts';
 import { authRoutes, type AuthEnv } from './auth';
 import { requireSession, type SessionVars } from './authMiddleware';
@@ -86,6 +93,7 @@ type Env = AuthEnv & {
   PLAN_CAP_MONTHLY?: string;
   RECEIPT_CAP_MONTHLY?: string;
   PREP_CAP_MONTHLY?: string;
+  SWAP_CAP_MONTHLY?: string;
 };
 
 const API = '/provisions/api';
@@ -186,12 +194,18 @@ async function loadDeals(
 }
 
 /** A 429 for a household that has used up a monthly cap, or null when it may go ahead. */
-async function overCap(env: Env, householdId: string, kind: 'plan' | 'receipt' | 'prep'): Promise<Response | null> {
+async function overCap(env: Env, householdId: string, kind: UsageKind): Promise<Response | null> {
   // An admin's household is never refused. Its calls are still counted in recordUsage.
   if (await householdHasAdmin(env.DB, env, householdId)) return null;
   const today = torontoDate();
   const message = await capMessage(env.DB, householdId, kind, usageCapsFrom(env), usageMonth(today));
   return message ? new Response(message, { status: 429 }) : null;
+}
+
+/** Why a week's plan cannot be changed, or null when it can: a Sunday this week or up to WEEKS_AHEAD weeks ahead. */
+function planWeekError(weekOf: string, now: Date): string | null {
+  if (!isSundayIso(weekOf)) return 'weekOf must be a Sunday (YYYY-MM-DD)';
+  return isPlannableWeek(weekOf, now) ? null : PLAN_WINDOW_MESSAGE;
 }
 
 app.get(`${API}/health`, (c) => c.json({ ok: true }));
@@ -289,7 +303,8 @@ app.post(`${API}/plan`, async (c) => {
         message: "Prices are estimates from the current flyer; next week's flyers aren't out yet.",
       });
     }
-    await savePlan(c.env.DB, householdId, plan);
+    // A new plan that replaces one keeps the old one, so the change can be undone.
+    await savePlan(c.env.DB, householdId, plan, await loadPlanData(c.env.DB, householdId, request.weekOf));
     await recordUsage(c.env.DB, householdId, 'plan', usageMonth(today));
     return c.json(plan);
   } catch (e) {
@@ -325,6 +340,73 @@ app.post(`${API}/plan/:weekOf/prep`, async (c) => {
   } catch (e) {
     return c.text(e instanceof Error ? e.message : 'Prep failed', 500);
   }
+});
+
+// Swaps the chosen meals of a saved week, and the meals linked to them by leftovers. The rest of the week is kept
+// as it is. Counted as a swap; the plan it replaces is kept for undo.
+app.post(`${API}/plan/:weekOf/swap`, async (c) => {
+  const apiKey = c.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return c.text('Planner not configured: add the ANTHROPIC_API_KEY secret.', 503);
+  const weekOf = c.req.param('weekOf');
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const parsed = SwapRequestSchema.safeParse(body);
+  if (!parsed.success) return c.text(formatZod(parsed.error), 400);
+  const weekError = planWeekError(weekOf, new Date());
+  if (weekError) return c.text(weekError, 400);
+
+  const householdId = c.get('householdId');
+  const capped = await overCap(c.env, householdId, 'swap');
+  if (capped) return capped;
+
+  try {
+    const stored = await loadPlanData(c.env.DB, householdId, weekOf);
+    if (stored === null) return c.text('No plan for this week', 404);
+    const saved = readStoredPlan(JSON.parse(stored) as MealPlan) as MealPlan;
+    const known = new Set(saved.meals.map((m) => m.id));
+    const unknown = parsed.data.mealIds.find((id) => !known.has(id));
+    if (unknown !== undefined) return c.text(`Unknown meal: ${unknown}`, 400);
+
+    const household = await loadHousehold(c.env.DB, householdId);
+    const { matched, deals, neverBuy } = await loadDeals(c.env, householdId, weekOf);
+    const earlier = await plansBetween(c.env.DB, householdId, addDaysIso(weekOf, -21), weekOf);
+    const today = torontoDate();
+    const result = await runSwap({
+      household,
+      plan: saved,
+      mealIds: parsed.data.mealIds,
+      note: parsed.data.note,
+      deals,
+      matched,
+      neverBuy,
+      recentDinnerNames: recentDinnerNames(earlier, weekOf),
+      pantry: await loadPantry(c.env.DB, householdId),
+      ratings: ratingSignals(await loadRatings(c.env.DB, householdId), household.people, today),
+      today,
+      client: anthropicClient(apiKey, c.env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
+    });
+    await savePlan(c.env.DB, householdId, result.plan, stored);
+    await recordUsage(c.env.DB, householdId, 'swap', usageMonth(today));
+    return c.json({ ...result.plan, swapped: result.swapped, added: result.added });
+  } catch (e) {
+    return c.text(e instanceof Error ? e.message : 'Swap failed', 500);
+  }
+});
+
+// Undoes the last change to a week's plan (a swap or a new plan): the plan and the one it replaced trade places.
+app.post(`${API}/plan/:weekOf/undo`, async (c) => {
+  const weekOf = c.req.param('weekOf');
+  const weekError = planWeekError(weekOf, new Date());
+  if (weekError) return c.text(weekError, 400);
+  const householdId = c.get('householdId');
+  if (!(await undoPlan(c.env.DB, householdId, weekOf))) return c.text('Nothing to undo for this week', 404);
+  const plan = await loadPlan(c.env.DB, householdId, weekOf);
+  return plan ? c.json(plan) : c.text('No plan for this week', 404);
 });
 
 // ---- Flyer import (milestone 4) ----

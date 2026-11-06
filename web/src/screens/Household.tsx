@@ -1,6 +1,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
   ALLERGEN_PRESETS,
+  matchIngredient,
+  type CatalogIngredient,
+  defaultInputUnit,
   type AccessEntry,
   type AccessView,
   type MeView,
@@ -26,6 +29,7 @@ import {
   type Unit,
   type UsageView,
 } from '@provisions/shared';
+import { searchIngredients } from '../components/IngredientPicker';
 import {
   cancelInvite,
   errorMessage,
@@ -1104,20 +1108,17 @@ function FixedMealFields({ meal, people, update }: { meal: FixedMeal; people: Pe
         <ul className="mt-2 space-y-4">
           {meal.ingredients.map((ing, i) => (
             <li key={i} className="space-y-2">
-              <div className="flex gap-2">
-                <input
-                  className={fieldCls}
-                  placeholder="Ingredient"
-                  aria-label="Ingredient name"
+              <div className="flex items-start gap-2">
+                <IngredientNameField
                   value={ing.name}
-                  maxLength={60}
-                  onChange={(e) => patchIngredient(i, { name: e.target.value })}
+                  onChange={(name) => patchIngredient(i, { name })}
+                  onPick={(picked) => patchIngredient(i, { name: picked.name, unit: defaultInputUnit(picked.baseUnit) })}
                 />
                 <button
                   type="button"
                   aria-label={`Remove ${ing.name || 'ingredient'}`}
                   onClick={() => removeIngredient(i)}
-                  className={removeIconBtn}
+                  className={`${removeIconBtn} mt-[6px] shrink-0`}
                 >
                   &times;
                 </button>
@@ -1158,6 +1159,61 @@ function FixedMealFields({ meal, people, update }: { meal: FixedMeal; people: Pe
       </div>
 
     </>
+  );
+}
+
+/**
+ * A fixed-meal ingredient name. Typing searches the catalogue; picking an entry sets its name. Free text is kept,
+ * and a name that matches nothing is marked "Custom item": it goes on the shopping list without a price.
+ */
+function IngredientNameField({
+  value,
+  onChange,
+  onPick,
+}: {
+  value: string;
+  onChange: (name: string) => void;
+  onPick: (picked: CatalogIngredient) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const matches = searchIngredients(value);
+  const results = focused ? matches : [];
+  // Custom only when the catalogue matches nothing: neither the search nor the costing match.
+  const custom = value.trim() !== '' && matches.length === 0 && matchIngredient(value) === null;
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-2">
+        <input
+          className={fieldCls}
+          placeholder="Ingredient"
+          aria-label="Ingredient name"
+          value={value}
+          maxLength={60}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {custom && <span className="shrink-0 text-[12px] text-muted">Custom item</span>}
+      </div>
+      {results.length > 0 && (
+        <ul className="mt-2 space-y-1.5">
+          {results.map((i) => (
+            <li key={i.id}>
+              <button
+                type="button"
+                // Keeps focus in the field, so the list stays open until the pick lands.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onPick(i)}
+                className="flex h-11 w-full items-center justify-between rounded-md border border-edge px-3 text-left"
+              >
+                <span className="text-[15px] text-paper">{i.name}</span>
+                <span className={eyebrow}>{i.category}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

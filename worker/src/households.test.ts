@@ -438,7 +438,7 @@ describe('monthly caps', () => {
 
     const usage = (await (await get('/usage', cookies[OWNER]!, env)).json()) as { month: string; caps: object; counts: object; resetsOn: string };
     expect(usage).toMatchObject({ month: '2026-11', resetsOn: '2026-12-01', counts: { plan: 1, receipt: 0, prep: 0 } });
-    expect(usage.caps).toEqual({ plan: 1, receipt: 30, prep: 30 });
+    expect(usage.caps).toEqual({ plan: 1, receipt: 30, prep: 30, swap: 60 });
   });
 
   it('refuses receipt scans and prep refreshes at a cap of zero, before calling Claude', async () => {
@@ -459,7 +459,7 @@ describe('monthly caps', () => {
   it('uses the default caps when the cap variables are not numbers', async () => {
     const { env, cookies } = await setup([OWNER], { PLAN_CAP_MONTHLY: 'twenty', RECEIPT_CAP_MONTHLY: '-1' });
     const usage = (await (await get('/usage', cookies[OWNER]!, env)).json()) as { caps: object };
-    expect(usage.caps).toEqual({ plan: 20, receipt: 30, prep: 30 });
+    expect(usage.caps).toEqual({ plan: 20, receipt: 30, prep: 30, swap: 60 });
   });
 
   it('never refuses a household with an admin in it, still counts its calls, and says it has no limits', async () => {
