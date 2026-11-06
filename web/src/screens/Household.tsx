@@ -2939,10 +2939,8 @@ export function CuisinesSection({ h, update }: { h: Household; update: Update })
   function set(key: string, level: CuisineLevel) {
     update((prev) => ({ ...prev, cuisines: { ...prev.cuisines, [key]: level } }));
   }
-  // Regions with an 'often' cuisine start open; the rest start closed.
-  const [openGroups, setOpenGroups] = useState<Set<string>>(
-    () => new Set(CUISINE_GROUPS.filter((g) => CUISINES.some((c) => c.group === g && cuisineLevel(h.cuisines, c.key) === 'often'))),
-  );
+  // Every region starts closed; its summary shows what is set.
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
 
   function toggleOpen(group: string) {
     setOpenGroups((prev) => {
@@ -3029,9 +3027,9 @@ export function SpiceRackSection({ h, update }: { h: Household; update: Update }
   const kept = new Set(h.onHand);
   const pantryIds = new Set(CUISINES.flatMap((c) => c.pantry));
   const others = h.onHand.filter((id) => !pantryIds.has(id) && INGREDIENT_BY_ID[id]);
-  // Cuisines the household eats often open first; the rest start closed.
+  // Cuisines the household eats often are listed first. All start closed.
   const order = [...CUISINES].sort((a, b) => LEVEL_RANK[cuisineLevel(h.cuisines, a.key)] - LEVEL_RANK[cuisineLevel(h.cuisines, b.key)]);
-  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set(CUISINES.filter((c) => cuisineLevel(h.cuisines, c.key) === 'often').map((c) => c.key)));
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
 
   function toggleOpen(key: string) {
     setOpenKeys((prev) => {
