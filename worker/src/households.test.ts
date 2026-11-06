@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, type Household, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, PARTNER, call, count, householdOf, householdWith, json, rows, setup, signIn, withCookie } from './testing/app';
+import { toolReply } from './testing/sse';
 
 const H = API;
 const FRIEND = 'friend@example.com';
@@ -26,9 +27,7 @@ const claudeReply = () => {
   const meals = DAYS.flatMap((d) =>
     SLOTS.map((s) => ({ id: `${d}-${s}`, slotId: `${d}-${s}`, name: `${d} ${s}`, ingredients: [], activeMinutes: 10, steps: [], tags: [] })),
   );
-  return new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_plan', input: { meals, notes: 'x' } }] }), {
-    status: 200,
-  });
+  return toolReply({ meals, notes: 'x' });
 };
 
 const get = (path: string, cookie: string, env: unknown) => call(`${H}${path}`, { headers: { cookie } }, env);

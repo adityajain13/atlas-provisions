@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, type Household, type ItemRule, type MealPlan, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, call, householdOf, householdWith, json, setup } from './testing/app';
+import { toolReply } from './testing/sse';
 
 const NOW = '2026-11-05T17:00:00Z';
 const WEEK = '2026-11-15'; // two weeks ahead, so the window allows it
@@ -46,9 +47,7 @@ function stubClaude() {
     'fetch',
     vi.fn(
       async () =>
-        new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_plan', input: claudeInput() }] }), {
-          status: 200,
-        }),
+        toolReply(claudeInput()),
     ),
   );
 }

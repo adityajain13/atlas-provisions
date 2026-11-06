@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, type Household, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, call, householdWith, json, setup } from './testing/app';
+import { sseResponse, toolReply } from './testing/sse';
 
 const H = API;
 const KEYED = { ANTHROPIC_API_KEY: 'test-key' };
@@ -32,9 +33,7 @@ function stubClaude(input: unknown) {
     'fetch',
     vi.fn(
       async () =>
-        new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_plan', input }] }), {
-          status: 200,
-        }),
+        toolReply(input),
     ),
   );
 }
@@ -96,6 +95,22 @@ describe('POST /plan with x-ndjson', () => {
     const last = lines[lines.length - 1]!;
     expect(last).toMatchObject({ stage: 'error', status: 500 });
     expect(String(last.message)).toContain('Claude API returned 500');
+  });
+
+  it('ends with the error message when Claude sends an error event mid-reply', async () => {
+    const { raw, env, cookies } = await setup([OWNER], KEYED);
+    await householdWith(raw, env, cookies[OWNER]!, OWNER, household());
+    const events = [
+      { event: 'message_start', data: { type: 'message_start', message: {} } },
+      { event: 'error', data: { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } } },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse(events)));
+
+    const res = await call(`${H}/plan`, streamed(REQUEST, cookies[OWNER]!), env);
+
+    const lines = await linesOf(res);
+    expect(lines[lines.length - 1]).toMatchObject({ stage: 'error', status: 500 });
+    expect(String(lines[lines.length - 1]!.message)).toBe('Claude API stream failed: overloaded_error: Overloaded');
   });
 
   it('keeps the plain JSON response when the header is absent, with the timings in the plan', async () => {

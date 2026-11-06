@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, type Household, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, call, householdWith, json, setup } from './testing/app';
+import { toolReply } from './testing/sse';
 
 const H = API;
 const NOW = '2026-11-05T17:00:00Z'; // Thursday; the current plan week starts Sunday 2026-11-01.
@@ -37,9 +38,7 @@ function claudeInput() {
 function stubClaude() {
   const fetchMock = vi.fn(
     async (_url: string, _init: RequestInit) =>
-      new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_plan', input: claudeInput() }] }), {
-        status: 200,
-      }),
+      toolReply(claudeInput()),
   );
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;

@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, expandWeek, type Household, type MealPlan, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, PARTNER, call, householdWith, json, rows, setup } from './testing/app';
+import { toolReply } from './testing/sse';
 
 const H = API;
 const KEYED = { ANTHROPIC_API_KEY: 'test-key' };
@@ -65,7 +66,7 @@ function insertPlan(raw: Parameters<typeof rows>[0], hh: string, plan: MealPlan)
 
 /** One submit_plan reply as the Messages API sends it. */
 const claudeReply = (input: unknown) =>
-  new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_plan', input }] }), { status: 200 });
+  toolReply(input);
 
 /** The parts of the payload the Worker sent in a call that these tests read. */
 interface Sent {

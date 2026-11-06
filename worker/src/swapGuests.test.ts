@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, expandWeek, type Household, type MealPlan, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, call, householdWith, json, rows, setup } from './testing/app';
+import { toolReply } from './testing/sse';
 
 const WEEK = '2026-11-08';
 const KEYED = { ANTHROPIC_API_KEY: 'test-key' };
@@ -44,7 +45,7 @@ function storedPlan(doc: Household): MealPlan {
 }
 
 const claudeReply = (input: unknown) =>
-  new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_plan', input }] }), { status: 200 });
+  toolReply(input);
 
 interface Sent {
   slots: { id: string; eaters: string[] }[];
