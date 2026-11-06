@@ -74,6 +74,29 @@ describe('site store locations', () => {
     expect(got.status).toBe(409);
     expect(await got.text()).toMatch(/PC id sign-in/);
   });
+
+  it('answers 200 with unsupported, and the site status, when the chain has no listed locations', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ message: 'not available' }, 400)));
+    const { env, cookies } = await setup();
+    const got = await call(`${API}/site-stores/tandt/locations?q=mississauga`, withCookie(cookies[OWNER]!), env);
+    expect(got.status).toBe(200);
+    expect(await got.json()).toEqual({ locations: [], unsupported: true, status: 400 });
+  });
+
+  it('finds the T&T location by postal code, with or without the space', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        reply({ pickupLocations: [{ storeId: '1234', name: 'T&T Mississauga', address: { line1: '3600 Hurontario St', town: 'Mississauga', postalCode: 'L5A3V7' } }] }),
+      ),
+    );
+    const { env, cookies } = await setup();
+    const cookie = cookies[OWNER]!;
+    const spaced = (await (await call(`${API}/site-stores/tandt/locations?q=L5A%203V7`, withCookie(cookie), env)).json()) as { locations: unknown[] };
+    expect(spaced).toEqual({ locations: [{ storeId: '1234', label: 'T&T Supermarket · 3600 Hurontario St, Mississauga', postalCode: 'L5A3V7' }] });
+    const plain = (await (await call(`${API}/site-stores/tandt/locations?q=l5a3v7`, withCookie(cookie), env)).json()) as { locations: unknown[] };
+    expect(plain.locations).toHaveLength(1);
+  });
 });
 
 describe('regular price refresh and status', () => {

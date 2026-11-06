@@ -191,13 +191,13 @@ describe('food forms, dishes and storage in the planner payload', () => {
       people: [{ id: 'ann', name: 'Ann', dietTags: [], allergies: [] }],
       avoidDishes: ['slaw'],
       forms: { fish: ['fresh', 'frozen'] },
-      storage: { containers: 'few', freezer: false, zipBags: true },
+      storage: { containers: 'few', freezer: false, zipBags: true, freezerBags: true },
     };
     const payload = buildPayload({ household, request, cells: expandWeek(household, request).cells, fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
     expect(payload.avoidDishes).toEqual(['slaw']);
     expect(payload.formsAllowed.fish).toEqual(['fresh', 'frozen']);
-    expect(payload.formsAllowed.beans).toEqual(['canned', 'dry']);
-    expect(payload.storage).toEqual({ containers: 'few', freezer: false, zipBags: true });
+    expect(payload.formsAllowed.beans).toEqual(['dry', 'canned']);
+    expect(payload.storage).toEqual({ containers: 'few', freezer: false, zipBags: true, freezerBags: true });
   });
 
   it('gives a household saved before these fields an empty avoid list, every form and the default storage', () => {
@@ -205,7 +205,7 @@ describe('food forms, dishes and storage in the planner payload', () => {
     const payload = buildPayload({ household, request, cells: [], fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
     expect(payload.avoidDishes).toEqual([]);
     expect(payload.formsAllowed.fish).toEqual(['fresh', 'frozen', 'canned']);
-    expect(payload.storage).toEqual({ containers: 'some', freezer: true, zipBags: true });
+    expect(payload.storage).toEqual({ containers: 'some', freezer: true, zipBags: true, freezerBags: true });
   });
 
   it('tells the planner to avoid dishes by variant, and to respect the forms kept', () => {
@@ -217,5 +217,27 @@ describe('food forms, dishes and storage in the planner payload', () => {
     const out = buildAvailable([deal('canned-tuna', 0.5), deal('chicken-thigh-boneless', 0.5)], noFixed);
     expect(out.find((a) => a.id === 'canned-tuna')?.form).toBe('canned');
     expect(out.find((a) => a.id === 'chicken-thigh-boneless')).not.toHaveProperty('form');
+  });
+});
+
+describe('ingredient changes and variety in the planner prompt', () => {
+  const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false };
+
+  it('sends the skipped ingredients and the preferred swaps, and an empty pair when there are none', () => {
+    const household = defaultHousehold();
+    const cells = expandWeek(household, request).cells;
+    const none = buildPayload({ household, request, cells, fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
+    expect(none.ingredientFeedback).toEqual({ oftenSkipped: [], preferredSwaps: [] });
+
+    const feedback = { oftenSkipped: ['cilantro'], preferredSwaps: [{ from: 'sour-cream', to: 'Greek yogurt', toId: 'greek-yogurt' }] };
+    const some = buildPayload({ household, request, cells, fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [], feedback });
+    expect(some.ingredientFeedback).toEqual(feedback);
+  });
+
+  it('tells the model to avoid the often-skipped ingredients, use the swaps, and keep each non-staple to three meals', () => {
+    expect(SYSTEM_PROMPT).toContain('Avoid ingredients in `ingredientFeedback.oftenSkipped`');
+    expect(SYSTEM_PROMPT).toContain('`ingredientFeedback.preferredSwaps`');
+    expect(SYSTEM_PROMPT).toContain('use a non-staple ingredient in at most 3 meals a week');
+    expect(SYSTEM_PROMPT).toContain('pick a different vegetable or accept some left over');
   });
 });

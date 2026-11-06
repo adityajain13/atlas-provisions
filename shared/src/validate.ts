@@ -12,6 +12,7 @@ import type { StorePreference } from './stores';
 import { avoidedDish } from './dishes';
 import { allowedForms, FORM_GROUP_LABEL, FORM_LABEL, formGroupOf } from './forms';
 import { nutrientTotals, round2, unitLabel } from './units';
+import { MAX_MEALS_PER_INGREDIENT, repeatedMeals } from './repeats';
 
 const MACRO_DAYS = 7;
 const MACRO_FLOOR = 0.85;
@@ -863,6 +864,24 @@ function checkPins(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   return out;
 }
 
+/**
+ * A non-staple ingredient in more than MAX_MEALS_PER_INGREDIENT meals of the week. Each meal past the limit is an error,
+ * so the repair rewrites those meals and the first ones keep the ingredient.
+ */
+function checkRepetition(plan: MealPlan): ValidationIssue[] {
+  const out: ValidationIssue[] = [];
+  for (const [id, meals] of repeatedMeals(plan.meals)) {
+    for (const meal of meals) {
+      out.push({
+        check: 'repetition',
+        severity: 'error',
+        message: `"${meal.name}" is one of more than ${MAX_MEALS_PER_INGREDIENT} meals this week using ${ingName(id)}. Use a different ingredient here, or let the rest of the pack go to waste.`,
+      });
+    }
+  }
+  return out;
+}
+
 /** Every check on a plan. Errors make the planner retry. Warnings are shown to the user. */
 export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   return [
@@ -883,5 +902,6 @@ export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[
     ...checkPins(plan, ctx),
     ...checkUseItUp(plan, ctx),
     ...checkNeverAgain(plan, ctx),
+    ...checkRepetition(plan),
   ];
 }

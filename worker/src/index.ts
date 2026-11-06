@@ -41,6 +41,7 @@ import {
   type UsageKind,
   estimateOffers,
   isSiteBanner,
+  normalizePostalCode,
   siteOffers,
   type Offer,
 } from '@provisions/shared';
@@ -87,9 +88,11 @@ import { authRoutes, type AuthEnv } from './auth';
 import { requireSession, type SessionVars } from './authMiddleware';
 import { householdRoutes } from './householdRoutes';
 import { accessRoutes } from './accessRoutes';
+import { feedbackRoutes, planFeedback } from './feedbackRoutes';
 import { capMessage, recordUsage } from './usage';
 import { householdHasAdmin } from './access';
-import { SITE_BUDGET, SITE_PRICE_DAYS, SCHEDULED_SUBREQUEST_LIMIT, cachedLocations, matchLocations, runScheduledSite, runSitePrices, siteStatus, siteTargets, siteWaitMinutes } from './sitePrices';
+import { SITE_BUDGET, SITE_PRICE_DAYS, SCHEDULED_SUBREQUEST_LIMIT, cachedLocations, runScheduledSite, runSitePrices, siteStatus, siteTargets, siteWaitMinutes } from './sitePrices';
+import { searchLocations } from './pcexpress';
 
 type Env = AuthEnv & {
   ASSETS: Fetcher;
@@ -116,12 +119,17 @@ app.use(`${API}/*`, requireSession);
 app.route(`${API}/auth`, authRoutes);
 app.route(API, householdRoutes);
 app.route(API, accessRoutes);
+app.route(API, feedbackRoutes);
 
 function formatZod(error: ZodError): string {
   return error.issues
     .map((i) => `${i.path.join('.') || 'body'}: ${i.message}`)
     .join('; ');
 }
+
+/** The household's postal code as flyer rows and Flipp searches store it: no space. Undefined when there is none. */
+const flyerPostal = (household: Household): string | undefined =>
+  household.postalCode ? (normalizePostalCode(household.postalCode) ?? undefined) : undefined;
 
 /**
  * The flyer items that price a week starting on `weekOf`, for a postal code. The flyers valid that Sunday come
@@ -163,7 +171,7 @@ async function loadDeals(
   const household = await loadHousehold(env.DB, householdId);
   const { items: flyerItems, source: priceSource } = await flyerItemsFor(
     env.DB,
-    household.postalCode,
+    flyerPostal(household),
     date,
     torontoDate(),
   );
@@ -280,6 +288,7 @@ async function planWeek(env: Env, apiKey: string, householdId: string, request: 
   const today = torontoDate();
   const pantry = await loadPantry(env.DB, householdId);
   const ratings = ratingSignals(await loadRatings(env.DB, householdId), household.people, today);
+  const feedback = await planFeedback(env.DB, householdId, today);
   // One Claude call makes the meals and, when a prep day is set, the prep list.
   const plan = await runPlanner({
     household,
@@ -290,6 +299,7 @@ async function planWeek(env: Env, apiKey: string, householdId: string, request: 
     recentDinnerNames: recentDinnerNames(earlier, request.weekOf),
     pantry,
     ratings,
+    feedback,
     today,
     estimates,
     client: anthropicClient(apiKey, env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
@@ -344,7 +354,7 @@ app.post(`${API}/dev/load-fixtures`, async (c) => {
   if (c.env.DEV !== '1') return c.json({ error: 'Not found' }, 404);
 
   const household = await loadHousehold(c.env.DB, c.get('householdId'));
-  const flyerCount = await insertFlyerItems(c.env.DB, household.postalCode ?? '', flyerFixture as FlyerItem[]);
+  const flyerCount = await insertFlyerItems(c.env.DB, flyerPostal(household) ?? '', flyerFixture as FlyerItem[]);
   const historyCount = await insertPriceHistory(c.env.DB, historyFixture as HistoryInsert[]);
   return c.json({ flyerItems: flyerCount, priceHistory: historyCount });
 });
@@ -471,6 +481,7 @@ app.post(`${API}/plan/:weekOf/swap`, async (c) => {
       recentDinnerNames: recentDinnerNames(earlier, weekOf),
       pantry: await loadPantry(c.env.DB, householdId),
       ratings: ratingSignals(await loadRatings(c.env.DB, householdId), household.people, today),
+      feedback: await planFeedback(c.env.DB, householdId, today),
       today,
       client: anthropicClient(apiKey, c.env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
       onProgress: (p: PlanProgress) => emit(p),
@@ -512,7 +523,7 @@ app.post(`${API}/plan/:weekOf/undo`, async (c) => {
 // minutes per postal code, since the flyers for a postal code do not change that often.
 app.post(`${API}/flyers/refresh`, async (c) => {
   const household = await loadHousehold(c.env.DB, c.get('householdId'));
-  const postal = household.postalCode;
+  const postal = flyerPostal(household);
   if (!postal) return c.json(notRunSummary('Add a postal code in Household first.'));
   const stores = enabledStores(household);
   if (stores.length === 0) return c.json(notRunSummary('Turn on at least one store in Household first.'));
@@ -534,7 +545,7 @@ app.post(`${API}/flyers/refresh`, async (c) => {
 // The latest run and the prices valid today, for the household's postal code. ?debug=1 adds the run's sample and flyers.
 app.get(`${API}/flyers/status`, async (c) => {
   const household = await loadHousehold(c.env.DB, c.get('householdId'));
-  const postal = household.postalCode;
+  const postal = flyerPostal(household);
   if (!postal) return c.json({ lastRun: null, currentItems: [] });
   const lastRun = await latestIngestRun(c.env.DB, postal, { debug: c.req.query('debug') === '1' });
   const currentItems = await flyerCountsForDate(c.env.DB, postal, torontoDate());
@@ -543,19 +554,20 @@ app.get(`${API}/flyers/status`, async (c) => {
 
 // ---- Regular prices from the Loblaw-family sites (migration 0012) ----
 
-const SITE_ERROR_STATUS = { auth: 409, blocked: 503, 'not-found': 502, network: 502, shape: 502 } as const;
 const SITE_AUTH_MESSAGE = "Loblaw's site needs a PC id sign-in for store search, so store locations aren't available yet.";
 
-// The store locations of a Loblaw-family banner that match the search text. Cached for a week.
+// The store locations of a Loblaw-family banner that match the search text. Cached for a week. When the site lists no
+// locations for the banner (or refuses the listing), the answer is 200 with unsupported set, and the picker offers a
+// store number instead.
 app.get(`${API}/site-stores/:banner/locations`, async (c) => {
   const banner = c.req.param('banner');
   if (!isSiteBanner(banner)) return c.text('Unknown store chain', 400);
   const got = await cachedLocations(c.env.DB, banner, fetch, new Date());
   if (!got.ok) {
-    const message = got.error.kind === 'auth' ? SITE_AUTH_MESSAGE : `Could not load store locations: ${got.error.message}`;
-    return c.text(message, SITE_ERROR_STATUS[got.error.kind]);
+    if (got.error.kind === 'auth') return c.text(SITE_AUTH_MESSAGE, 409);
+    return c.json({ locations: [], unsupported: true, status: got.error.status ?? null });
   }
-  return c.json({ locations: matchLocations(got.value, banner, c.req.query('q') ?? '') });
+  return c.json({ locations: searchLocations(got.value, banner, c.req.query('q') ?? '') });
 });
 
 // Reads the regular prices of the household's stores now. Limited to once per 10 minutes per household.

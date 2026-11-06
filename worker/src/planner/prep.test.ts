@@ -150,7 +150,7 @@ describe('anthropicPrepClient', () => {
 });
 
 describe('storage in the prep prompt', () => {
-  const storage = { containers: 'none' as const, freezer: false, zipBags: false };
+  const storage = { containers: 'none' as const, freezer: false, zipBags: false, freezerBags: false };
 
   it('sends the household storage in the payload, and not when none is given', () => {
     expect(buildPrepPayload(plan(), 'sun', storage)).toMatchObject({ storage });
@@ -171,5 +171,6 @@ describe('storage in the prep prompt', () => {
     expect(system).toContain('containers "few"');
     expect(system).toContain('Use the freezer only when freezer is true');
     expect(system).toContain('zipBags is true');
+    expect(system).toContain('freezerBags and freezer are both true');
   });
 });

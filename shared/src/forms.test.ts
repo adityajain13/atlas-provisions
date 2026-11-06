@@ -10,7 +10,7 @@ describe('form groups', () => {
   it('builds the five groups from the catalogue tags, with the forms each has', () => {
     expect(FORM_GROUPS.map((g) => g.key)).toEqual(['fish', 'beans', 'vegetables', 'tomatoes', 'fruit']);
     expect(group('fish').forms).toEqual(['fresh', 'frozen', 'canned']);
-    expect(group('beans').forms).toEqual(['canned', 'dry']);
+    expect(group('beans').forms).toEqual(['dry', 'canned']);
     expect(group('vegetables').forms).toEqual(['fresh', 'frozen', 'canned']);
     expect(group('tomatoes').forms).toEqual(['fresh', 'canned']);
     expect(group('fruit').forms).toEqual(['fresh', 'frozen']);
@@ -79,15 +79,15 @@ describe('household schema for forms, storage and dishes', () => {
       ...defaultHousehold(),
       forms: { fish: ['frozen'] },
       avoidDishes: ['slaw'],
-      storage: { containers: 'few', freezer: false, zipBags: false },
+      storage: { containers: 'few', freezer: false, zipBags: false, freezerBags: false },
     });
     expect(parsed.forms.fish).toEqual(['frozen']);
     expect(parsed.avoidDishes).toEqual(['slaw']);
-    expect(parsed.storage).toEqual({ containers: 'few', freezer: false, zipBags: false });
+    expect(parsed.storage).toEqual({ containers: 'few', freezer: false, zipBags: false, freezerBags: false });
   });
 
   it('rejects a storage level that is not one of the four', () => {
-    const bad = { ...defaultHousehold(), storage: { containers: 'lots', freezer: true, zipBags: true } };
+    const bad = { ...defaultHousehold(), storage: { containers: 'lots', freezer: true, zipBags: true, freezerBags: true } };
     expect(HouseholdSchema.safeParse(bad).success).toBe(false);
   });
 

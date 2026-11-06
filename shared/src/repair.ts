@@ -8,6 +8,7 @@ import { avoidedDish } from './dishes';
 import { nameHasWord } from './itemRules';
 import type { MealPlan, PlannedMeal, SlotCell, ValidationIssue } from './plan';
 import { swapClosure } from './swap';
+import { repeatedMeals } from './repeats';
 import { isVegetable, type ValidateContext } from './validate';
 
 export interface Repair {
@@ -28,6 +29,7 @@ const REPAIRABLE = new Set([
   'variety',
   'form',
   'avoid-dish',
+  'repetition',
 ]);
 
 const cellOf = (c: { day: string; slot: string }) => `${c.day}-${c.slot}`;
@@ -100,6 +102,10 @@ function attribute(check: string, plan: MealPlan, ctx: ValidateContext): { meals
       break;
     case 'avoid-dish':
       for (const m of plan.meals) if (avoidedDish(m.name, ctx.avoidDishes) !== undefined) meals.push(m.id);
+      break;
+    case 'repetition':
+      // Only the meals past the third use of an ingredient: the first ones keep it.
+      for (const later of repeatedMeals(plan.meals).values()) for (const m of later) meals.push(m.id);
       break;
     case 'busy':
       for (const m of plan.meals) {

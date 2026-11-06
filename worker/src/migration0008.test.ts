@@ -168,12 +168,13 @@ describe('migration 0008 on an empty database', () => {
     ).toThrow(/UNIQUE|constraint/i);
   });
 
-  it('is followed by the access, swap, price and site price migrations, which are now the last on disk', () => {
+  it('is followed by the access, swap, price, site price and ingredient feedback migrations, which are now the last on disk', () => {
     const names = migrationFiles().map((f) => f.name);
     expect(names[names.indexOf(MIGRATION) + 1]).toBe('0009_access.sql');
     expect(names[names.indexOf(MIGRATION) + 2]).toBe('0010_swap.sql');
     expect(names[names.indexOf(MIGRATION) + 3]).toBe('0011_price_household.sql');
     expect(names[names.indexOf(MIGRATION) + 4]).toBe('0012_site_prices.sql');
-    expect(migrationFiles().at(-1)?.name).toBe('0012_site_prices.sql');
+    expect(names[names.indexOf(MIGRATION) + 5]).toBe('0013_ingredient_feedback.sql');
+    expect(migrationFiles().at(-1)?.name).toBe('0013_ingredient_feedback.sql');
   });
 });
