@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import {
   CheckBulkSchema,
   CheckPutSchema,
@@ -7,6 +7,7 @@ import {
   PantryCreateSchema,
   PantryPatchSchema,
   PlanRequestSchema,
+  type PlanRequest,
   RatingInputSchema,
   SwapRequestSchema,
   readStoredPlan,
@@ -73,7 +74,7 @@ import {
 import { anthropicClient, anthropicPrepClient } from './planner/claude';
 import { enabledStores, notRunSummary, refreshWaitMinutes, runIngest, runScheduledIngest } from './ingest';
 import { attachPrep } from './planner/prep';
-import { runPlanner } from './planner/run';
+import { runPlanner, type PlanProgress } from './planner/run';
 import { runSwap } from './planner/swap';
 import { MAX_RECEIPT_IMAGE_CHARS, parseReceiptImage } from './receipts';
 import { authRoutes, type AuthEnv } from './auth';
@@ -208,6 +209,84 @@ function planWeekError(weekOf: string, now: Date): string | null {
   return isPlannableWeek(weekOf, now) ? null : PLAN_WINDOW_MESSAGE;
 }
 
+/** A progress or result event, written to the response as one JSON line. */
+type Emit = (event: object) => void;
+const noEmit: Emit = () => {};
+
+/** The client asked for progress lines (`Accept: application/x-ndjson`). Otherwise the response is one JSON document. */
+function wantsNdjson(c: Context): boolean {
+  return (c.req.header('accept') ?? '').includes('application/x-ndjson');
+}
+
+/**
+ * A streamed response of JSON lines. `work` emits progress as it goes and returns the final event, which is written
+ * last. A failure is written as an error event with status 500, since the HTTP status is already sent.
+ */
+function ndjson(c: Context, work: (emit: Emit) => Promise<object>): Response {
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const emit: Emit = (event) => {
+    void writer.write(encoder.encode(`${JSON.stringify(event)}\n`)).catch(() => {});
+  };
+  const finished = work(emit)
+    .then((last) => emit(last))
+    .catch((e: unknown) => emit({ stage: 'error', status: 500, message: e instanceof Error ? e.message : 'Planner failed' }))
+    .finally(() => {
+      void writer.close().catch(() => {});
+    });
+  // Keeps the Worker alive until the stream has finished. Outside a Worker there is no execution context.
+  try {
+    c.executionCtx.waitUntil(finished);
+  } catch {
+    // Not running in a Worker (tests call the app directly).
+  }
+  return new Response(readable, {
+    headers: { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store' },
+  });
+}
+
+/**
+ * Plans a week and saves it. Progress goes to `emit` as the planner works, and the saved plan is returned. Shared by
+ * the JSON and the streamed responses of POST /plan.
+ */
+async function planWeek(env: Env, apiKey: string, householdId: string, request: PlanRequest, emit: Emit): Promise<MealPlan> {
+  const { household, matched, deals, neverBuy, priceSource } = await loadDeals(env, householdId, request.weekOf);
+  // Plans starting up to 21 days before the week can hold dinners in the 14-day window.
+  const earlier = await plansBetween(env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf);
+  const today = torontoDate();
+  const pantry = await loadPantry(env.DB, householdId);
+  const ratings = ratingSignals(await loadRatings(env.DB, householdId), household.people, today);
+  // One Claude call makes the meals and, when a prep day is set, the prep list.
+  const plan = await runPlanner({
+    household,
+    request,
+    deals,
+    matched,
+    neverBuy,
+    recentDinnerNames: recentDinnerNames(earlier, request.weekOf),
+    pantry,
+    ratings,
+    today,
+    client: anthropicClient(apiKey, env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
+    onProgress: (p: PlanProgress) => emit(p),
+  });
+  plan.priceSource = priceSource;
+  // Next week's flyers are often not out yet; the plan says its prices are estimates.
+  if (priceSource === 'current' && request.weekOf > planWeekOf(new Date())) {
+    plan.issues.push({
+      check: 'prices',
+      severity: 'warning',
+      message: "Prices are estimates from the current flyer; next week's flyers aren't out yet.",
+    });
+  }
+  // A new plan that replaces one keeps the old one, so the change can be undone.
+  emit({ stage: 'saving' });
+  await savePlan(env.DB, householdId, plan, await loadPlanData(env.DB, householdId, request.weekOf));
+  await recordUsage(env.DB, householdId, 'plan', usageMonth(today));
+  return plan;
+}
+
 app.get(`${API}/health`, (c) => c.json({ ok: true }));
 
 app.get(`${API}/household`, async (c) => {
@@ -274,39 +353,11 @@ app.post(`${API}/plan`, async (c) => {
   const capped = await overCap(c.env, householdId, 'plan');
   if (capped) return capped;
 
+  if (wantsNdjson(c)) {
+    return ndjson(c, async (emit) => ({ stage: 'done', plan: await planWeek(c.env, apiKey, householdId, request, emit) }));
+  }
   try {
-    const { household, matched, deals, neverBuy, priceSource } = await loadDeals(c.env, householdId, request.weekOf);
-    // Plans starting up to 21 days before the week can hold dinners in the 14-day window.
-    const earlier = await plansBetween(c.env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf);
-    const today = torontoDate();
-    const pantry = await loadPantry(c.env.DB, householdId);
-    const ratings = ratingSignals(await loadRatings(c.env.DB, householdId), household.people, today);
-    // One Claude call makes the meals and, when a prep day is set, the prep list.
-    const plan = await runPlanner({
-      household,
-      request,
-      deals,
-      matched,
-      neverBuy,
-      recentDinnerNames: recentDinnerNames(earlier, request.weekOf),
-      pantry,
-      ratings,
-      today,
-      client: anthropicClient(apiKey, c.env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
-    });
-    plan.priceSource = priceSource;
-    // Next week's flyers are often not out yet; the plan says its prices are estimates.
-    if (priceSource === 'current' && request.weekOf > planWeekOf(new Date())) {
-      plan.issues.push({
-        check: 'prices',
-        severity: 'warning',
-        message: "Prices are estimates from the current flyer; next week's flyers aren't out yet.",
-      });
-    }
-    // A new plan that replaces one keeps the old one, so the change can be undone.
-    await savePlan(c.env.DB, householdId, plan, await loadPlanData(c.env.DB, householdId, request.weekOf));
-    await recordUsage(c.env.DB, householdId, 'plan', usageMonth(today));
-    return c.json(plan);
+    return c.json(await planWeek(c.env, apiKey, householdId, request, noEmit));
   } catch (e) {
     return c.text(e instanceof Error ? e.message : 'Planner failed', 500);
   }
@@ -364,14 +415,21 @@ app.post(`${API}/plan/:weekOf/swap`, async (c) => {
   const capped = await overCap(c.env, householdId, 'swap');
   if (capped) return capped;
 
+  let stored: string;
+  let saved: MealPlan;
   try {
-    const stored = await loadPlanData(c.env.DB, householdId, weekOf);
-    if (stored === null) return c.text('No plan for this week', 404);
-    const saved = readStoredPlan(JSON.parse(stored) as MealPlan) as MealPlan;
-    const known = new Set(saved.meals.map((m) => m.id));
-    const unknown = parsed.data.mealIds.find((id) => !known.has(id));
-    if (unknown !== undefined) return c.text(`Unknown meal: ${unknown}`, 400);
+    const found = await loadPlanData(c.env.DB, householdId, weekOf);
+    if (found === null) return c.text('No plan for this week', 404);
+    stored = found;
+    saved = readStoredPlan(JSON.parse(stored) as MealPlan) as MealPlan;
+  } catch (e) {
+    return c.text(e instanceof Error ? e.message : 'Swap failed', 500);
+  }
+  const known = new Set(saved.meals.map((m) => m.id));
+  const unknown = parsed.data.mealIds.find((id) => !known.has(id));
+  if (unknown !== undefined) return c.text(`Unknown meal: ${unknown}`, 400);
 
+  const swapWeek = async (emit: Emit) => {
     const household = await loadHousehold(c.env.DB, householdId);
     const { matched, deals, neverBuy } = await loadDeals(c.env, householdId, weekOf);
     const earlier = await plansBetween(c.env.DB, householdId, addDaysIso(weekOf, -21), weekOf);
@@ -389,9 +447,22 @@ app.post(`${API}/plan/:weekOf/swap`, async (c) => {
       ratings: ratingSignals(await loadRatings(c.env.DB, householdId), household.people, today),
       today,
       client: anthropicClient(apiKey, c.env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
+      onProgress: (p: PlanProgress) => emit(p),
     });
+    emit({ stage: 'saving' });
     await savePlan(c.env.DB, householdId, result.plan, stored);
     await recordUsage(c.env.DB, householdId, 'swap', usageMonth(today));
+    return result;
+  };
+
+  if (wantsNdjson(c)) {
+    return ndjson(c, async (emit) => {
+      const result = await swapWeek(emit);
+      return { stage: 'done', plan: result.plan, swapped: result.swapped, added: result.added };
+    });
+  }
+  try {
+    const result = await swapWeek(noEmit);
     return c.json({ ...result.plan, swapped: result.swapped, added: result.added });
   } catch (e) {
     return c.text(e instanceof Error ? e.message : 'Swap failed', 500);

@@ -29,6 +29,7 @@ import { secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
 import { defaultDay, planToWeek, type Rateable, type ViewMeal, type ViewWeek } from '../lib/planView';
 import { swappedMessage, swapPreview } from '../lib/swap';
+import { WAITING_TEXT, progressText, timingLine } from '../lib/planProgress';
 import { useChecks } from '../lib/useChecks';
 
 const RING = 'outline-none focus-visible:ring-2 focus-visible:ring-herb';
@@ -95,6 +96,8 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   const [swapNote, setSwapNote] = useState('');
   // The meals being replaced while the planner works, and the ones a swap just put in place.
   const [swapping, setSwapping] = useState<string[]>([]);
+  // What the planner is doing for the swap in progress, as a line of text.
+  const [swapProgress, setSwapProgress] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string[]>([]);
   const [swapError, setSwapError] = useState<string | null>(null);
   const [undo, setUndo] = useState<{ key: number; count: number } | null>(null);
@@ -248,7 +251,8 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
     setSwapError(null);
     setSwapping(replaced);
     try {
-      const result = await track(swapMeals(plan.weekOf, ids, note), undefined, { busy: 'Planning…' });
+      const run = () => swapMeals(plan.weekOf, ids, note, (e) => setSwapProgress(progressText(e)));
+      const result = await track(run(), undefined, { busy: 'Planning…' });
       // The reload makes the List and prep screens show the new plan as well.
       const fresh = await getPlan(plan.weekOf).catch(() => null);
       setSource({ status: 'plan', plan: fresh ?? result });
@@ -259,6 +263,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
     } catch (e) {
       setSwapError(errorMessage(e));
     } finally {
+      setSwapProgress(null);
       setSwapping([]);
     }
   }
@@ -300,6 +305,12 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   const hasDeskSide = deskPrep !== null || deskWarning !== null;
 
   const swapErrorLine = swapError && <p className="mt-6 text-[13px] text-[#D98C7A]">Could not swap meals: {swapError}</p>;
+  const swapStatusLine = swapping.length > 0 && (
+    <p aria-live="polite" className="mt-6 text-[13px] text-muted">
+      {swapProgress ?? WAITING_TEXT}
+    </p>
+  );
+  const timing = timingLine(plan?.timings);
   const chooseButton = (className: string) =>
     !past && !choosing ? (
       <button type="button" onClick={() => setChoosing(true)} className={className}>
@@ -352,9 +363,10 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
             {i.message}
           </p>
         ))}
+        {swapStatusLine}
         {swapErrorLine}
 
-        <BudgetBlock week={week} pct={pct} className="mt-8" />
+        <BudgetBlock week={week} pct={pct} timing={timing} className="mt-8" />
 
         <div className="mt-6 flex justify-between" role="group" aria-label="Day">
           {week.days.map((d) => {
@@ -507,7 +519,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
             </div>
           </div>
           <div className="flex items-end gap-4 xl:shrink-0">
-            <BudgetBlock week={week} pct={pct} className="min-w-0 flex-1 xl:w-[300px] xl:flex-none" />
+            <BudgetBlock week={week} pct={pct} timing={timing} className="min-w-0 flex-1 xl:w-[300px] xl:flex-none" />
             {chooseButton(`${RING} flex h-11 shrink-0 items-center gap-2 rounded-lg border border-edge px-4 text-[14px] text-paper hover:border-muted`)}
             {!past && (
               <Link
@@ -536,6 +548,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
             {i.message}
           </p>
         ))}
+        {swapStatusLine}
         {swapErrorLine}
 
         <div className="mt-8 min-w-0">
@@ -678,7 +691,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   );
 }
 
-function BudgetBlock({ week, pct, className = '' }: { week: ViewWeek; pct: number; className?: string }) {
+function BudgetBlock({ week, pct, timing, className = '' }: { week: ViewWeek; pct: number; timing: string | null; className?: string }) {
   const n = week.stores.length;
   return (
     <div className={`border-y border-line py-4 ${className}`}>
@@ -689,6 +702,7 @@ function BudgetBlock({ week, pct, className = '' }: { week: ViewWeek; pct: numbe
       <div className="mt-3 h-1 w-full rounded-full bg-line" aria-hidden="true">
         <div className="h-1 rounded-full bg-herb" style={{ width: `${pct}%` }} />
       </div>
+      {timing && <p className="mt-3 text-[12px] text-muted">{timing}</p>}
       {n > 0 && (
         <div className="mt-3">
           <p className="text-[12px] text-muted">

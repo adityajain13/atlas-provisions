@@ -344,3 +344,25 @@ describe('POST /plan keeps the plan it replaces for undo', () => {
     ]);
   });
 });
+
+describe('POST /plan/:weekOf/swap with x-ndjson', () => {
+  it('streams the stages and ends with the swapped week, its swapped and added meal ids', async () => {
+    const { env, cookie } = await withPlan();
+    stubClaude();
+
+    const res = await call(
+      `${H}/plan/${WEEK}/swap`,
+      { method: 'POST', headers: { 'content-type': 'application/json', cookie, accept: 'application/x-ndjson' }, body: JSON.stringify({ mealIds: ['mon-dinner'] }) },
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/x-ndjson');
+    const lines = (await res.text()).split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines.map((l) => l.stage)).toEqual(['writing', 'checking', 'saving', 'done']);
+    const done = lines[3] as { plan: { meals: unknown[] }; swapped: string[]; added: string[] };
+    expect(done.swapped).toEqual(['mon-dinner', 'tue-lunch']);
+    expect(done.added).toEqual(['mon-dinner', 'tue-lunch']);
+    expect(done.plan.meals).toHaveLength(21);
+  });
+});

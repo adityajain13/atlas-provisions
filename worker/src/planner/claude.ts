@@ -99,7 +99,7 @@ export function anthropicClient(
       }
       return {
         meals: input.meals,
-        notes: typeof input.notes === 'string' ? input.notes : '',
+        notes: typeof input.notes === 'string' ? input.notes.slice(0, 200) : '',
         // Checked by runPlanner against the kept attempt's meals. Missing or invalid prep is not an error.
         ...(input.prep !== undefined ? { prep: input.prep } : {}),
       };

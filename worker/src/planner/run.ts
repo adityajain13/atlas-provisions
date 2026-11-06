@@ -1,13 +1,19 @@
 import {
+  DAYS,
+  DAY_LONG,
+  SLOTS,
   buildList,
   costFixedMeals,
   expandWeek,
   expiringSoon,
+  repairFor,
   round2,
+  swapClosure,
   toPlannedMeals,
   torontoDate,
   usableItems,
   validate,
+  type AttemptTiming,
   type Day,
   type Deal,
   type FixedCost,
@@ -16,16 +22,27 @@ import {
   type MatchedItem,
   type MealPlan,
   type PantryItem,
+  type PlanTimings,
   type PlannedMeal,
   type PlanRequest,
   prepTimingIssues,
   type PrepPlan,
   type RatingSignals,
   type RawPlan,
+  type Repair,
   type SlotCell,
   type ValidationIssue,
+  type ValidateContext,
 } from '@provisions/shared';
-import { buildAvailable, buildPayload, SYSTEM_PROMPT, type AvailableItem, type PlannerPayload } from './prompt';
+import {
+  buildAvailable,
+  buildPayload,
+  SWAP_PROMPT,
+  SYSTEM_PROMPT,
+  type AvailableItem,
+  type KeptMealPayload,
+  type PlannerPayload,
+} from './prompt';
 import type { PlannerClient } from './claude';
 import { normalisePrep } from './prep';
 
@@ -56,6 +73,8 @@ export interface RunInput {
   ratings?: RatingSignals; // favourites, avoid and never from meal ratings
   today?: string; // YYYY-MM-DD on the Toronto calendar; defaults to today
   maxAttempts?: number;
+  onProgress?: (p: PlanProgress) => void;
+  now?: () => number; // clock for the timings; defaults to Date.now
 }
 
 /** Everything a week is priced and checked against. A new plan and a swap of part of a plan use the same frame. */
@@ -79,7 +98,7 @@ export interface WeekFrame {
   available: AvailableItem[];
 }
 
-type FrameInput = Omit<RunInput, 'client' | 'maxAttempts'>;
+type FrameInput = Omit<RunInput, 'client' | 'maxAttempts' | 'onProgress' | 'now'>;
 
 /** Enabled store names, or every store in the flyer data when none is enabled. */
 function storeNames(household: Household, deals: Deal[], matched: MatchedItem[]): string[] {
@@ -148,19 +167,24 @@ export function evaluateWeek(frame: WeekFrame, meals: PlannedMeal[], shapeIssues
   plan.issues = [
     ...fixedCost.issues,
     ...shapeIssues,
-    ...validate(plan, {
-      household,
-      cells: frame.cells,
-      fixed: fixedCost,
-      available: new Set(frame.available.map((a) => a.id)),
-      neverBuy: new Set(frame.neverBuy),
-      neverWords: frame.neverWords,
-      recentDinnerNames: frame.recentDinnerNames,
-      useFirst: frame.dueSoon.map((i) => ({ ingredientId: i.ingredientId, expiresOn: i.expiresOn })),
-      neverMeals: frame.ratings.never,
-    }),
+    ...validate(plan, validationContext(frame)),
   ];
   return plan;
+}
+
+/** What a week is checked against. Repair attribution reads the same context as validate. */
+export function validationContext(frame: WeekFrame): ValidateContext {
+  return {
+    household: frame.household,
+    cells: frame.cells,
+    fixed: frame.fixedCost,
+    available: new Set(frame.available.map((a) => a.id)),
+    neverBuy: new Set(frame.neverBuy),
+    neverWords: frame.neverWords,
+    recentDinnerNames: frame.recentDinnerNames,
+    useFirst: frame.dueSoon.map((i) => ({ ingredientId: i.ingredientId, expiresOn: i.expiresOn })),
+    neverMeals: frame.ratings.never,
+  };
 }
 
 /** One attempt: the plan it priced and checked, and the prep list that came with it. */
@@ -171,22 +195,257 @@ export interface Attempt {
 
 const errorCount = (issues: ValidationIssue[]) => issues.filter((i) => i.severity === 'error').length;
 
+/** What the planner is doing, for the status line while a week is being planned. */
+export type PlanProgress =
+  | { stage: 'writing'; attempt: number }
+  | { stage: 'checking'; attempt: number }
+  | { stage: 'fixing'; attempt: number; meals: number; reason: string }
+  | { stage: 'saving' };
+
+/** Plan order: by day, then by slot. */
+export const weekOrder = (a: PlannedMeal, b: PlannedMeal) =>
+  DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || SLOTS.indexOf(a.slot) - SLOTS.indexOf(b.slot);
+
 /**
- * Asks for a plan until one has no errors or the attempts run out. Each attempt's errors go back to the model as
- * feedback on the next. The kept attempt is the one with the fewest errors, then the lowest cost, with its own prep.
- * Prep never counts as an error and never triggers a retry.
+ * The model's new meals, with ids that do not collide with the kept meals or each other. A link is kept only when it
+ * points at another new meal: a new meal never shares leftovers with a kept one.
  */
-export async function bestAttempt(
-  payload: PlannerPayload,
-  maxAttempts: number,
-  attempt: (payload: PlannerPayload) => Promise<Attempt>,
-): Promise<{ best: Attempt; attempts: number }> {
+export function renameFresh(fresh: PlannedMeal[], keptIds: ReadonlySet<string>): PlannedMeal[] {
+  const taken = new Set(keptIds);
+  const assigned = fresh.map((m) => {
+    let id = m.id;
+    for (let n = 2; taken.has(id); n++) id = `${m.id}-${n}`;
+    taken.add(id);
+    return id;
+  });
+  const byRaw = new Map<string, string>();
+  fresh.forEach((m, i) => {
+    if (!byRaw.has(m.id)) byRaw.set(m.id, assigned[i]!);
+  });
+  return fresh.map((m, i) => {
+    const { usesLeftoversFrom, makesLeftoversFor, ...rest } = m;
+    const id = assigned[i]!;
+    const uses = usesLeftoversFrom !== undefined ? byRaw.get(usesLeftoversFrom) : undefined;
+    const makes = makesLeftoversFor !== undefined ? byRaw.get(makesLeftoversFor) : undefined;
+    return {
+      ...rest,
+      id,
+      ...(uses && uses !== id ? { usesLeftoversFrom: uses } : {}),
+      ...(makes && makes !== id ? { makesLeftoversFor: makes } : {}),
+    };
+  });
+}
+
+/** A meal that stays in the week while others are written. The planner must not change it. */
+export function keptPayload(m: PlannedMeal): KeptMealPayload {
+  return {
+    id: m.id,
+    day: m.day,
+    slot: m.slot,
+    name: m.name,
+    ingredients: m.ingredients.map((i) => ({ id: i.ingredientId, qty: i.qty, unit: i.unit })),
+    ...(m.usesLeftoversFrom ? { usesLeftoversFrom: m.usesLeftoversFrom } : {}),
+    ...(m.makesLeftoversFor ? { makesLeftoversFor: m.makesLeftoversFor } : {}),
+  };
+}
+
+/** What the kept meals cost on their own, for the budget left for the cells being written. Fixed meals are not counted. */
+export function keptCostOf(frame: WeekFrame, kept: PlannedMeal[]): number {
+  if (kept.length === 0) return 0;
+  const list = buildList(
+    kept,
+    { ...frame.fixedCost, needs: [] },
+    frame.deals,
+    frame.matched,
+    frame.stores,
+    frame.household.maxStores,
+    frame.priceMatchStores,
+    frame.pantry,
+  );
+  return round2(list.reduce((sum, i) => sum + i.total, 0));
+}
+
+/**
+ * Where a week's attempts start: the cells the model writes first, the meals kept as they are, and what they cost.
+ * A new plan starts with every cell and nothing kept. A swap starts with the freed cells and the meals that stay.
+ */
+export interface WeekStart {
+  cells: SlotCell[];
+  kept: PlannedMeal[];
+  replacing: string[]; // names being replaced: the model must not reuse them
+  keptCost: number;
+  swap: boolean; // true for a swap, so the payload carries keptMeals even when none are kept
+  note?: string; // the household's note for a swap
+  notes?: string; // the notes to keep when nothing is written
+}
+
+export interface WeekJob {
+  frame: WeekFrame;
+  start: WeekStart;
+  client: PlannerClient;
+  maxAttempts: number;
+  prepDay: Day | null;
+  onProgress?: (p: PlanProgress) => void;
+  now: () => number;
+}
+
+export interface WeekResult {
+  best: Attempt;
+  attempts: number;
+  timings: PlanTimings;
+}
+
+/** One attempt to write: the cells to fill, the meals kept, and what the last check said. */
+interface Step {
+  mode: 'full' | 'repair';
+  cells: SlotCell[];
+  kept: PlannedMeal[];
+  replacing: string[];
+  keptCost: number;
+  swap: boolean;
+  note?: string;
+  notes: string;
+  feedback: ValidationIssue[] | null;
+}
+
+function payloadFor(frame: WeekFrame, step: Step): PlannerPayload {
+  const payload = buildPayload({
+    household: frame.household,
+    request: frame.request,
+    cells: step.cells,
+    fixed: frame.placements,
+    fixedCost: frame.fixedCost,
+    available: frame.available,
+    neverBuy: frame.neverBuy,
+    neverBuyWords: frame.neverWords,
+    recentDinnerNames: frame.recentDinnerNames,
+    pantryUseFirst: frame.dueSoon.map((i) => i.ingredientId),
+    favourites: frame.ratings.favourites,
+    avoid: [...frame.ratings.avoid, ...frame.ratings.never],
+    ...(swapStyle(step)
+      ? {
+          keptMeals: step.kept.map(keptPayload),
+          keptCost: step.keptCost,
+          replacing: step.replacing,
+          ...(step.note ? { swapNote: step.note } : {}),
+        }
+      : {}),
+  });
+  payload.feedback = step.feedback;
+  return payload;
+}
+
+/** Repairs and swaps keep meals, so they use the swap prompt. A new plan's first attempt does not. */
+const swapStyle = (step: Step) => step.swap || step.mode === 'repair';
+
+/** One model call for a step, checked against the whole week. A step with nothing to write is checked without a call. */
+async function attemptStep(job: WeekJob, step: Step): Promise<Attempt> {
+  const { frame } = job;
+  if (step.cells.length === 0) return { plan: evaluateWeek(frame, step.kept, [], step.notes) };
+
+  const payload = payloadFor(frame, step);
+  const system = swapStyle(step) ? `${SYSTEM_PROMPT}\n${SWAP_PROMPT}` : SYSTEM_PROMPT;
+  const raw = await job.client.submitPlan(system, payload);
+  const { meals: everyNew, issues: shapeIssues } = toPlannedMeals(raw.meals, frame.cells);
+
+  let merged: PlannedMeal[] = everyNew;
+  const strays: ValidationIssue[] = [];
+  if (swapStyle(step)) {
+    const refillKeys = new Set(step.cells.map(cellKey));
+    const fresh = everyNew.filter((m) => refillKeys.has(cellKey(m)));
+    for (const m of everyNew) {
+      if (refillKeys.has(cellKey(m))) continue;
+      strays.push({
+        check: 'slot-coverage',
+        severity: 'error',
+        message: `"${m.name}" is for ${DAY_LONG[m.day]} ${m.slot}, which is not being swapped. Plan only the slots listed.`,
+      });
+    }
+    const keptIds = new Set(step.kept.map((m) => m.id));
+    merged = [...step.kept, ...renameFresh(fresh, keptIds)].sort(weekOrder);
+  }
+  return {
+    plan: evaluateWeek(frame, merged, [...shapeIssues, ...strays], raw.notes),
+    prep: job.prepDay ? prepFrom(raw, merged, job.prepDay) : undefined,
+  };
+}
+
+const cellKey = (c: { day: string; slot: string }) => `${c.day}-${c.slot}`;
+
+/**
+ * The next step after a checked attempt. When every error names meals (or an empty cell), only those meals and the
+ * cells they leave are written again, and the rest is kept. Otherwise the whole job is asked again with the errors.
+ */
+function nextStep(job: WeekJob, tried: Attempt): { step: Step; repaired: Repair | null } {
+  const { start } = job;
+  const errors = tried.plan.issues.filter((i) => i.severity === 'error');
+  const rep = repairFor(tried.plan, validationContext(job.frame), tried.plan.issues);
+  if (rep) {
+    const replaced = new Set(rep.replaceIds);
+    const kept = tried.plan.meals.filter((m) => !replaced.has(m.id));
+    const replacing = [...new Set(tried.plan.meals.filter((m) => replaced.has(m.id)).map((m) => m.name))];
+    return {
+      repaired: rep,
+      step: {
+        mode: 'repair',
+        cells: rep.refill,
+        kept,
+        replacing,
+        keptCost: keptCostOf(job.frame, kept),
+        swap: start.swap,
+        note: start.note,
+        notes: tried.plan.notes,
+        feedback: errors,
+      },
+    };
+  }
+  return {
+    repaired: null,
+    step: {
+      mode: 'full',
+      cells: start.cells,
+      kept: start.kept,
+      replacing: start.replacing,
+      keptCost: start.keptCost,
+      swap: start.swap,
+      note: start.note,
+      notes: start.notes ?? '',
+      feedback: tried.plan.issues,
+    },
+  };
+}
+
+/**
+ * Asks for the week until it has no errors or the attempts run out. The first attempt writes the job's cells. After
+ * that, errors that name meals are repaired by writing only those meals again; other errors ask for the whole job
+ * again, with the issues as feedback. The attempt with the fewest errors, then the lowest cost, is kept, with its
+ * own prep. Each attempt is timed and reported through onProgress.
+ */
+export async function runWeek(job: WeekJob): Promise<WeekResult> {
+  const started = job.now();
+  const records: AttemptTiming[] = [];
   let best: Attempt | null = null;
   let attempts = 0;
-  while (attempts < maxAttempts) {
+  let step: Step = {
+    mode: 'full',
+    cells: job.start.cells,
+    kept: job.start.kept,
+    replacing: job.start.replacing,
+    keptCost: job.start.keptCost,
+    swap: job.start.swap,
+    note: job.start.note,
+    notes: job.start.notes ?? '',
+    feedback: null,
+  };
+
+  for (;;) {
     attempts++;
-    const tried = await attempt(payload);
+    const t0 = job.now();
+    if (step.mode === 'full' && step.cells.length > 0) job.onProgress?.({ stage: 'writing', attempt: attempts });
+    const tried = await attemptStep(job, step);
+    if (step.cells.length > 0) job.onProgress?.({ stage: 'checking', attempt: attempts });
     const errors = errorCount(tried.plan.issues);
+    records.push({ ms: job.now() - t0, mode: step.mode, replaced: step.cells.length, errors });
     if (
       best === null ||
       errors < errorCount(best.plan.issues) ||
@@ -194,10 +453,20 @@ export async function bestAttempt(
     ) {
       best = tried;
     }
-    if (errors === 0) break;
-    payload.feedback = tried.plan.issues;
+    if (errors === 0 || attempts >= job.maxAttempts) break;
+
+    const next = nextStep(job, tried);
+    if (next.repaired) {
+      job.onProgress?.({
+        stage: 'fixing',
+        attempt: attempts + 1,
+        meals: next.repaired.replaceIds.length,
+        reason: next.repaired.reason,
+      });
+    }
+    step = next.step;
   }
-  return { best: best!, attempts };
+  return { best: best!, attempts, timings: { totalMs: job.now() - started, attempts: records } };
 }
 
 /**
@@ -213,11 +482,11 @@ export function attachWeekPrep(plan: MealPlan, prep: PrepPlan | undefined, prepD
 
 /**
  * Plan one week. Expand the grid, cost the fixed meals, ask the model for meals (and, when the
- * household has a prep day, the prep list in the same call), then price and check the result. If
- * there are errors and attempts remain, the issues go back to the model as feedback and it tries
- * again. The attempt with the fewest errors, then the lowest cost, is kept, with its own prep.
- * Prep never counts as an error and never triggers a retry: missing or invalid prep is a warning.
- * With no plannable cells the model is not called.
+ * household has a prep day, the prep list in the same call), then price and check the result. Errors
+ * that name meals are repaired by writing only those meals again; other errors ask for the whole week
+ * again with the issues as feedback. The attempt with the fewest errors, then the lowest cost, is kept,
+ * with its own prep. Prep never counts as an error and never triggers a retry: missing or invalid prep
+ * is a warning. With no plannable cells the model is not called.
  */
 export async function runPlanner(input: RunInput): Promise<MealPlan> {
   const { household, client } = input;
@@ -225,30 +494,16 @@ export async function runPlanner(input: RunInput): Promise<MealPlan> {
   const frame = weekFrame(input);
   const { cells } = frame;
 
-  if (cells.length === 0) return evaluateWeek(frame, [], [], '');
+  if (cells.length === 0) return { ...evaluateWeek(frame, [], [], ''), timings: { totalMs: 0, attempts: [] } };
 
-  const payload: PlannerPayload = buildPayload({
-    household,
-    request: frame.request,
-    cells,
-    fixed: frame.placements,
-    fixedCost: frame.fixedCost,
-    available: frame.available,
-    neverBuy: frame.neverBuy,
-    neverBuyWords: frame.neverWords,
-    recentDinnerNames: frame.recentDinnerNames,
-    pantryUseFirst: frame.dueSoon.map((i) => i.ingredientId),
-    favourites: frame.ratings.favourites,
-    avoid: [...frame.ratings.avoid, ...frame.ratings.never],
+  const { best, attempts, timings } = await runWeek({
+    frame,
+    start: { cells, kept: [], replacing: [], keptCost: 0, swap: false, notes: '' },
+    client,
+    maxAttempts,
+    prepDay: household.prepDay,
+    onProgress: input.onProgress,
+    now: input.now ?? Date.now,
   });
-
-  const { best, attempts } = await bestAttempt(payload, maxAttempts, async (p) => {
-    const raw = await client.submitPlan(SYSTEM_PROMPT, p);
-    const { meals, issues: shapeIssues } = toPlannedMeals(raw.meals, cells);
-    return {
-      plan: evaluateWeek(frame, meals, shapeIssues, raw.notes),
-      prep: household.prepDay ? prepFrom(raw, meals, household.prepDay) : undefined,
-    };
-  });
-  return { ...attachWeekPrep(best.plan, best.prep, household.prepDay), attempts };
+  return { ...attachWeekPrep(best.plan, best.prep, household.prepDay), attempts, timings };
 }

@@ -215,3 +215,4 @@ export * from './checks';
 export * from './households';
 export * from './itemRules';
 export * from './swap';
+export * from './repair';
