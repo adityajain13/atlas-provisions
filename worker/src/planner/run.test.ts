@@ -16,7 +16,7 @@ import {
 } from '@provisions/shared';
 import flyer from '../../fixtures/flyer-sample.json';
 import type { PlannerClient } from './claude';
-import { runPlanner } from './run';
+import { runPlanner, type PlanProgress } from './run';
 
 const matched: MatchedItem[] = (flyer as FlyerItem[])
   .map(matchFlyerItem)
@@ -86,20 +86,57 @@ function fakeClient(plans: RawPlan[]) {
   return { client, submitPlan, seen };
 }
 
+
+/**
+ * A model that answers each call with `answer(payload, call)`. Each payload is kept, so tests can see what was asked.
+ * A repair's payload names only the slots it asks for, so an answer that fills only those is what the model would give.
+ */
+function scriptedModel(answer: (payload: { slots: { id: string }[] }, call: number) => RawPlan) {
+  const seen: { system: string; payload: { feedback: { check: string; severity: string }[] | null; slots: { id: string }[] } & Record<string, unknown> }[] = [];
+  const submitPlan = vi.fn(async (system: string, payload: unknown) => {
+    seen.push({ system, payload: structuredClone(payload) as (typeof seen)[number]['payload'] });
+    return answer(payload as { slots: { id: string }[] }, seen.length);
+  });
+  const client: PlannerClient = { submitPlan };
+  return { client, submitPlan, seen };
+}
+
+/** Meals for the given slots only, each using `ingredientId` at `qty(slotId)`. Meal ids follow the full week's cell order. */
+function mealsForSlots(all: SlotCell[], slots: { id: string }[], ingredientId: string, qty: (slotId: string) => number): RawPlan {
+  return {
+    notes: 'fake',
+    meals: slots.map((slot) => {
+      const i = all.findIndex((c) => `${c.day}-${c.slot}` === slot.id);
+      return {
+        id: `m${i}`,
+        slotId: slot.id,
+        name: `Meal ${slot.id}`,
+        ingredients: [{ id: ingredientId, qty: qty(slot.id) }],
+        activeMinutes: 20,
+        steps: ['Cook'],
+        tags: [],
+      };
+    }),
+  };
+}
+
 describe('runPlanner', () => {
-  it('retries with the errors as feedback after an over-budget plan, then keeps the valid one', async () => {
+  it('repairs an over-budget plan by rewriting its two most expensive meals, then keeps the valid one', async () => {
     const h = household();
     const req = request({ budget: 150 });
     const cells = cellsOf(h, req);
-    const { client, submitPlan, seen } = fakeClient([
-      planFor(cells, DEAL_ID, 200), // far over budget
-      planFor(cells, DEAL_ID, DEAL_UNIT_QTY),
-    ]);
+    // The first two cells are far over budget; the rest of the week is cheap.
+    const expensive = (slotId: string) => (slotId === `${cells[0]!.day}-${cells[0]!.slot}` || slotId === `${cells[1]!.day}-${cells[1]!.slot}` ? 200 : DEAL_UNIT_QTY);
+    const { client, submitPlan, seen } = scriptedModel((payload, call) =>
+      call === 1 ? mealsForSlots(cells, cells.map((c) => ({ id: `${c.day}-${c.slot}` })), DEAL_ID, expensive) : mealsForSlots(cells, payload.slots, DEAL_ID, () => DEAL_UNIT_QTY),
+    );
 
     const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
 
     expect(submitPlan).toHaveBeenCalledTimes(2);
     expect(seen[0]!.payload.feedback).toBeNull();
+    // The repair asks only for the two expensive slots, and says so with the errors as feedback.
+    expect(seen[1]!.payload.slots.map((s) => s.id)).toEqual([`${cells[0]!.day}-${cells[0]!.slot}`, `${cells[1]!.day}-${cells[1]!.slot}`]);
     expect(seen[1]!.payload.feedback?.some((i) => i.check === 'budget' && i.severity === 'error')).toBe(true);
     expect(plan.attempts).toBe(2);
     expect(plan.issues.filter((i) => i.severity === 'error')).toEqual([]);
@@ -339,9 +376,13 @@ describe('runPlanner: prep in the same call', () => {
     const h = household();
     const req = request({ budget: 150 });
     const cells = cellsOf(h, req);
-    const first: RawPlan = { ...planFor(cells, DEAL_ID, 200), prep: prepWith('First attempt prep', ['m0']) }; // over budget
-    const second: RawPlan = { ...planFor(cells, DEAL_ID, DEAL_UNIT_QTY), prep: prepWith('Second attempt prep', ['m0']) };
-    const { client, submitPlan } = fakeClient([first, second]);
+    const expensive = (slotId: string) => (slotId === `${cells[0]!.day}-${cells[0]!.slot}` ? 200 : DEAL_UNIT_QTY);
+    const first: RawPlan = { ...mealsForSlots(cells, cells.map((c) => ({ id: `${c.day}-${c.slot}` })), DEAL_ID, expensive), prep: prepWith('First attempt prep', ['m0']) };
+    const { client, submitPlan } = scriptedModel((payload, call) =>
+      call === 1
+        ? first
+        : { ...mealsForSlots(cells, payload.slots, DEAL_ID, () => DEAL_UNIT_QTY), prep: prepWith('Second attempt prep', ['m0']) },
+    );
 
     const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
 
@@ -398,5 +439,96 @@ describe('runPlanner: prep in the same call', () => {
     expect((seen[0]!.payload as unknown as { prepDay: unknown }).prepDay).toBeNull();
     expect(plan.prep).toBeUndefined();
     expect(plan.issues.filter(isPrepIssue)).toEqual([]);
+  });
+});
+
+describe('runPlanner: targeted repair', () => {
+  const SUN_DINNER = 'sun-dinner';
+
+  it('a repair writes only the meal that failed, and the rest of the week is sent back as it was', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const first = planFor(cells, DEAL_ID, DEAL_UNIT_QTY);
+    first.meals = first.meals.map((m) => (m.slotId === SUN_DINNER ? { ...m, ingredients: [{ id: 'not-a-real-ingredient', qty: 1 }] } : m));
+    const { client, submitPlan, seen } = scriptedModel((payload, call) =>
+      call === 1 ? first : mealsForSlots(cells, payload.slots, DEAL_ID, () => DEAL_UNIT_QTY),
+    );
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPlan).toHaveBeenCalledTimes(2);
+    const repair = seen[1]!.payload as unknown as { slots: { id: string }[]; keptMeals: { id: string; name: string }[]; replacing: string[] };
+    expect(repair.slots.map((s) => s.id)).toEqual([SUN_DINNER]);
+    expect(repair.replacing).toEqual(['Meal sun dinner']);
+    expect(repair.keptMeals).toHaveLength(cells.length - 1);
+    const sunDinnerId = first.meals.find((m) => m.slotId === SUN_DINNER)!.id;
+    expect(repair.keptMeals.some((k) => k.id === sunDinnerId)).toBe(false);
+    // Every kept meal comes back in the plan with the same id, name and ingredients.
+    const kept = plan.meals.filter((m) => `${m.day}-${m.slot}` !== SUN_DINNER);
+    expect(kept.map((m) => [m.id, m.name, m.ingredients])).toEqual(
+      repair.keptMeals.map((k) => [k.id, k.name, first.meals.find((r) => r.id === k.id)!.ingredients.map((i) => ({ ingredientId: i.id, qty: i.qty, unit: expect.any(String) }))]),
+    );
+    expect(plan.meals).toHaveLength(cells.length);
+    expect(plan.issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('reports each step in order: writing, checking, fixing the meals over budget, then checking again', async () => {
+    const h = household();
+    const req = request({ budget: 150 });
+    const cells = cellsOf(h, req);
+    const expensive = (slotId: string) => (slotId === `${cells[0]!.day}-${cells[0]!.slot}` || slotId === `${cells[1]!.day}-${cells[1]!.slot}` ? 200 : DEAL_UNIT_QTY);
+    const events: PlanProgress[] = [];
+    const { client } = scriptedModel((payload, call) =>
+      call === 1 ? mealsForSlots(cells, cells.map((c) => ({ id: `${c.day}-${c.slot}` })), DEAL_ID, expensive) : mealsForSlots(cells, payload.slots, DEAL_ID, () => DEAL_UNIT_QTY),
+    );
+
+    await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [], onProgress: (p) => events.push(p) });
+
+    expect(events).toEqual([
+      { stage: 'writing', attempt: 1 },
+      { stage: 'checking', attempt: 1 },
+      { stage: 'fixing', attempt: 2, meals: 2, reason: 'budget' },
+      { stage: 'checking', attempt: 2 },
+    ]);
+  });
+
+  it('gives up after three attempts when repairs keep failing, and records each attempt', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const { client, submitPlan } = scriptedModel((payload) => mealsForSlots(cells, payload.slots, 'not-a-real-ingredient', () => 1));
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPlan).toHaveBeenCalledTimes(3);
+    expect(plan.attempts).toBe(3);
+    expect(plan.timings?.attempts.map((a) => a.mode)).toEqual(['full', 'repair', 'repair']);
+    expect(plan.timings?.attempts.map((a) => a.replaced)).toEqual([cells.length, cells.length, cells.length]);
+    expect(plan.timings?.attempts.every((a) => a.errors > 0)).toBe(true);
+  });
+
+  it('a plan that is right first time records one full attempt, and a total time', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const { client } = scriptedModel(() => planFor(cells, DEAL_ID, DEAL_UNIT_QTY));
+    let clock = 0;
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [], now: () => (clock += 5) });
+
+    expect(plan.timings?.attempts).toEqual([{ ms: 5, mode: 'full', replaced: cells.length, errors: 0 }]);
+    expect(plan.timings?.totalMs).toBeGreaterThan(0);
+  });
+
+  it('a week with nothing to plan records no attempts', async () => {
+    const h = household({ people: [] });
+    const req = request();
+    const { client, submitPlan } = scriptedModel(() => ({ notes: '', meals: [] }));
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPlan).not.toHaveBeenCalled();
+    expect(plan.timings).toEqual({ totalMs: 0, attempts: [] });
   });
 });

@@ -25,6 +25,7 @@ import {
   type RatingInput,
   type ReceiptCommit,
 } from '@provisions/shared';
+import type { PlanProgressEvent } from './lib/planProgress';
 
 const BASE = '/provisions/api';
 
@@ -103,15 +104,52 @@ export async function saveHousehold(household: Household): Promise<Household> {
   return HouseholdSchema.parse(await res.json());
 }
 
-/** Plan a week. Takes up to a minute. Errors carry the server's message as-is. */
-export async function generatePlan(req: PlanRequest): Promise<MealPlan> {
+/**
+ * Reads a planner response that streams JSON lines (progress events, then one done or error line). Progress goes to
+ * onProgress. Resolves with the done line; an error line throws its message. Returns null when the body is not a stream.
+ */
+export async function readPlanStream(
+  res: Response,
+  onProgress?: (e: PlanProgressEvent) => void,
+): Promise<Record<string, unknown> | null> {
+  if (!(res.headers.get('content-type') ?? '').includes('application/x-ndjson') || !res.body) return null;
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  const state: { done: Record<string, unknown> | null } = { done: null };
+  const handle = (line: string) => {
+    if (line.trim() === '') return;
+    const event = JSON.parse(line) as { stage: string; message?: string };
+    if (event.stage === 'done') state.done = event as Record<string, unknown>;
+    else if (event.stage === 'error') throw new Error(event.message ?? 'Planner failed');
+    else onProgress?.(event as PlanProgressEvent);
+  };
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    lines.forEach(handle);
+  }
+  handle(buffer);
+  if (!state.done) throw new Error('The planner stopped before it finished.');
+  return state.done;
+}
+
+/**
+ * Plan a week. Takes up to a minute. Progress is streamed (see readPlanStream) and passed to onProgress. Errors carry
+ * the server's message as-is.
+ */
+export async function generatePlan(req: PlanRequest, onProgress?: (e: PlanProgressEvent) => void): Promise<MealPlan> {
   const res = await ensureOk(
     await authFetch(`${BASE}/plan`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
       body: JSON.stringify(req),
     }),
   );
+  const streamed = await readPlanStream(res, onProgress);
+  if (streamed) return readStoredPlan(streamed.plan as MealPlan) as MealPlan;
   return readStoredPlan((await res.json()) as MealPlan) as MealPlan;
 }
 
@@ -126,18 +164,27 @@ export type SwapOutcome = MealPlan & { swapped: string[]; added: string[] };
 
 /**
  * Swaps the chosen meals of a week, and the meals linked to them by leftovers. The server adds the linked meals and
- * keeps the rest of the week. Takes up to a minute. Errors carry the server's message as-is (a 429 names the cap).
+ * keeps the rest of the week. Takes up to a minute. Progress is streamed and passed to onProgress. Errors carry the
+ * server's message as-is (a 429 names the cap).
  */
-export async function swapMeals(weekOf: string, mealIds: string[], note?: string): Promise<SwapOutcome> {
+export async function swapMeals(
+  weekOf: string,
+  mealIds: string[],
+  note?: string,
+  onProgress?: (e: PlanProgressEvent) => void,
+): Promise<SwapOutcome> {
   const res = await ensureOk(
     await authFetch(`${BASE}/plan/${weekOf}/swap`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
       body: JSON.stringify({ mealIds, ...(note && note.trim() ? { note: note.trim() } : {}) }),
     }),
   );
-  const body = (await res.json()) as SwapOutcome;
-  return { ...(readStoredPlan(body) as MealPlan), swapped: body.swapped, added: body.added };
+  const streamed = await readPlanStream(res, onProgress);
+  const body = (streamed ?? (await res.json())) as SwapOutcome & { plan?: MealPlan };
+  // A streamed done line carries the plan under `plan`; a plain response is the plan itself.
+  const plan = (body.plan ?? body) as MealPlan;
+  return { ...(readStoredPlan(plan) as MealPlan), swapped: body.swapped, added: body.added };
 }
 
 /** Puts back the plan that the last swap or new plan replaced. Returns the restored week. */

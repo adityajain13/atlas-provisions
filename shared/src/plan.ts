@@ -163,9 +163,23 @@ export interface MealPlan {
   fixedCost: number; // what the fixed meals cost on their own
   issues: ValidationIssue[];
   attempts: number;
+  timings?: PlanTimings; // how the planner spent its time; absent on plans saved before this was recorded
   generatedAt: string;
   notes: string;
   prep?: PrepPlan; // batch prep for the household's prep day, when one is set and generated
+}
+
+/** One model call: how long it took, whether it wrote a whole week or only some meals, how many meals it was asked for, and the errors it left. */
+export interface AttemptTiming {
+  ms: number;
+  mode: 'full' | 'repair';
+  replaced: number; // cells the model was asked to fill
+  errors: number;
+}
+
+export interface PlanTimings {
+  totalMs: number;
+  attempts: AttemptTiming[];
 }
 
 // ---- Dates ----
