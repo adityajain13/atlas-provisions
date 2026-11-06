@@ -189,7 +189,7 @@ describe('ReceiptCommitSchema and planReceiptCommit', () => {
       () => `id-${++n}`,
     );
 
-    expect(rows.prices).toEqual([{ ingredientId: 'chicken-breast-boneless', store: 'No Frills', date: '2026-11-12', pricePerUnit: 6.5833 }]);
+    expect(rows.prices).toEqual([{ ingredientId: 'chicken-breast-boneless', store: 'No Frills', date: '2026-11-12', pricePerUnit: 6.5833, packQty: 0.84 }]);
     expect(rows.matches).toEqual([
       { rawKey: 'bnls chkn brst', ingredientId: 'chicken-breast-boneless', packQty: 0.84 },
       { rawKey: 'broccoli crowns', ingredientId: 'broccoli', packQty: 1 },

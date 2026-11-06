@@ -64,7 +64,7 @@ describe('planToList', () => {
 
   it('shows the pack count for a priced item', () => {
     const view = planToList(plan([priced], ['No Frills']));
-    expect(view.items[0]).toMatchObject({ store: 'No Frills', qty: '2 × 1 kg', price: 5 });
+    expect(view.items[0]).toMatchObject({ store: 'No Frills', qty: '2 × 1 kg · $2.50 each', price: 5 });
   });
 });
 

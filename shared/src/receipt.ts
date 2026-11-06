@@ -206,7 +206,8 @@ export const ReceiptCommitSchema = z.object({
 export type ReceiptCommit = z.infer<typeof ReceiptCommitSchema>;
 
 export interface ReceiptCommitRows {
-  prices: { ingredientId: string; store: string; date: string; pricePerUnit: number }[];
+  // packQty: the base units the line bought, so a later estimate can price the pack as it was bought.
+  prices: { ingredientId: string; store: string; date: string; pricePerUnit: number; packQty: number }[];
   matches: { rawKey: string; ingredientId: string; packQty: number }[];
   pantry: PantryItem[];
 }
@@ -226,7 +227,8 @@ export function planReceiptCommit(input: ReceiptCommit, today: string, newId: ()
     if (!catalog) throw new Error(`Unknown ingredient: ${line.ingredientId}`);
 
     if (line.pricePerUnit !== null && line.pricePerUnit > 0) {
-      rows.prices.push({ ingredientId: line.ingredientId, store: input.store, date, pricePerUnit: line.pricePerUnit });
+      const packQty = catalog.baseUnit === 'each' ? 1 : line.qty;
+      rows.prices.push({ ingredientId: line.ingredientId, store: input.store, date, pricePerUnit: line.pricePerUnit, packQty });
     }
 
     const rawKey = normalizeRawName(line.original ?? line.name);

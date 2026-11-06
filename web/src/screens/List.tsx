@@ -9,7 +9,7 @@ import WeekSwitcher from '../components/WeekSwitcher';
 import { useViewedWeek, viewWindow } from '../lib/week';
 import { eyebrow } from '../components/ui';
 import { useChecks } from '../lib/useChecks';
-import { LIST_CATEGORY_ORDER, planToList, type ViewItem } from '../lib/planView';
+import { LIST_CATEGORY_ORDER, monthDay, planToList, type ViewItem } from '../lib/planView';
 
 type View = { weekOf: string; stores: string[]; items: ViewItem[] };
 
@@ -193,9 +193,19 @@ function ListRow({
             </span>
           )}
           {item.elsewhere && <span className="block text-[12px] text-muted">{item.elsewhere}</span>}
+          {item.pinnedTo && <span className="block text-[12px] text-muted">Pinned to {item.pinnedTo}</span>}
         </span>
         {showPrice && (
-          <span className={`shrink-0 text-[14px] ${done ? 'text-faint' : 'text-paper'}`}>${item.price.toFixed(2)}</span>
+          <span className="shrink-0 text-right">
+            {item.priceUnknown ? (
+              <span className="block text-[13px] text-muted">price unknown</span>
+            ) : (
+              <span className={`block text-[14px] ${done ? 'text-faint' : 'text-paper'}`}>
+                {item.estimate ? '~' : ''}${item.price.toFixed(2)}
+              </span>
+            )}
+            {item.estimate && <span className="block text-[12px] text-muted">last paid {monthDay(item.estimate.date)}</span>}
+          </span>
         )}
       </label>
     </li>

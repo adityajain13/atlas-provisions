@@ -720,3 +720,40 @@ describe('validate: store cap warning', () => {
     expect(issues.some((i) => i.check === 'unknown-ingredient')).toBe(false);
   });
 });
+
+describe('validate: form and avoid-dish', () => {
+  it('flags a planned ingredient in a form the household does not keep, and says which forms it keeps', () => {
+    const meals = cleanMeals();
+    meals[0] = { ...meals[0]!, name: 'Tuna melt', ingredients: [{ ingredientId: 'canned-tuna', qty: 1, unit: 'each' }] };
+    const blocked = new Set(['canned-tuna']);
+    const issues = validate(planOf(meals), ctxOf({ household: household({ forms: { fish: ['fresh', 'frozen'] } }), formBlocked: blocked, available: ALL_IDS }));
+    const hit = issues.find((i) => i.check === 'form');
+    expect(hit).toMatchObject({ severity: 'error' });
+    expect(hit!.message).toContain('"Tuna melt" uses Canned tuna');
+    expect(hit!.message).toContain('Use fresh or frozen instead.');
+    // Reported once, as a form problem, not also as an unknown ingredient.
+    expect(checksOf(issues)).not.toContain('unknown-ingredient');
+  });
+
+  it('does not flag a form the household keeps', () => {
+    const meals = cleanMeals();
+    meals[0] = { ...meals[0]!, ingredients: [{ ingredientId: 'salmon-fillet', qty: 0.2, unit: 'kg' }] };
+    expect(checksOf(validate(planOf(meals), ctxOf({ formBlocked: new Set(['canned-tuna']) })))).not.toContain('form');
+  });
+
+  it('checks nothing for forms when no form is blocked', () => {
+    expect(checksOf(validate(planOf(cleanMeals()), ctxOf()))).not.toContain('form');
+  });
+
+  it('flags a meal whose name is an avoided dish, and names the word', () => {
+    const meals = cleanMeals().map((m) => (m.id === 'mon-dinner' ? { ...m, name: 'Coleslaw with chicken' } : m));
+    const issues = validate(planOf(meals), ctxOf({ avoidDishes: ['slaw'] }));
+    const hit = issues.find((i) => i.check === 'avoid-dish');
+    expect(hit).toMatchObject({ severity: 'error' });
+    expect(hit!.message).toBe("Replace Coleslaw with chicken: it's a slaw dish, which you don't want.");
+  });
+
+  it('does not flag an avoided word that is not in a meal name', () => {
+    expect(checksOf(validate(planOf(cleanMeals()), ctxOf({ avoidDishes: ['slaw'] })))).not.toContain('avoid-dish');
+  });
+});

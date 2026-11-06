@@ -3,7 +3,7 @@ import type { FixedPlacement } from './grid';
 import type { Household } from './index';
 import type { ListItem, ValidationIssue } from './plan';
 import { matchIngredient, type MatchedItem } from './match';
-import { collectOffers, cheapest, packsFor } from './offers';
+import { collectOffers, cheapest, packsFor, type Offer } from './offers';
 import type { Deal } from './scoring';
 import { nutrientTotals, round2, toBaseUnitQty, type InputUnit } from './units';
 
@@ -45,11 +45,12 @@ export function costFixedMeals(
   household: Household,
   deals: Deal[],
   matchedItems: MatchedItem[],
+  estimates: Offer[] = [],
 ): FixedCost {
   const mealById = new Map(household.fixedMeals.map((m) => [m.id, m]));
   const enabled = new Set(household.stores.filter((s) => s.enabled).map((s) => s.name));
   const storeOk = (store: string) => enabled.size === 0 || enabled.has(store);
-  const offers = collectOffers(deals, matchedItems, storeOk);
+  const offers = collectOffers(deals, matchedItems, storeOk, estimates);
 
   const needs = new Map<string, { qty: number; usedIn: string[] }>();
   const customs = new Map<string, CustomNeed>();

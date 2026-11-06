@@ -1,6 +1,11 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import {
   ALLERGEN_PRESETS,
+  CONTAINER_LABEL,
+  CONTAINER_LEVELS,
+  FORM_GROUPS,
+  FORM_LABEL,
+  allowedForms,
   matchIngredient,
   type CatalogIngredient,
   defaultInputUnit,
@@ -19,17 +24,23 @@ import {
   usageLine,
   type Day,
   type FixedMeal,
+  type FormGroupKey,
+  type FoodForm,
   type Household,
   type ItemRule,
   type MembersView,
   type Person,
   type Slot,
+  type Storage as HouseholdStorage,
   type Store,
+  type StorePreference,
   type StorePreset,
   type Unit,
   type UsageView,
 } from '@provisions/shared';
-import { searchIngredients } from '../components/IngredientPicker';
+import { IngredientPicker, searchIngredients } from '../components/IngredientPicker';
+import { Svg } from '../components/Icons';
+import { AppearanceControl } from '../components/Appearance';
 import {
   cancelInvite,
   errorMessage,
@@ -79,14 +90,19 @@ import {
   addCustomStore,
   addFlippName,
   clampMaxStores,
+  dropIndex,
   enabledCount,
   groupPresets,
   maxStoresLimit,
   groupOf,
-  orderStores,
+  moveStore,
+  moveStoreTo,
+  parseMinSaving,
+  pinStoreOptions,
   presetsNotInList,
   removeFlippName,
   storeFromPreset,
+  withPinnedStore,
 } from '../lib/stores';
 import { useSession } from '../session';
 
@@ -177,17 +193,24 @@ export default function HouseholdScreen() {
             <PeopleSection h={h} update={update} />
             <ScheduleSection h={h} update={update} />
             <PrepSection h={h} update={update} />
+            <StorageSection h={h} update={update} />
             <FixedMealsSection h={h} update={update} />
             <ItemRulesSection h={h} update={update} />
+            <DishesSection h={h} update={update} />
           </div>
           <div className="lg:flex lg:flex-col lg:gap-12">
             <AllergiesSection h={h} />
             <EquipmentSection h={h} update={update} />
+            <FormsSection h={h} update={update} />
             <VarietySection h={h} update={update} />
             <StoresSection h={h} update={update} />
           </div>
         </div>
       )}
+
+      <div className="mt-10 border-t border-line pt-4 lg:hidden">
+        <AppearanceControl />
+      </div>
 
       <SessionRow />
     </Page>
@@ -633,10 +656,17 @@ function allOn(): Record<string, Record<string, boolean>> {
   return Object.fromEntries(DAYS.map((d) => [d, Object.fromEntries(SLOTS.map((s) => [s, true]))]));
 }
 
-function fixedMealSummary(m: FixedMeal, people: Person[]): string {
+/** The closed row's second line for a fixed meal. With nobody ticked it says so in red, since the meal is not used. */
+function fixedMealDetail(m: FixedMeal, people: Person[]): ReactNode {
+  const paused = m.active ? '' : 'Paused · ';
   const names = people.filter((p) => m.personIds.includes(p.id)).map((p) => p.name);
-  return [SLOT_LABEL[m.slot], formatDays(m.days), names.length ? names.join(', ') : 'No one'].join(
-    ' · ',
+  const head = [SLOT_LABEL[m.slot], formatDays(m.days)];
+  if (names.length > 0) return `${paused}${[...head, names.join(', ')].join(' · ')}`;
+  return (
+    <>
+      {paused}
+      {head.join(' · ')} · <span className={ERROR_TEXT}>No one selected: not used</span>
+    </>
   );
 }
 
@@ -935,7 +965,16 @@ function FixedMealsSection({ h, update }: { h: Household; update: Update }) {
       ...prev,
       fixedMeals: [
         ...prev.fixedMeals,
-        { id, name: 'New meal', personIds: [], days: [], slot: 'breakfast', ingredients: [], active: true },
+        {
+          id,
+          name: 'New meal',
+          // Everyone here eats it until they are unticked. A meal with nobody ticked is never used.
+          personIds: prev.people.map((p) => p.id),
+          days: [],
+          slot: 'breakfast',
+          ingredients: [],
+          active: true,
+        },
       ],
     }));
     setOpenId(id);
@@ -967,7 +1006,7 @@ function FixedMealsSection({ h, update }: { h: Household; update: Update }) {
               open={openId === m.id}
               onToggle={() => toggle(m.id)}
               title={m.name}
-              detail={`${m.active ? '' : 'Paused · '}${fixedMealSummary(m, h.people)}`}
+              detail={fixedMealDetail(m, h.people)}
               focusFirstField={freshId === m.id}
               remove={{ label: 'Delete fixed meal', onClick: () => void removeMeal(m) }}
             >
@@ -1079,6 +1118,10 @@ function FixedMealFields({ meal, people, update }: { meal: FixedMeal; people: Pe
           })}
         </div>
       </div>
+
+      {people.length > 0 && meal.personIds.length === 0 && (
+        <p className={`text-[13px] ${ERROR_TEXT}`}>Tick who eats this, or it won&apos;t be used.</p>
+      )}
 
       <div>
         <span className={eyebrow}>Who</span>
@@ -1364,10 +1407,41 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const limit = maxStoresLimit(h.stores);
   const perTrip = clampMaxStores(h.maxStores, h.stores);
-  const rows = orderStores(h.stores);
+  // The list's order is the ranking: the first store is the closest or the favourite.
+  const rows = h.stores;
+  const listRef = useRef<HTMLUListElement>(null);
+  // A row being dragged, and the position it would drop to (0 to rows.length, counted as the rows are now).
+  const [drag, setDrag] = useState<{ id: string; to: number } | null>(null);
 
   function setMax(n: number) {
     update((prev) => ({ ...prev, maxStores: clampMaxStores(n, prev.stores) }));
+  }
+
+  function setPreference(patch: Partial<StorePreference>) {
+    update((prev) => ({ ...prev, storePreference: { ...prev.storePreference, ...patch } }));
+  }
+
+  function gripDown(e: PointerEvent<HTMLElement>, id: string) {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDrag({ id, to: rows.findIndex((r) => r.id === id) });
+  }
+
+  function gripMove(e: PointerEvent<HTMLElement>) {
+    if (!drag || !listRef.current) return;
+    const middles = Array.from(listRef.current.querySelectorAll<HTMLElement>('[data-store-row]')).map((el) => {
+      const box = el.getBoundingClientRect();
+      return box.top + box.height / 2;
+    });
+    const to = dropIndex(middles, e.clientY);
+    if (to !== drag.to) setDrag({ id: drag.id, to });
+  }
+
+  function gripUp() {
+    if (!drag) return;
+    const { id, to } = drag;
+    setDrag(null);
+    changeStores((list) => moveStoreTo(list, id, to));
   }
 
   return (
@@ -1387,14 +1461,28 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
           <p className="mt-2 text-[14px] text-muted">No stores yet. Add one below.</p>
         ) : (
           <>
-            <ul className="mt-2">
-              {rows.map((s) => (
-                <li key={s.id}>
+            <p className="mt-1 text-[13px] text-muted">Ranked by preference: closest or favourite first.</p>
+            <ul className="mt-2" ref={listRef}>
+              {rows.map((s, index) => (
+                <li
+                  key={s.id}
+                  data-store-row
+                  className={drag && drag.to === index && drag.id !== s.id ? 'border-t-2 border-herb' : ''}
+                >
                   <StoreRow
                     store={s}
                     open={openId === s.id}
                     onToggle={() => setOpenId((cur) => (cur === s.id ? null : s.id))}
                     change={changeStores}
+                    rank={{
+                      index,
+                      count: rows.length,
+                      dragging: drag?.id === s.id,
+                      onMove: (step) => changeStores((list) => moveStore(list, s.id, step)),
+                      onGripDown: (e) => gripDown(e, s.id),
+                      onGripMove: gripMove,
+                      onGripUp: gripUp,
+                    }}
                   />
                 </li>
               ))}
@@ -1412,6 +1500,38 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
         >
           + Add store
         </button>
+      </div>
+
+      <div className="mt-8">
+        <p className="text-[15px] text-paper">When stores tie or nearly tie</p>
+        <div
+          role="radiogroup"
+          aria-label="When stores tie or nearly tie"
+          className="mt-3 inline-flex rounded-full border border-edge p-1"
+        >
+          {PREFERENCE_CHOICES.map((choice) => {
+            const active = h.storePreference.mode === choice.mode;
+            return (
+              <button
+                key={choice.mode}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setPreference({ mode: choice.mode })}
+                className={`min-h-11 rounded-full px-4 text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb ${
+                  active ? 'bg-herb font-medium text-ink' : 'text-muted'
+                }`}
+              >
+                {choice.label}
+              </button>
+            );
+          })}
+        </div>
+        {h.storePreference.mode === 'prefer' ? (
+          <MinSavingField value={h.storePreference.minSaving} onChange={(minSaving) => setPreference({ minSaving })} />
+        ) : (
+          <p className="mt-2 text-[13px] text-muted">The lowest total wins, whatever order the stores are in.</p>
+        )}
       </div>
 
       <div className="mt-8">
@@ -1440,7 +1560,7 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
           </div>
         </div>
         <p className="mt-2 text-[13px] text-muted">
-          {`We'll pick the cheapest combination of up to ${perTrip} of your enabled stores.`}
+          {`We'll pick up to ${perTrip} of your enabled stores, by price and by how you rank them.`}
         </p>
       </div>
 
@@ -1455,16 +1575,69 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
 }
 
 /** One store: a shop-here switch, the name and chain, a price-match pill, and an expandable editor. */
+/** Where a store sits in the ranking, and the controls that move it: arrows for the keyboard, a drag grip for a pointer. */
+type RankControls = {
+  index: number;
+  count: number;
+  dragging: boolean;
+  onMove: (step: -1 | 1) => void;
+  onGripDown: (e: PointerEvent<HTMLElement>) => void;
+  onGripMove: (e: PointerEvent<HTMLElement>) => void;
+  onGripUp: () => void;
+};
+
+// Hidden on phones, where they squeeze the store name; there the grip drags and the open row has Move buttons.
+const RANK_BTN =
+  'hidden sm:flex h-11 w-9 shrink-0 items-center justify-center rounded-md text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb disabled:opacity-30';
+
+/** The store preference choices, in the order the control shows them. */
+const PREFERENCE_CHOICES: { mode: StorePreference['mode']; label: string }[] = [
+  { mode: 'cheapest', label: 'Cheapest wins' },
+  { mode: 'prefer', label: 'Prefer my top stores' },
+];
+
+/** The dollar amount a higher-ranked store may cost more by before a lower-ranked one is taken. Typed freely; saved when valid. */
+function MinSavingField({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  // A saved value that changes from elsewhere replaces the draft.
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+  return (
+    <label className="mt-4 flex flex-wrap items-center gap-2 text-[15px] text-paper">
+      <span>Switch to a lower-ranked store only if it saves at least $</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        max={50}
+        step={0.5}
+        aria-label="Minimum saving in dollars"
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          const n = parseMinSaving(e.target.value);
+          if (n !== null) onChange(n);
+        }}
+        onBlur={() => setDraft(String(value))}
+        className="h-11 w-24 rounded-md border border-edge bg-ink px-3 text-[15px] text-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb"
+      />
+    </label>
+  );
+}
+
 function StoreRow({
   store: s,
   open,
   onToggle,
   change,
+  rank,
 }: {
   store: Store;
   open: boolean;
   onToggle: () => void;
   change: StoresUpdate;
+  rank: RankControls;
 }) {
   const confirm = useConfirm();
   const shopping = s.enabled;
@@ -1493,27 +1666,65 @@ function StoreRow({
       open={open}
       onToggle={onToggle}
       lead={
-        <button
-          type="button"
-          role="switch"
-          aria-checked={shopping}
-          aria-label={`Shop at ${s.name}`}
-          onClick={() => patch({ enabled: !shopping })}
-          className="flex h-12 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb"
-        >
+        <span className="flex shrink-0 items-center">
           <span
             aria-hidden="true"
-            className={`relative inline-block h-5 w-9 rounded-full transition-colors motion-reduce:transition-none ${
-              shopping ? 'bg-herb' : 'bg-edge'
+            onPointerDown={rank.onGripDown}
+            onPointerMove={rank.onGripMove}
+            onPointerUp={rank.onGripUp}
+            onPointerCancel={rank.onGripUp}
+            className={`flex h-11 w-7 shrink-0 touch-none select-none items-center justify-center text-faint ${
+              rank.dragging ? 'cursor-grabbing' : 'cursor-grab'
             }`}
           >
-            <span
-              className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-paper transition-transform motion-reduce:transition-none ${
-                shopping ? 'translate-x-[18px]' : 'translate-x-0.5'
-              }`}
-            />
+            <Svg size={16}>
+              <path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" />
+            </Svg>
           </span>
-        </button>
+          <button
+            type="button"
+            aria-label={`Move ${s.name} up`}
+            disabled={rank.index === 0}
+            onClick={() => rank.onMove(-1)}
+            className={RANK_BTN}
+          >
+            <Svg size={16}>
+              <path d="M6 15l6-6 6 6" />
+            </Svg>
+          </button>
+          <button
+            type="button"
+            aria-label={`Move ${s.name} down`}
+            disabled={rank.index === rank.count - 1}
+            onClick={() => rank.onMove(1)}
+            className={RANK_BTN}
+          >
+            <Svg size={16}>
+              <path d="M6 9l6 6 6-6" />
+            </Svg>
+          </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={shopping}
+            aria-label={`Shop at ${s.name}`}
+            onClick={() => patch({ enabled: !shopping })}
+            className="flex h-12 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb"
+          >
+            <span
+              aria-hidden="true"
+              className={`relative inline-block h-5 w-9 rounded-full transition-colors motion-reduce:transition-none ${
+                shopping ? 'bg-herb' : 'bg-edge'
+              }`}
+            >
+              <span
+                className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-paper transition-transform motion-reduce:transition-none ${
+                  shopping ? 'translate-x-[18px]' : 'translate-x-0.5'
+                }`}
+              />
+            </span>
+          </button>
+        </span>
       }
       title={
         <>
@@ -1530,6 +1741,27 @@ function StoreRow({
       }
       remove={{ label: 'Remove store', onClick: () => void remove() }}
     >
+      <div className="flex items-center justify-between gap-4 sm:hidden">
+        <span className="text-[15px] text-paper">Rank {rank.index + 1} of {rank.count}</span>
+        <span className="flex gap-2">
+          <button
+            type="button"
+            disabled={rank.index === 0}
+            onClick={() => rank.onMove(-1)}
+            className="h-11 rounded-lg border border-edge px-4 text-[14px] text-paper disabled:opacity-30"
+          >
+            Move up
+          </button>
+          <button
+            type="button"
+            disabled={rank.index === rank.count - 1}
+            onClick={() => rank.onMove(1)}
+            className="h-11 rounded-lg border border-edge px-4 text-[14px] text-paper disabled:opacity-30"
+          >
+            Move down
+          </button>
+        </span>
+      </div>
       <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4">
         <span className="min-w-0">
           <span className="block text-[15px] text-paper">Price-matches</span>
@@ -1840,9 +2072,130 @@ function ItemRulesSection({ h, update }: { h: Household; update: Update }) {
     <Section title="Always / never buy">
       <RuleList title="Always buy" rule="always" h={h} update={update} />
       <div className="mt-6">
+        <PinList h={h} update={update} />
+      </div>
+      <div className="mt-6">
         <RuleList title="Never buy" rule="never" h={h} update={update} />
       </div>
     </Section>
+  );
+}
+
+/** A store select for one rule: "Cheapest", or a store. A store that is turned off stays visible, marked off. */
+function StoreSelect({
+  label,
+  value,
+  stores,
+  cheapestLabel,
+  onChange,
+}: {
+  label: string;
+  value: string | undefined;
+  stores: string[];
+  cheapestLabel?: string;
+  onChange: (store: string | undefined) => void;
+}) {
+  const off = value !== undefined && !stores.includes(value);
+  return (
+    <select
+      aria-label={label}
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value || undefined)}
+      className="h-9 max-w-[11rem] rounded-md border border-edge bg-ink px-2 text-[13px] text-paper"
+    >
+      {cheapestLabel !== undefined && <option value="">{cheapestLabel}</option>}
+      {stores.map((name) => (
+        <option key={name} value={name}>
+          {name}
+        </option>
+      ))}
+      {off && <option value={value}>{value} (off)</option>}
+    </select>
+  );
+}
+
+/** Items bought at one store whenever they are on the list: "eggs → Costco". Adding one picks the ingredient and the store. */
+function PinList({ h, update }: { h: Household; update: Update }) {
+  const pins = h.itemRules.filter((r) => r.rule === 'pin');
+  const stores = pinStoreOptions(h.stores);
+  const [picked, setPicked] = useState<CatalogIngredient | null>(null);
+  const [store, setStore] = useState('');
+  const chosen = stores.includes(store) ? store : (stores[0] ?? '');
+
+  function setPinStore(id: string, name: string | undefined) {
+    update((prev) => ({ ...prev, itemRules: prev.itemRules.map((r) => (r.id === id ? withPinnedStore(r, name) : r)) }));
+  }
+
+  function removePin(id: string) {
+    update((prev) => ({ ...prev, itemRules: prev.itemRules.filter((r) => r.id !== id) }));
+  }
+
+  function addPin() {
+    if (!picked || !chosen) return;
+    const ingredient = picked;
+    setPicked(null);
+    update((prev) => {
+      const existing = prev.itemRules.find((r) => r.rule === 'pin' && r.ingredientId === ingredient.id);
+      if (existing) {
+        return { ...prev, itemRules: prev.itemRules.map((r) => (r === existing ? withPinnedStore(r, chosen) : r)) };
+      }
+      return {
+        ...prev,
+        itemRules: [...prev.itemRules, { id: newId(), name: ingredient.name, rule: 'pin', store: chosen, ingredientId: ingredient.id }],
+      };
+    });
+  }
+
+  return (
+    <div>
+      <p className={eyebrow}>Always buy at a store</p>
+      <p className="mt-1 text-[13px] text-muted">
+        Bought at that store whenever it is on the list. It does not put the item on the list.
+      </p>
+      {pins.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {pins.map((p) => (
+            <li key={p.id} className="flex flex-wrap items-center gap-2 text-[15px] text-paper">
+              <span className="min-w-0 truncate">{p.name}</span>
+              <span className="text-muted" aria-hidden="true">
+                &rarr;
+              </span>
+              <StoreSelect
+                label={`Buy ${p.name} at`}
+                value={p.store}
+                stores={stores}
+                onChange={(name) => setPinStore(p.id, name)}
+              />
+              <button
+                type="button"
+                aria-label={`Remove ${p.name} pin`}
+                onClick={() => removePin(p.id)}
+                className={removeIconBtn}
+              >
+                &times;
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3">
+        {picked ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`${chipBase} border-edge px-4 text-paper`}>{picked.name}</span>
+            <StoreSelect label="Store to buy it at" value={chosen || undefined} stores={stores} onChange={(name) => setStore(name ?? '')} />
+            <button type="button" onClick={addPin} disabled={!chosen} className={addBtn}>
+              Add
+            </button>
+            <button type="button" onClick={() => setPicked(null)} className={linkBtn}>
+              Change
+            </button>
+          </div>
+        ) : (
+          <IngredientPicker onPick={setPicked} />
+        )}
+        {stores.length === 0 && <p className="mt-2 text-[13px] text-muted">Turn on a store above to pin items to it.</p>}
+      </div>
+    </div>
   );
 }
 
@@ -1959,6 +2312,18 @@ function RuleList({
                 ) : (
                   <span className={ERROR_TEXT}>{NO_MATCH_TEXT}</span>
                 )}
+                <StoreSelect
+                  label={`Buy ${item.name} at`}
+                  value={item.store}
+                  stores={pinStoreOptions(h.stores)}
+                  cheapestLabel="Cheapest"
+                  onChange={(name) =>
+                    update((prev) => ({
+                      ...prev,
+                      itemRules: prev.itemRules.map((r) => (r.id === item.id ? withPinnedStore(r, name) : r)),
+                    }))
+                  }
+                />
                 <button
                   type="button"
                   aria-label={`Remove ${item.name}`}
@@ -1992,5 +2357,180 @@ function RuleList({
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------- Storage I have ----------
+
+function StorageSection({ h, update }: { h: Household; update: Update }) {
+  const storage = h.storage;
+
+  function patch(p: Partial<HouseholdStorage>) {
+    update((prev) => ({ ...prev, storage: { ...prev.storage, ...p } }));
+  }
+
+  return (
+    <Section title="Storage I have" caption="Prep plans only use what you have.">
+      <div>
+        <span className={eyebrow}>Containers</span>
+        <div role="group" aria-label="Containers" className="mt-2 grid grid-cols-4 gap-1 rounded-lg border border-edge p-1">
+          {CONTAINER_LEVELS.map((level) => {
+            const on = storage.containers === level;
+            return (
+              <button
+                key={level}
+                type="button"
+                aria-pressed={on}
+                onClick={() => patch({ containers: level })}
+                className={`h-11 rounded-md text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb ${
+                  on ? 'bg-herb font-medium text-ink' : 'text-muted'
+                }`}
+              >
+                {CONTAINER_LABEL[level]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <ul className="mt-4">
+        <li>
+          <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-4 border-b border-line2">
+            <span className="text-[15px] text-paper">Freezer</span>
+            <input
+              type="checkbox"
+              role="switch"
+              className="h-5 w-5 shrink-0"
+              checked={storage.freezer}
+              onChange={(e) => patch({ freezer: e.target.checked })}
+            />
+          </label>
+        </li>
+        <li>
+          <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-4 border-b border-line2">
+            <span className="text-[15px] text-paper">Zip bags</span>
+            <input
+              type="checkbox"
+              role="switch"
+              className="h-5 w-5 shrink-0"
+              checked={storage.zipBags}
+              onChange={(e) => patch({ zipBags: e.target.checked })}
+            />
+          </label>
+        </li>
+      </ul>
+    </Section>
+  );
+}
+
+// ---------- Fresh, frozen or canned ----------
+
+function FormsSection({ h, update }: { h: Household; update: Update }) {
+  function toggle(key: FormGroupKey, form: FoodForm) {
+    update((prev) => {
+      const group = FORM_GROUPS.find((g) => g.key === key);
+      if (!group) return prev;
+      const current = allowedForms(prev.forms, key);
+      const next = current.includes(form) ? current.filter((f) => f !== form) : [...current, form];
+      if (next.length === 0) return prev; // at least one form stays on
+      return { ...prev, forms: { ...prev.forms, [key]: group.forms.filter((f) => next.includes(f)) } };
+    });
+  }
+
+  return (
+    <Section
+      title="Fresh, frozen or canned"
+      caption="Foods in a form you don't keep are not planned or bought. At least one form stays on."
+    >
+      <ul>
+        {FORM_GROUPS.map((g) => {
+          const kept = allowedForms(h.forms, g.key);
+          return (
+            <li
+              key={g.key}
+              className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line2 py-3"
+            >
+              <span className="text-[15px] text-paper">{g.label}</span>
+              <div className="flex flex-wrap gap-2">
+                {g.forms.map((f) => {
+                  const on = kept.includes(f);
+                  return (
+                    <button
+                      key={f}
+                      type="button"
+                      aria-pressed={on}
+                      aria-label={`${g.label}: ${FORM_LABEL[f]}`}
+                      disabled={on && kept.length === 1}
+                      onClick={() => toggle(g.key, f)}
+                      className={`${chipBase} px-4 ${chipTone(on)} disabled:cursor-not-allowed disabled:opacity-60`}
+                    >
+                      {FORM_LABEL[f]}
+                    </button>
+                  );
+                })}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
+  );
+}
+
+// ---------- Dishes I don't want ----------
+
+function DishesSection({ h, update }: { h: Household; update: Update }) {
+  const [text, setText] = useState('');
+
+  function add() {
+    const word = text.trim();
+    setText('');
+    if (!word) return;
+    update((prev) => {
+      if (prev.avoidDishes.some((d) => d.toLowerCase() === word.toLowerCase())) return prev;
+      return { ...prev, avoidDishes: [...prev.avoidDishes, word] };
+    });
+  }
+
+  function remove(word: string) {
+    update((prev) => ({ ...prev, avoidDishes: prev.avoidDishes.filter((d) => d !== word) }));
+  }
+
+  return (
+    <Section title="Dishes I don't want" caption="Meals like these won't be planned, whatever they're called.">
+      {h.avoidDishes.length === 0 ? (
+        <p className="text-[14px] text-muted">None yet.</p>
+      ) : (
+        <ul className="flex flex-wrap gap-2">
+          {h.avoidDishes.map((d) => (
+            <li key={d} className={`${chipBase} gap-1 border-edge pl-4 pr-1 text-paper`}>
+              {d}
+              <button type="button" aria-label={`Remove ${d}`} onClick={() => remove(d)} className={removeIconBtn}>
+                &times;
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3 flex gap-2">
+        <input
+          className={fieldCls}
+          placeholder="Add a dish, e.g. slaw"
+          aria-label="Add a dish I don't want"
+          value={text}
+          maxLength={40}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button type="button" onClick={add} className={addBtn}>
+          Add
+        </button>
+      </div>
+    </Section>
   );
 }

@@ -4,6 +4,7 @@
 // caller asks for a whole new attempt instead.
 import { DAYS } from './calendar';
 import { INGREDIENT_BY_ID } from './catalog';
+import { avoidedDish } from './dishes';
 import { nameHasWord } from './itemRules';
 import type { MealPlan, PlannedMeal, SlotCell, ValidationIssue } from './plan';
 import { swapClosure } from './swap';
@@ -25,6 +26,8 @@ const REPAIRABLE = new Set([
   'never-again',
   'busy',
   'variety',
+  'form',
+  'avoid-dish',
 ]);
 
 const cellOf = (c: { day: string; slot: string }) => `${c.day}-${c.slot}`;
@@ -92,6 +95,12 @@ function attribute(check: string, plan: MealPlan, ctx: ValidateContext): { meals
       for (const m of plan.meals) if (never.has(nameKey(m.name))) meals.push(m.id);
       break;
     }
+    case 'form':
+      for (const m of plan.meals) if (m.ingredients.some((i) => ctx.formBlocked?.has(i.ingredientId))) meals.push(m.id);
+      break;
+    case 'avoid-dish':
+      for (const m of plan.meals) if (avoidedDish(m.name, ctx.avoidDishes) !== undefined) meals.push(m.id);
+      break;
     case 'busy':
       for (const m of plan.meals) {
         const cap = capOf.get(cellOf(m));

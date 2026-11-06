@@ -22,6 +22,7 @@ import type {
   PantryItem,
   Rating,
   ReceiptCommitRows,
+  ReceiptPrice,
 } from '@provisions/shared';
 
 interface FlyerRow {
@@ -126,6 +127,32 @@ export async function priceHistory(db: D1Database, sinceDate: string): Promise<H
     store: r.store,
     date: r.date,
     pricePerUnit: r.price_per_unit,
+  }));
+}
+
+/**
+ * The prices one household paid at its stores, from its confirmed receipts, dated from `from` to `to`. Other
+ * households' receipts and the shared flyer rows are not included.
+ */
+export async function householdReceiptPrices(
+  db: D1Database,
+  householdId: string,
+  from: string,
+  to: string,
+): Promise<ReceiptPrice[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT ingredient_id, store, date, price_per_unit, pack_qty FROM price_history
+       WHERE source = 'receipt' AND household_id = ? AND date >= ? AND date <= ?`,
+    )
+    .bind(householdId, from, to)
+    .all<{ ingredient_id: string; store: string; date: string; price_per_unit: number; pack_qty: number | null }>();
+  return results.map((r) => ({
+    ingredientId: r.ingredient_id,
+    store: r.store,
+    date: r.date,
+    pricePerUnit: r.price_per_unit,
+    ...(r.pack_qty !== null ? { packQty: r.pack_qty } : {}),
   }));
 }
 
@@ -366,10 +393,10 @@ export async function commitReceiptRows(
     statements.push(
       db
         .prepare(
-          `INSERT OR REPLACE INTO price_history (ingredient_id, store, date, price_per_unit, on_sale, source)
-           VALUES (?, ?, ?, ?, 0, 'receipt')`,
+          `INSERT OR REPLACE INTO price_history (ingredient_id, store, date, price_per_unit, on_sale, source, household_id, pack_qty)
+           VALUES (?, ?, ?, ?, 0, 'receipt', ?, ?)`,
         )
-        .bind(p.ingredientId, p.store, p.date, p.pricePerUnit),
+        .bind(p.ingredientId, p.store, p.date, p.pricePerUnit, householdId, p.packQty),
     );
   }
 

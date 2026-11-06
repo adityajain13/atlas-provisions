@@ -2,8 +2,10 @@ import {
   DAYS,
   DAY_LONG,
   SLOTS,
+  blockedFormIds,
   buildList,
   costFixedMeals,
+  pinsOf,
   expandWeek,
   expiringSoon,
   repairFor,
@@ -14,8 +16,10 @@ import {
   usableItems,
   validate,
   type AttemptTiming,
+  type BuildListOptions,
   type Day,
   type Deal,
+  type Offer,
   type FixedCost,
   type FixedPlacement,
   type Household,
@@ -71,6 +75,7 @@ export interface RunInput {
   neverBuy: string[]; // ingredient ids from never-buy item rules
   pantry?: PantryItem[]; // all pantry items; expired ones are ignored
   ratings?: RatingSignals; // favourites, avoid and never from meal ratings
+  estimates?: Offer[]; // receipt prices the household paid, used where no flyer prices a store
   today?: string; // YYYY-MM-DD on the Toronto calendar; defaults to today
   maxAttempts?: number;
   onProgress?: (p: PlanProgress) => void;
@@ -96,6 +101,8 @@ export interface WeekFrame {
   fixedCost: FixedCost;
   fixedMeals: MealPlan['fixedMeals'];
   available: AvailableItem[];
+  formBlocked: ReadonlySet<string>; // ingredient ids in a form the household does not keep: not planned, not bought
+  listOptions: BuildListOptions; // store preference, pins and estimates, for buildList
 }
 
 type FrameInput = Omit<RunInput, 'client' | 'maxAttempts' | 'onProgress' | 'now'>;
@@ -109,21 +116,28 @@ function storeNames(household: Household, deals: Deal[], matched: MatchedItem[])
 
 /** The week's cells, fixed placements, costs and what the planner may use, for the request as saved. */
 export function weekFrame(input: FrameInput): WeekFrame {
-  const { household, request, deals, matched } = input;
+  const { household, request } = input;
   const today = input.today ?? torontoDate();
   const pantry = usableItems(input.pantry ?? [], today);
   const ratings = input.ratings ?? { favourites: [], avoid: [], never: [] };
   // Never-buy names as typed. The planner must not build a meal around one, listed ingredient or not.
   const neverWords = household.itemRules.filter((r) => r.rule === 'never').map((r) => r.name);
+  // Forms the household does not keep are taken out of the prices and the planner's choices, so they are neither planned nor bought.
+  const formBlocked = blockedFormIds(household.forms);
+  const kept = <T extends { ingredientId: string }>(items: T[]) => items.filter((i) => !formBlocked.has(i.ingredientId));
+  const deals = kept(input.deals);
+  const matched = kept(input.matched);
   const { cells, fixed: placements } = expandWeek(household, request);
-  const fixedCost = costFixedMeals(placements, household, deals, matched);
+  const estimates = kept(input.estimates ?? []);
+  const fixedCost = costFixedMeals(placements, household, deals, matched, estimates);
   const names = new Map(household.fixedMeals.map((m) => [m.id, m.name]));
   return {
     household,
     request,
     deals,
     matched,
-    stores: storeNames(household, deals, matched),
+    formBlocked,
+    stores: storeNames(household, input.deals, input.matched),
     priceMatchStores: household.stores.filter((s) => s.enabled && s.priceMatches).map((s) => s.name),
     neverBuy: input.neverBuy,
     neverWords,
@@ -141,14 +155,15 @@ export function weekFrame(input: FrameInput): WeekFrame {
       slot: p.slot,
       eaters: p.eaters,
     })),
-    available: buildAvailable(deals, fixedCost, pantry),
+    available: buildAvailable(deals, fixedCost, pantry).filter((a) => !formBlocked.has(a.id)),
+    listOptions: { preference: household.storePreference, pins: pinsOf(household.itemRules), estimates },
   };
 }
 
 /** Prices and checks one set of planned meals for the week. Shape issues from toPlannedMeals come in as well. */
 export function evaluateWeek(frame: WeekFrame, meals: PlannedMeal[], shapeIssues: ValidationIssue[], notes: string): MealPlan {
   const { household, request, deals, matched, fixedCost, stores, priceMatchStores, pantry } = frame;
-  const list = buildList(meals, fixedCost, deals, matched, stores, household.maxStores, priceMatchStores, pantry);
+  const list = buildList(meals, fixedCost, deals, matched, stores, household.maxStores, priceMatchStores, pantry, frame.listOptions);
   const totalCost = round2(list.reduce((sum, i) => sum + i.total, 0));
   const plan: MealPlan = {
     weekOf: request.weekOf,
@@ -184,6 +199,8 @@ export function validationContext(frame: WeekFrame): ValidateContext {
     recentDinnerNames: frame.recentDinnerNames,
     useFirst: frame.dueSoon.map((i) => ({ ingredientId: i.ingredientId, expiresOn: i.expiresOn })),
     neverMeals: frame.ratings.never,
+    formBlocked: frame.formBlocked,
+    avoidDishes: frame.household.avoidDishes,
   };
 }
 
@@ -261,6 +278,7 @@ export function keptCostOf(frame: WeekFrame, kept: PlannedMeal[]): number {
     frame.household.maxStores,
     frame.priceMatchStores,
     frame.pantry,
+    frame.listOptions,
   );
   return round2(list.reduce((sum, i) => sum + i.total, 0));
 }

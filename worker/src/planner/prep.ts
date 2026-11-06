@@ -11,6 +11,7 @@ import {
   type MealPlan,
   type PrepPlan,
   type PrepStep,
+  type Storage,
 } from '@provisions/shared';
 
 /** Batch prep: one extra model call per plan, after the meals are checked. */
@@ -26,6 +27,7 @@ export const PREP_RULES = [
   '`storage` has a `method` (fridge, freezer, counter or pantry), a `how` (the container or wrapping, such as "airtight container" or "wrapped in a damp paper towel"), and `keepsDays`: how many days the item stays good from the step\'s day to the last meal it serves. If it cannot keep that long, split the step into two so each batch keeps.',
   'When one prepped item serves meals on different days, say in `useNote` how to split it and where the rest is kept, for example "Use half Monday; the rest is for Wednesday, in the fridge."',
   'Only prep what keeps until it is eaten: respect each ingredient\'s `shelfLifeDays`. Link each step to the meal ids it serves in `forMeals`. Keep active prep under 90 minutes in total when possible.',
+  'Storage comes from `storage` in the payload. With containers "none", give no container steps at all: keep prepped food in its original packaging, in a bowl covered with a plate or wrap, or in the pot it was cooked in. With containers "few" (1 to 3), batch no more than the containers can hold, and prefer steps on the day they are eaten or the evening before over batching on the prep day. Use the freezer only when freezer is true, and mention zip bags only when zipBags is true.',
 ];
 
 /** The step properties of the prep list, shared by the meal call and the regenerate call. */
@@ -84,12 +86,13 @@ export function prepSystemPrompt(prepDay: Day): string {
   ].join('\n');
 }
 
-/** What the model sees: the week's meals with ingredient names, and shelf lives by name. */
-export function buildPrepPayload(plan: MealPlan, prepDay: Day) {
+/** What the model sees: the week's meals with ingredient names, shelf lives by name, and the household's storage. */
+export function buildPrepPayload(plan: MealPlan, prepDay: Day, storage?: Storage) {
   const shelfLifeDays: Record<string, number> = {};
   return {
     weekOf: plan.weekOf,
     prepDay: DAY_LONG[prepDay],
+    ...(storage ? { storage } : {}),
     meals: plan.meals.map((m) => ({
       id: m.id,
       day: DAY_LONG[m.day],
@@ -137,8 +140,8 @@ export function normalisePrep(raw: unknown, prepDay: Day, mealIds: ReadonlySet<s
  * Ask the model for the prep list and check it. Used by the on-demand regenerate path. Throws
  * when the output does not match the shape.
  */
-export async function generatePrep(plan: MealPlan, prepDay: Day, client: PrepClient): Promise<PrepPlan> {
-  const raw = await client.submitPrep(prepSystemPrompt(prepDay), buildPrepPayload(plan, prepDay));
+export async function generatePrep(plan: MealPlan, prepDay: Day, client: PrepClient, storage?: Storage): Promise<PrepPlan> {
+  const raw = await client.submitPrep(prepSystemPrompt(prepDay), buildPrepPayload(plan, prepDay, storage));
   return normalisePrep(raw, prepDay, new Set(plan.meals.map((m) => m.id)));
 }
 
@@ -147,12 +150,12 @@ export async function generatePrep(plan: MealPlan, prepDay: Day, client: PrepCli
  * warning on the plan, and the meals are kept. Any earlier prep warning is replaced. With no prep
  * day the plan comes back without prep.
  */
-export async function attachPrep(plan: MealPlan, prepDay: Day | null, client: PrepClient): Promise<MealPlan> {
+export async function attachPrep(plan: MealPlan, prepDay: Day | null, client: PrepClient, storage?: Storage): Promise<MealPlan> {
   const { prep: _stale, ...rest } = plan;
   const issues = plan.issues.filter((i) => i.check !== 'prep' && i.check !== 'prep-timing');
   if (!prepDay) return { ...rest, issues };
   try {
-    const prep = await generatePrep(plan, prepDay, client);
+    const prep = await generatePrep(plan, prepDay, client, storage);
     return { ...rest, issues: [...issues, ...prepTimingIssues(prep, plan.meals)], prep };
   } catch (e) {
     const reason = e instanceof Error ? e.message : 'unknown error';

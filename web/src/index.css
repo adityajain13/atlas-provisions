@@ -2,10 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Colour tokens as RGB triplets, read by the tailwind colours. Dark is the default. Black (AMOLED) is set per device
+   from Household or the sidebar, by data-theme on <html>: true black ink, and darker surfaces with the borders kept
+   visible. Paper, muted, faint and herb stay the same, so text keeps its contrast. */
+:root {
+  --ink: 14 14 12;
+  --paper: 237 232 223;
+  --muted: 154 148 138;
+  --faint: 119 113 106;
+  --line: 42 40 36;
+  --line2: 31 29 26;
+  --edge: 46 43 39;
+  --field: 23 22 20;
+  --chip: 42 40 36;
+  --herb: 125 180 108;
+  --herbLight: 156 203 141;
+}
+
+:root[data-theme='black'] {
+  --ink: 0 0 0;
+  --field: 10 10 10;
+  --chip: 22 22 22;
+  --line: 28 28 28;
+  --line2: 20 20 20;
+  --edge: 38 38 38;
+}
+
 @layer base {
   html,
   body {
-    background-color: #0e0e0c;
+    background-color: rgb(var(--ink));
   }
 
   body {
@@ -14,11 +40,11 @@
   }
 
   input[type='checkbox'] {
-    accent-color: #7db46c;
+    accent-color: rgb(var(--herb));
   }
 
   input::placeholder {
-    color: #77716a;
+    color: rgb(var(--faint));
   }
 
   button:not(:disabled) {

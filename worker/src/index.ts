@@ -39,6 +39,8 @@ import {
   type PriceSource,
   type Rating,
   type UsageKind,
+  estimateOffers,
+  type Offer,
 } from '@provisions/shared';
 import type { ZodError } from 'zod';
 import flyerFixture from '../fixtures/flyer-sample.json';
@@ -50,6 +52,7 @@ import {
   insertMissingChecks,
   deletePantryItem,
   flyerCountsForDate,
+  householdReceiptPrices,
   insertFlyerItems,
   insertPantryItem,
   insertPriceHistory,
@@ -100,6 +103,8 @@ type Env = AuthEnv & {
 const API = '/provisions/api';
 const DEFAULT_PLANNER_MODEL = 'claude-sonnet-5-5';
 const DEFAULT_PREP_MODEL = 'claude-haiku-5-5';
+// Receipt prices this many days old or newer can stand in for a flyer price the household's stores do not run.
+const RECEIPT_ESTIMATE_DAYS = 90;
 export const app = new Hono<{ Bindings: Env; Variables: SessionVars }>();
 
 // Sign-in is required for every API route except health and /auth/* (checked in the middleware).
@@ -149,6 +154,7 @@ async function loadDeals(
   deals: Deal[];
   neverBuy: string[];
   priceSource: PriceSource;
+  estimates: Offer[]; // receipt prices from the last 90 days, where no flyer prices a store
 }> {
   const household = await loadHousehold(env.DB, householdId);
   const { items: flyerItems, source: priceSource } = await flyerItemsFor(
@@ -171,6 +177,10 @@ async function loadDeals(
   }
 
   const history = await priceHistory(env.DB, addDaysIso(date, -56));
+  // What the household last paid at each store, from its receipts. Estimates only where no flyer prices that store.
+  const today = torontoDate();
+  const estimateFrom = addDaysIso(today, -RECEIPT_ESTIMATE_DAYS);
+  const estimates = estimateOffers(await householdReceiptPrices(env.DB, householdId, estimateFrom, today), estimateFrom, today);
 
   // Item rules name foods in free text. A never-buy name blocks every ingredient it covers, less the ones the
   // household un-ticked. An always-buy name keeps its single best match.
@@ -191,7 +201,7 @@ async function loadDeals(
     householdSize: Math.max(1, household.people.length),
   });
 
-  return { household, matched, unmatched, deals, neverBuy, priceSource };
+  return { household, matched, unmatched, deals, neverBuy, priceSource, estimates };
 }
 
 /** A 429 for a household that has used up a monthly cap, or null when it may go ahead. */
@@ -251,7 +261,7 @@ function ndjson(c: Context, work: (emit: Emit) => Promise<object>): Response {
  * the JSON and the streamed responses of POST /plan.
  */
 async function planWeek(env: Env, apiKey: string, householdId: string, request: PlanRequest, emit: Emit): Promise<MealPlan> {
-  const { household, matched, deals, neverBuy, priceSource } = await loadDeals(env, householdId, request.weekOf);
+  const { household, matched, deals, neverBuy, priceSource, estimates } = await loadDeals(env, householdId, request.weekOf);
   // Plans starting up to 21 days before the week can hold dinners in the 14-day window.
   const earlier = await plansBetween(env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf);
   const today = torontoDate();
@@ -268,6 +278,7 @@ async function planWeek(env: Env, apiKey: string, householdId: string, request: 
     pantry,
     ratings,
     today,
+    estimates,
     client: anthropicClient(apiKey, env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
     onProgress: (p: PlanProgress) => emit(p),
   });
@@ -384,6 +395,7 @@ app.post(`${API}/plan/:weekOf/prep`, async (c) => {
       plan,
       household.prepDay,
       anthropicPrepClient(apiKey, c.env.PREP_MODEL ?? DEFAULT_PREP_MODEL),
+      household.storage,
     );
     await savePlan(c.env.DB, householdId, updated);
     await recordUsage(c.env.DB, householdId, 'prep', usageMonth(torontoDate()));
@@ -431,7 +443,7 @@ app.post(`${API}/plan/:weekOf/swap`, async (c) => {
 
   const swapWeek = async (emit: Emit) => {
     const household = await loadHousehold(c.env.DB, householdId);
-    const { matched, deals, neverBuy } = await loadDeals(c.env, householdId, weekOf);
+    const { matched, deals, neverBuy, estimates } = await loadDeals(c.env, householdId, weekOf);
     const earlier = await plansBetween(c.env.DB, householdId, addDaysIso(weekOf, -21), weekOf);
     const today = torontoDate();
     const result = await runSwap({
@@ -442,6 +454,7 @@ app.post(`${API}/plan/:weekOf/swap`, async (c) => {
       deals,
       matched,
       neverBuy,
+      estimates,
       recentDinnerNames: recentDinnerNames(earlier, weekOf),
       pantry: await loadPantry(c.env.DB, householdId),
       ratings: ratingSignals(await loadRatings(c.env.DB, householdId), household.people, today),

@@ -1,5 +1,5 @@
 // Store presets: the Ontario chains the Household screen offers, and the defaults for a new household.
-// Pure data and slugs, no imports, so index.ts can use it without a cycle.
+// Pure data, slugs and the store preference defaults, no imports, so index.ts can use it without a cycle.
 
 export const STORE_GROUPS = ['Loblaw', 'Metro', 'Sobeys', 'Other'] as const;
 export type StoreGroup = (typeof STORE_GROUPS)[number];
@@ -63,3 +63,17 @@ export function slugifyName(text: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
+
+// How a household picks between stores whose totals are close. 'cheapest' always takes the lowest total.
+// 'prefer' keeps the higher-ranked store (the store list's order) unless a lower-ranked one saves at least minSaving.
+export const STORE_PREFERENCE_MODES = ['cheapest', 'prefer'] as const;
+export type StorePreferenceMode = (typeof STORE_PREFERENCE_MODES)[number];
+
+export interface StorePreference {
+  mode: StorePreferenceMode;
+  /** Dollars a lower-ranked store must save before it wins. 0 to 50. */
+  minSaving: number;
+}
+
+export const MAX_MIN_SAVING = 50;
+export const DEFAULT_STORE_PREFERENCE: StorePreference = { mode: 'prefer', minSaving: 3 };

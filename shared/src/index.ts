@@ -1,7 +1,16 @@
 import { z } from 'zod';
 
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
-import { STORE_GROUPS, STORE_PRESETS, slugifyName } from './stores';
+import {
+  DEFAULT_STORE_PREFERENCE,
+  MAX_MIN_SAVING,
+  STORE_GROUPS,
+  STORE_PREFERENCE_MODES,
+  STORE_PRESETS,
+  slugifyName,
+} from './stores';
+import { DEFAULT_STORAGE, StorageSchema } from './storage';
+import { FoodFormSchema } from './forms';
 export {
   DAYS,
   SLOTS,
@@ -118,9 +127,14 @@ export type Store = z.infer<typeof StoreSchema>;
 export const ItemRuleSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1, 'Item name is required').max(60),
-  rule: z.enum(['always', 'never']),
+  // 'pin' buys the item at its store whenever it is on the list, without putting it on the list.
+  rule: z.enum(['always', 'never', 'pin']),
   // Ingredient ids the household un-ticked from a never-buy name. Optional, so stored rules without it still parse.
   except: z.array(z.string().min(1)).optional(),
+  // Where to buy it: a store name. An always-buy rule with a store is pinned there; a 'pin' rule has one.
+  store: z.string().trim().min(1).max(40).optional(),
+  // The catalogue ingredient a 'pin' rule is for, so the pin does not depend on how the name matches.
+  ingredientId: z.string().min(1).optional(),
 });
 export type ItemRule = z.infer<typeof ItemRuleSchema>;
 
@@ -143,6 +157,20 @@ export const HouseholdSchema = z.object({
     .string()
     .regex(/^[A-Z]\d[A-Z]\d[A-Z]\d$/, 'Postal code looks like M5V2T6')
     .optional(),
+  // How close store totals are settled: the cheapest, or the store list's order when they nearly tie.
+  // Stored households without it get the default.
+  storePreference: z
+    .object({
+      mode: z.enum(STORE_PREFERENCE_MODES),
+      minSaving: z.number().min(0, 'Saving cannot be negative').max(MAX_MIN_SAVING),
+    })
+    .default(DEFAULT_STORE_PREFERENCE),
+  // Dishes the household does not want planned, as typed: "slaw" rules out coleslaw. Stored households without it get none.
+  avoidDishes: z.array(z.string().trim().min(1).max(40)).max(50).default([]),
+  // Forms the household keeps, per group (fish, beans, ...). A missing group keeps every form.
+  forms: z.record(z.string(), z.array(FoodFormSchema)).default({}),
+  // What storage the household has. Stored households without it get the defaults.
+  storage: StorageSchema.default(DEFAULT_STORAGE),
 });
 export type Household = z.infer<typeof HouseholdSchema>;
 
@@ -179,6 +207,10 @@ export function defaultHousehold(): Household {
     itemRules: [],
     timeCaps: {},
     prepDay: 'sun',
+    avoidDishes: [],
+    forms: {},
+    storage: { ...DEFAULT_STORAGE },
+    storePreference: { ...DEFAULT_STORE_PREFERENCE },
   };
 }
 
@@ -195,6 +227,8 @@ export {
   INGREDIENT_BY_ID,
   type Category,
   type BaseUnit,
+  type FoodForm,
+  type FormGroupKey,
   type Ingredient as CatalogIngredient,
 } from './catalog';
 export * from './parse';
@@ -216,3 +250,6 @@ export * from './households';
 export * from './itemRules';
 export * from './swap';
 export * from './repair';
+export * from './storage';
+export * from './forms';
+export * from './dishes';

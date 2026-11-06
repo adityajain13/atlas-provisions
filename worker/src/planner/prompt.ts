@@ -2,14 +2,18 @@ import {
   DAYS,
   INGREDIENT_BY_ID,
   VARIETY_RULES,
+  formOf,
+  formsAllowedFor,
   type Day,
   type Deal,
+  type FoodForm,
   type PantryItem,
   type FixedCost,
   type FixedPlacement,
   type Household,
   type PlanRequest,
   type SlotCell,
+  type Storage,
   type ValidationIssue,
 } from '@provisions/shared';
 import { PREP_RULES, PREP_STEP_PROPERTIES } from './prep';
@@ -29,6 +33,8 @@ export const SYSTEM_PROMPT = [
   'Balanced dinners: a protein, a vegetable, a grain or starch. Weeknight dinners are 40 active minutes or fewer unless a slot has maxMinutes, which is a hard cap.',
   'Use only methods possible with `equipment`.',
   'Respect `varietyRules` that are true. Avoid `avoid` meals; you may reuse `favourites`.',
+  "Never plan a dish in `avoidDishes` or a close variant of it (e.g. 'slaw' rules out coleslaw, cabbage slaw and any raw shredded-cabbage salad).",
+  "Respect formsAllowed (e.g. no canned fish if canned isn't allowed). An available item with a `form` is that form.",
   'Quantities are in each ingredient\'s `unit`, as the total for that meal. Do not estimate prices; code computes cost.',
   'For `each` ingredients, qty counts packages or pieces as sold (see eachMeans), never slices or servings: two people having toast all week is 1 loaf, not 7.',
   'If `feedback` is present, the previous plan broke these checks. Fix every error listed there and keep what already worked.',
@@ -119,6 +125,7 @@ export interface AvailableItem {
   vegetarian: boolean;
   shelfLifeDays: number;
   eachMeans?: string; // for `each` items: what one unit of qty is, as sold
+  form?: FoodForm; // for items sold in a form the household's forms apply to
 }
 
 /** What one `each` unit means for this ingredient, from its catalogue weight. */
@@ -146,6 +153,7 @@ export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryIt
     const ing = INGREDIENT_BY_ID[ingredientId];
     if (!ing) return null;
     const eachMeans = eachMeansFor(ing);
+    const form = formOf(ing.id);
     return {
       id: ing.id,
       name: ing.name,
@@ -157,6 +165,7 @@ export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryIt
       vegetarian: ing.vegetarian,
       shelfLifeDays: ing.shelfLifeDays,
       ...(eachMeans ? { eachMeans } : {}),
+      ...(form ? { form } : {}),
     };
   };
   for (const d of deals) {
@@ -229,6 +238,9 @@ export interface PlannerPayload {
   useFirst: string[];
   favourites: string[];
   avoid: string[];
+  avoidDishes: string[]; // dish words the household does not want, as typed
+  formsAllowed: Record<string, FoodForm[]>; // per form group, the forms the household keeps
+  storage: Storage;
   feedback: ValidationIssue[] | null;
   prepDay: Day | null;
   keptMeals?: KeptMealPayload[];
@@ -280,6 +292,9 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
       : [],
     favourites: input.favourites ?? [],
     avoid: [...new Set([...(noRepeat ? input.recentDinnerNames : []), ...(input.avoid ?? [])])],
+    avoidDishes: household.avoidDishes,
+    formsAllowed: formsAllowedFor(household.forms),
+    storage: household.storage,
     feedback: null,
     ...(input.keptMeals
       ? {
