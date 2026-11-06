@@ -47,7 +47,8 @@ describe('who may use the app', () => {
     const { raw, env, cookies } = await setup([OWNER]);
     const res = await get('/household', cookies[OWNER]!, env);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual(defaultHousehold());
+    // A brand-new owner household starts with first-time setup to do.
+    expect(await res.json()).toEqual({ ...defaultHousehold(), setupDone: false });
     expect(rows(raw, 'SELECT name FROM households')).toEqual([{ name: "owner's household" }]);
     expect(rows(raw, 'SELECT role FROM household_members WHERE email = ?', OWNER)).toEqual([{ role: 'owner' }]);
   });
@@ -81,6 +82,30 @@ describe('who may use the app', () => {
       invites: [],
     });
     expect(count(raw, 'household_invites')).toBe(0);
+  });
+
+  it('keeps the setup flag the owner saves, and returns it on the next read', async () => {
+    const { env, cookies } = await setup([OWNER]);
+    await get('/household', cookies[OWNER]!, env);
+    const done = { ...defaultHousehold(), setupDone: true };
+    expect((await send('PUT', '/household', done, cookies[OWNER]!, env)).status).toBe(200);
+    expect(await (await get('/household', cookies[OWNER]!, env)).json()).toEqual(done);
+  });
+
+  it('lets an invited member join a household that has setup to do, with the document unchanged and its saves leaving the flag alone', async () => {
+    const { raw, env, cookies } = await setup([OWNER]);
+    const ownerView = await (await get('/household', cookies[OWNER]!, env)).json();
+    expect(ownerView).toMatchObject({ setupDone: false });
+    await send('POST', '/invites', { email: FRIEND }, cookies[OWNER]!, env);
+
+    const { cookie } = await signIn(raw, FRIEND);
+    const memberView = await (await get('/household', cookie, env)).json();
+    expect(memberView).toEqual(ownerView);
+    expect(((await (await get('/members', cookie, env)).json()) as { me: { role: string } }).me.role).toBe('member');
+
+    // The member's own save of the Household page sends the same flag back.
+    expect((await send('PUT', '/household', memberView, cookie, env)).status).toBe(200);
+    expect(await (await get('/household', cookies[OWNER]!, env)).json()).toMatchObject({ setupDone: false });
   });
 
   it('lets an invited address in even when it is not on the allow-list, and keeps it out once removed', async () => {

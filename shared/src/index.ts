@@ -191,6 +191,8 @@ export const HouseholdSchema = z.object({
   cuisines: z.record(z.string(), z.enum(CUISINE_LEVELS)).default(defaultCuisines),
   // Catalogue ids of the spices and staples the household keeps: plans use them freely and they never go on the list.
   onHand: z.array(z.string().min(1).max(80)).max(300).default(() => [...DEFAULT_ON_HAND]),
+  // False while the first-time setup wizard is unfinished. Missing means done, so existing households never see it.
+  setupDone: z.boolean().optional(),
 });
 export type Household = z.infer<typeof HouseholdSchema>;
 

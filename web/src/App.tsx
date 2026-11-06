@@ -8,9 +8,11 @@ import List from './screens/List';
 import Plan from './screens/Plan';
 import HouseholdScreen from './screens/Household';
 import Pantry from './screens/Pantry';
+import Setup from './screens/Setup';
 import Login from './screens/Login';
 import { InviteBanner } from './components/InviteBanner';
 import { SessionProvider, safeNext, useSession } from './session';
+import { SetupGateProvider, useSetupGate } from './setupGate';
 
 export default function App() {
   return (
@@ -45,18 +47,48 @@ function AppRoutes() {
   }
 
   return (
+    <SetupGateProvider>
+      <SignedInRoutes />
+    </SetupGateProvider>
+  );
+}
+
+/**
+ * The app for a signed-in address. A household with unfinished first-time setup is sent to /setup, which is the
+ * one full-screen page: no side nav and no tab bar. Nothing is routed until the household check has answered.
+ */
+function SignedInRoutes() {
+  const gate = useSetupGate();
+  const { pathname } = useLocation();
+
+  if (!gate.ready) return null;
+  if (!gate.setupDone && pathname !== '/setup') return <Navigate to="/setup" replace />;
+
+  const routes = (
+    <Routes>
+      <Route path="/" element={<Week />} />
+      <Route path="/list" element={<List />} />
+      <Route path="/plan" element={<Plan />} />
+      <Route path="/household" element={<HouseholdScreen />} />
+      <Route path="/pantry" element={<Pantry />} />
+      <Route path="/setup" element={<Setup />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+
+  if (pathname === '/setup') {
+    return (
+      <div className="min-h-screen bg-ink font-sans text-paper">
+        <InviteBanner />
+        {routes}
+      </div>
+    );
+  }
+
+  return (
     <div className="min-h-screen bg-ink font-sans text-paper">
       <InviteBanner />
-      <AppShell>
-        <Routes>
-          <Route path="/" element={<Week />} />
-          <Route path="/list" element={<List />} />
-          <Route path="/plan" element={<Plan />} />
-          <Route path="/household" element={<HouseholdScreen />} />
-          <Route path="/pantry" element={<Pantry />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AppShell>
+      <AppShell>{routes}</AppShell>
       <TabBar />
     </div>
   );
