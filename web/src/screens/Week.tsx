@@ -5,6 +5,7 @@ import {
   SLOTS,
   torontoDate,
   type Day,
+  type FixedMeal,
   type MealPlan,
   type PlannedMeal,
   type Rating,
@@ -94,6 +95,11 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   // Desktop only: the meal open in the side panel.
   const [openMeal, setOpenMeal] = useState<{ day: Day; meal: ViewMeal } | null>(null);
   const closeMeal = useCallback(() => setOpenMeal(null), []);
+  // Phone only: the meal open as a full-screen sheet.
+  const [sheetMeal, setSheetMeal] = useState<{ day: Day; meal: ViewMeal } | null>(null);
+  const closeSheet = useCallback(() => setSheetMeal(null), []);
+  // The household's fixed meals, for the ingredients a fixed meal's detail lists.
+  const [fixedMeals, setFixedMeals] = useState<FixedMeal[]>([]);
   // Meal swapping: choose mode, the meals picked, the meal ids the confirm dialog is for, and the note.
   const [choosing, setChoosing] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -120,6 +126,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
         if (!alive) return;
         setNames(new Map((household?.people ?? []).map((p) => [p.id, p.name])));
         setPrepDay(household?.prepDay ?? null);
+        setFixedMeals(household?.fixedMeals ?? []);
         setRatings(saved);
         setSource(plan ? { status: 'plan', plan } : { status: 'none' });
       })
@@ -169,16 +176,47 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
 
   const plan: MealPlan = source.plan;
   const week = planToWeek(plan, names);
-  // Leftover links point at other planned meals. Opening one swaps the side panel to it.
-  const openMealById = (id: string) => {
+  // Leftover links point at other planned meals. Opening one swaps the open meal (panel or sheet) to it.
+  const findMeal = (id: string): { day: Day; meal: ViewMeal } | null => {
     for (const d of week.days) {
       const meal = d.meals.find((m) => m.id === id);
-      if (meal) {
-        setOpenMeal({ day: d.key, meal });
-        return;
-      }
+      if (meal) return { day: d.key, meal };
     }
+    return null;
   };
+  const openMealById = (id: string) => {
+    const found = findMeal(id);
+    if (found) setOpenMeal(found);
+  };
+  const openSheetById = (id: string) => {
+    const found = findMeal(id);
+    if (found) setSheetMeal(found);
+  };
+  // The ingredients of the household's fixed meal behind a fixed meal on the week, as typed on Household.
+  const fixedIngredientsFor = (day: Day, meal: ViewMeal) =>
+    fixedMeals.find((f) => f.active && f.name === meal.name && f.slot === meal.slot && f.days.includes(day))?.ingredients;
+  // What the meal panel (desktop) or the sheet (phone) shows for one open meal.
+  const detailFor = (
+    open: { day: Day; meal: ViewMeal },
+    onClose: () => void,
+    onOpen: (id: string) => void,
+    presentation: 'panel' | 'sheet',
+  ) => ({
+    weekOf: plan.weekOf,
+    day: open.day,
+    meal: open.meal,
+    planned: plannedFor(plan, open.day, open.meal),
+    fixedIngredients: fixedIngredientsFor(open.day, open.meal),
+    onOpenMeal: onOpen,
+    rating: open.meal.rateable ? ratingFor(ratings, open.meal.rateable) : null,
+    ratingError,
+    onRate: (value: RatingKind) => {
+      if (open.meal.rateable) void rate(open.meal.rateable, value);
+    },
+    onClose,
+    onSwap: !past && open.meal.id && !open.meal.fixed ? () => openSwap([open.meal.id!]) : undefined,
+    presentation,
+  });
   const todayIso = torontoDate();
   const selectedDay = picked ?? defaultDay(week.weekOf, todayIso);
   const day = week.days.find((d) => d.key === selectedDay) ?? week.days[0]!;
@@ -261,6 +299,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
     setDialog(null);
     // The meal panel would cover the progress, so it closes as the swap starts.
     closeMeal();
+    setSheetMeal(null);
     setSwapError(null);
     setSwapping(replaced);
     setProgressModal({ title: swappingTitle(replaced.length), meals: replacedNames, error: null });
@@ -418,6 +457,60 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
               : m.leftover
                 ? 'rounded-lg border border-edge p-4'
                 : 'border-t border-line pt-4';
+            // The meal's name, meta and tags. On a phone it opens the meal as a full-screen sheet (not while choosing).
+            const header = (
+              <span className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-[0.14em] text-muted">
+                  {SLOT_LABEL[m.slot]} &middot; {m.who}
+                </span>
+                <span className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-muted ${st.selectable ? 'pr-7' : ''}`}>
+                  {st.linked && <span className="text-herbLight">Linked</span>}
+                  {!st.choosing && (m.fixed ? 'Fixed' : m.cost !== null ? `$${m.cost.toFixed(2)}` : '')}
+                </span>
+              </span>
+            );
+            const main = (
+              <>
+                {header}
+                {m.leftover && (
+                  <span className="mt-2 block">
+                    <LeftoverLine meal={m} />
+                  </span>
+                )}
+                <span
+                  role="heading"
+                  aria-level={3}
+                  className={`mt-2 block font-display font-medium ${m.leftover ? 'text-paper/80' : 'text-paper'} ${
+                    m.slot === 'dinner' ? 'text-[24px] leading-[1.2]' : 'text-[20px] leading-[1.25]'
+                  }`}
+                >
+                  {m.name}
+                </span>
+                <span className="mt-1 block text-[13px] text-muted">{m.detail}</span>
+                {m.makes && <MakesLine meal={m} className="mt-1 block text-[12px] text-muted" />}
+                {m.tags.length > 0 && (
+                  <span className="mt-3 flex flex-wrap gap-2">
+                    {m.tags.map((t) => (
+                      <span key={`${t.kind}-${t.text}`} className={`rounded-full border px-2.5 py-1 text-[12px] ${TAG_TONE[t.kind]}`}>
+                        {t.text}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </>
+            );
+            const opener = st.choosing ? (
+              <div className="block">{main}</div>
+            ) : (
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                onClick={() => setSheetMeal({ day: day.key, meal: m })}
+                className={`${RING} block w-full rounded-lg text-left`}
+              >
+                {main}
+              </button>
+            );
             return (
               <article
                 key={`${m.slot}-${m.name}`}
@@ -439,41 +532,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
                     </span>
                   </button>
                 )}
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] uppercase tracking-[0.14em] text-muted">
-                    {SLOT_LABEL[m.slot]} &middot; {m.who}
-                  </span>
-                  <span className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-muted ${st.selectable ? 'pr-7' : ''}`}>
-                    {st.linked && <span className="text-herbLight">Linked</span>}
-                    {!st.choosing && (m.fixed ? 'Fixed' : m.cost !== null ? `$${m.cost.toFixed(2)}` : '')}
-                  </span>
-                </div>
-                {m.leftover && (
-                  <div className="mt-2">
-                    <LeftoverLine meal={m} />
-                  </div>
-                )}
-                <h3
-                  className={`mt-2 font-display font-medium ${m.leftover ? 'text-paper/80' : 'text-paper'} ${
-                    m.slot === 'dinner' ? 'text-[24px] leading-[1.2]' : 'text-[20px] leading-[1.25]'
-                  }`}
-                >
-                  {m.name}
-                </h3>
-                <p className="mt-1 text-[13px] text-muted">{m.detail}</p>
-                {m.makes && <MakesLine meal={m} className="mt-1 block text-[12px] text-muted" />}
-                {m.tags.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {m.tags.map((t) => (
-                      <span
-                        key={`${t.kind}-${t.text}`}
-                        className={`rounded-full border px-2.5 py-1 text-[12px] ${TAG_TONE[t.kind]}`}
-                      >
-                        {t.text}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                {opener}
                 {m.rateable && (
                   <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label={`Rate ${m.name}`}>
                     {RATING_OPTIONS.map((opt) => {
@@ -510,6 +569,8 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
             {planLabel(weekOf, current, true)}
           </Link>
         )}
+
+        {sheetMeal && <MealDetail {...detailFor(sheetMeal, closeSheet, openSheetById, 'sheet')} />}
       </div>
 
       {/* Desktop layout: the whole week as a grid. */}
@@ -648,22 +709,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
           )}
         </div>
 
-        {openMeal && (
-          <MealDetail
-            weekOf={plan?.weekOf}
-            day={openMeal.day}
-            meal={openMeal.meal}
-            planned={plannedFor(plan, openMeal.day, openMeal.meal)}
-            onOpenMeal={openMealById}
-            rating={openMeal.meal.rateable ? ratingFor(ratings, openMeal.meal.rateable) : null}
-            ratingError={ratingError}
-            onRate={(value) => {
-              if (openMeal.meal.rateable) void rate(openMeal.meal.rateable, value);
-            }}
-            onClose={closeMeal}
-            onSwap={!past && openMeal.meal.id && !openMeal.meal.fixed ? () => openSwap([openMeal.meal.id!]) : undefined}
-          />
-        )}
+        {openMeal && <MealDetail {...detailFor(openMeal, closeMeal, openMealById, 'panel')} />}
       </div>
 
       {choosing && (

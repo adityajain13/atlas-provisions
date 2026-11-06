@@ -9,6 +9,7 @@ import {
   maxStoresLimit,
   orderStores,
   parseFlippNames,
+  readsSitePrices,
   removeFlippName,
   presetsNotInList,
   storeFromPreset,
@@ -180,5 +181,22 @@ describe('orderStores', () => {
     ];
     expect(orderStores(input).map((s) => s.name)).toEqual(['Costco', 'Metro', 'Fortinos', 'Zehrs']);
     expect(input[0]!.name).toBe('Zehrs');
+  });
+});
+
+describe('readsSitePrices', () => {
+  it('reads an enabled T&T store with no location, since its prices are the same everywhere', () => {
+    expect(readsSitePrices(store({ id: 'tt-supermarket', name: 'T&T Supermarket', enabled: true }))).toBe(true);
+    expect(readsSitePrices(store({ id: 'tt-supermarket', name: 'T&T Supermarket', enabled: false }))).toBe(false);
+  });
+
+  it('reads a Loblaw-family store only once its location is picked', () => {
+    expect(readsSitePrices(store({ id: 'no-frills', name: 'No Frills', enabled: true }))).toBe(false);
+    const picked = store({ id: 'no-frills', name: 'No Frills', enabled: true, siteStore: { banner: 'nofrills', storeId: '1234', label: 'No Frills · X' } });
+    expect(readsSitePrices(picked)).toBe(true);
+  });
+
+  it('does not read a store whose chain has no regular price feed', () => {
+    expect(readsSitePrices(store({ id: 'metro', name: 'Metro', enabled: true }))).toBe(false);
   });
 });

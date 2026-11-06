@@ -115,6 +115,7 @@ import {
   parseMinSaving,
   pinStoreOptions,
   presetsNotInList,
+  readsSitePrices,
   removeFlippName,
   storeFromPreset,
   withPinnedStore,
@@ -1472,7 +1473,7 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
           <FlyerRefresh />
         </div>
         <div className="mt-6 border-t border-line2 pt-4">
-          <SitePrices stores={h.stores.filter((s) => s.enabled && s.siteStore).length} />
+          <SitePrices stores={h.stores.filter(readsSitePrices).length} />
         </div>
       </div>
 
