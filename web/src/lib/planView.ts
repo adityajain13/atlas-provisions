@@ -4,6 +4,7 @@ import {
   INGREDIENT_BY_ID,
   type BaseUnit,
   type Day,
+  type EstimateBasis,
   type ListItem,
   type MealPlan,
   type PlannedMeal,
@@ -85,7 +86,7 @@ export type ViewItem = {
   price: number;
   note?: { kind: 'match' | 'used'; text: string };
   elsewhere?: string; // unpriced items: where the cheapest enabled store sells it
-  estimate?: { date: string }; // the price is the household's last receipt price, from this day
+  estimate?: { basis: EstimateBasis; date: string }; // not a flyer price: the last receipt price, or the store's regular site price, from this day
   pinnedTo?: string; // bought at this store because an item rule pins it there
   priceUnknown?: boolean; // pinned to a store with no known price: listed there, not priced
 };
@@ -339,7 +340,7 @@ export function planToList(plan: MealPlan): { weekOf: string; stores: string[]; 
       price: item.total,
       ...(note ? { note } : {}),
       ...(elsewhere ? { elsewhere } : {}),
-      ...(item.estimate ? { estimate: { date: item.estimate.date } } : {}),
+      ...(item.estimate ? { estimate: { basis: item.estimate.basis, date: item.estimate.date } } : {}),
       ...(item.pinned ? { pinnedTo: item.store } : {}),
       ...(item.priceUnknown ? { priceUnknown: true } : {}),
     };

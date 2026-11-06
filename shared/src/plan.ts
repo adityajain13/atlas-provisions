@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { DAYS, PLAN_RETENTION_WEEKS, SLOTS, WEEKS_AHEAD, addWeeks, isSunday, type Day, type Slot } from './calendar';
 import type { Category, BaseUnit } from './catalog';
 import type { PrepPlan } from './prep';
+import type { EstimateBasis } from './offers';
 
 // ---- Request ----
 
@@ -105,7 +106,7 @@ export interface ListItem {
   label?: string; // the name as typed, for custom items
   qtyText?: string; // the quantity as typed, e.g. "750 g", for custom items
   // The price is an estimate: the household's last receipt price at this store, not a flyer price this week.
-  estimate?: { basis: 'receipt'; date: string };
+  estimate?: { basis: EstimateBasis; date: string };
   // Pinned to this store by an item rule ("Eggs at Costco"). Its price is unknown when no store offer is known.
   pinned?: boolean;
   priceUnknown?: boolean; // pinned, and no price is known at its store: listed under the store, not priced

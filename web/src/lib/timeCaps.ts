@@ -1,7 +1,7 @@
 import { type Day, type Household, type Slot } from '@provisions/shared';
-import { allCells, cellKey, dayCells, moveCell, rectCells, sameCell, slotCells, weekendCells, weeknightDinnerCells, type Cell } from './cells';
+import { allCells, cellKey, dayCells, moveCell, rectCells, sameCell, slotCells, type Cell } from './cells';
 
-export { allCells, cellKey, dayCells, moveCell, rectCells, sameCell, slotCells, weekendCells, weeknightDinnerCells, type Cell, type GridMove } from './cells';
+export { allCells, cellKey, dayCells, moveCell, rectCells, sameCell, slotCells, type Cell, type GridMove } from './cells';
 
 // Busy-night time caps: helpers for the Household grid and the Plan labels. Pure, so they are tested without the DOM.
 

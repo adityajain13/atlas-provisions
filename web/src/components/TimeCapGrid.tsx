@@ -15,7 +15,7 @@ import {
   snapshotCaps,
   spokenCap,
 } from '../lib/timeCaps';
-import { allCells, weekendCells, weeknightDinnerCells, type Cell } from '../lib/cells';
+import { allCells, type Cell } from '../lib/cells';
 import { useConfirm } from './ConfirmDialog';
 import { QUICK, SlotGrid, type Undo } from './SlotGrid';
 
@@ -55,14 +55,8 @@ export function TimeCapGrid({ h, update }: { h: Household; update: Update }) {
     <SlotGrid
       label="Time caps by day and meal"
       menuLabel={(title) => `Time cap for ${title}`}
-      toolbar={({ open, act }) => (
+      toolbar={({ act }) => (
         <>
-          <button type="button" className={QUICK} onClick={(e) => open(weeknightDinnerCells(), e.currentTarget, 'Weeknight dinners')}>
-            Weeknight dinners&hellip;
-          </button>
-          <button type="button" className={QUICK} onClick={(e) => open(weekendCells(), e.currentTarget, 'Weekends')}>
-            Weekends&hellip;
-          </button>
           <button type="button" className={QUICK} disabled={total === 0} onClick={() => void clearAll(act)}>
             Clear all
           </button>

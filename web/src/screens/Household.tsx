@@ -67,6 +67,8 @@ import {
   neverExpansion,
 } from '../lib/itemRules';
 import { FlyerRefresh } from '../components/FlyerRefresh';
+import { RegularPriceLocation } from '../components/SiteLocation';
+import { SitePrices } from '../components/SitePrices';
 import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
@@ -1446,12 +1448,16 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
 
   return (
     <Section title="Stores">
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
-        <div className="lg:w-64 lg:shrink-0">
+      {/* Stacked full width: the right column is too narrow to put the refresh rows beside the postal code. */}
+      <div className="flex flex-col">
+        <div className="max-w-xs">
           <PostalCodeField h={h} update={update} />
         </div>
-        <div className="min-w-0 flex-1 border-t border-line2 pt-4 lg:border-t-0 lg:pt-0">
+        <div className="mt-6 border-t border-line2 pt-4">
           <FlyerRefresh />
+        </div>
+        <div className="mt-6 border-t border-line2 pt-4">
+          <SitePrices stores={h.stores.filter((s) => s.enabled && s.siteStore).length} />
         </div>
       </div>
 
@@ -1776,6 +1782,9 @@ function StoreRow({
       </label>
 
       <FlippNames store={s} change={change} />
+      <div className="mt-6">
+        <RegularPriceLocation store={s} change={change} />
+      </div>
     </Disclosure>
   );
 }

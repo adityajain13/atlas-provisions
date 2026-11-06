@@ -23,6 +23,7 @@ import type {
   Rating,
   ReceiptCommitRows,
   ReceiptPrice,
+  SitePrice,
 } from '@provisions/shared';
 
 interface FlyerRow {
@@ -117,9 +118,13 @@ export async function overlappingFlyerItems(
   return results.map(flyerFromRow);
 }
 
+/**
+ * Price history for deal scoring: flyer and receipt rows. Site rows are left out, since a regular shelf price is not a
+ * sale and would make every flyer deal look bigger; they reach the list as offers (sitePriceRows).
+ */
 export async function priceHistory(db: D1Database, sinceDate: string): Promise<HistoryPoint[]> {
   const { results } = await db
-    .prepare('SELECT ingredient_id, store, date, price_per_unit FROM price_history WHERE date >= ?')
+    .prepare("SELECT ingredient_id, store, date, price_per_unit FROM price_history WHERE date >= ? AND source <> 'site'")
     .bind(sinceDate)
     .all<HistoryRow>();
   return results.map((r) => ({
@@ -154,6 +159,45 @@ export async function householdReceiptPrices(
     pricePerUnit: r.price_per_unit,
     ...(r.pack_qty !== null ? { packQty: r.pack_qty } : {}),
   }));
+}
+
+/**
+ * The regular shelf prices read at the given store locations since `since` (YYYY-MM-DD). Each row is for one store
+ * name and location; the caller keeps the rows of the stores a household uses.
+ */
+export async function sitePriceRows(
+  db: D1Database,
+  locations: { store: string; storeId: string }[],
+  since: string,
+): Promise<SitePrice[]> {
+  if (locations.length === 0) return [];
+  const { results } = await db
+    .prepare(
+      `SELECT ingredient_id, store, site_store_id, date, price_per_unit, on_sale, regular_price_per_unit, pack_qty
+       FROM price_history WHERE source = 'site' AND date >= ? AND site_store_id IN (${locations.map(() => '?').join(', ')})`,
+    )
+    .bind(since, ...locations.map((l) => l.storeId))
+    .all<{
+      ingredient_id: string;
+      store: string;
+      site_store_id: string;
+      date: string;
+      price_per_unit: number;
+      on_sale: number;
+      regular_price_per_unit: number | null;
+      pack_qty: number | null;
+    }>();
+  return results
+    .filter((r) => locations.some((l) => l.store === r.store && l.storeId === r.site_store_id))
+    .map((r) => ({
+      ingredientId: r.ingredient_id,
+      store: r.store,
+      date: r.date,
+      pricePerUnit: r.price_per_unit,
+      onSale: r.on_sale === 1,
+      ...(r.regular_price_per_unit !== null ? { regularPricePerUnit: r.regular_price_per_unit } : {}),
+      ...(r.pack_qty !== null ? { packQty: r.pack_qty } : {}),
+    }));
 }
 
 export async function insertPriceHistory(db: D1Database, rows: HistoryInsert[]): Promise<number> {

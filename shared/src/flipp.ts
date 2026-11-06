@@ -175,6 +175,7 @@ export interface IngestRunSummary {
   storeCounts: StoreCount[]; // raw items per store, in flyers mode
   unmatchedSample: string[];
   errors: string[];
+  requests?: number; // requests sent to Flipp in this run, counted against the Worker's subrequest limit
 }
 
 export interface IngestStatus {

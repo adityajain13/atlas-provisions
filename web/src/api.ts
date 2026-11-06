@@ -325,6 +325,46 @@ export async function refreshFlyers(): Promise<IngestRunSummary> {
   return json(await authFetch(`${BASE}/flyers/refresh`, { method: 'POST' }), (raw) => raw as IngestRunSummary);
 }
 
+// ---- Regular prices from the Loblaw-family sites (store locations and batch lookups) ----
+
+export interface SiteLocationOption {
+  storeId: string;
+  label: string;
+  postalCode: string | null;
+}
+
+/** One regular-price batch: what it looked up and matched, and whether the site asked for a sign-in. */
+export interface SiteRunResult {
+  ok: boolean;
+  lookups: number;
+  matched: number;
+  errors: string[];
+  authNeeded: boolean;
+}
+
+export interface SiteStatus {
+  lastRun: (SiteRunResult & { id: string; startedAt: string; finishedAt: string; sample?: unknown[] }) | null;
+  prices: number; // ingredient and store pairs with a site price in the last two weeks, at the household's locations
+}
+
+/** Store locations of a banner that match the search text. */
+export async function searchSiteLocations(banner: string, q: string): Promise<SiteLocationOption[]> {
+  const body = await json(
+    await authFetch(`${BASE}/site-stores/${encodeURIComponent(banner)}/locations?q=${encodeURIComponent(q)}`),
+    (raw) => raw as { locations: SiteLocationOption[] },
+  );
+  return body.locations;
+}
+
+export async function getSitePriceStatus(): Promise<SiteStatus> {
+  return json(await authFetch(`${BASE}/site-prices/status`), (raw) => raw as SiteStatus);
+}
+
+/** Reads the regular prices of the household's stores now. Takes up to a minute. */
+export async function refreshSitePrices(): Promise<SiteRunResult> {
+  return json(await authFetch(`${BASE}/site-prices/refresh`, { method: 'POST' }), (raw) => raw as SiteRunResult);
+}
+
 // ---- Households: members, invites, leaving, usage ----
 
 export async function getMembers(): Promise<MembersView> {

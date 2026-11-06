@@ -25,16 +25,6 @@ export function dayCells(day: Day): Cell[] {
   return SLOTS.map((slot) => ({ day, slot }));
 }
 
-/** Monday to Thursday dinners. */
-export function weeknightDinnerCells(): Cell[] {
-  return (['mon', 'tue', 'wed', 'thu'] as Day[]).map((day) => ({ day, slot: 'dinner' as Slot }));
-}
-
-/** Every meal on Saturday and Sunday. */
-export function weekendCells(): Cell[] {
-  return [...dayCells('sat'), ...dayCells('sun')];
-}
-
 /** Every cell inside the rectangle between two corners, both included. */
 export function rectCells(a: Cell, b: Cell): Cell[] {
   const d0 = DAYS.indexOf(a.day);
