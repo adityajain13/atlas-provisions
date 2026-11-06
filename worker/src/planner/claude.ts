@@ -1,10 +1,23 @@
 import type { RawPlan } from '@provisions/shared';
-import { SUBMIT_PLAN_TOOL } from './prompt';
+import { splitPayload, submitPlanTool, type PlannerPayload } from './prompt';
 import { PREP_TOOL, type PrepClient } from './prep';
 import { answerFrom, answerOnlyInstruction, retryMessages, textOf, type ContentBlock } from '../toolAnswer';
 
+/**
+ * The system prompt of a call. A string is one block. The object form sends `cached` first (the part every attempt of a
+ * week shares, so it is cached) and then `uncached`, an extra block for a swap or repair.
+ */
+export type SystemText = string | { cached: string; uncached?: string };
+
+/** A payload split into the part every attempt shares (cached) and the part that varies. See splitPayload. */
+export interface SplitPayload {
+  stable: unknown;
+  variable: unknown;
+}
+
 export interface PlannerClient {
-  submitPlan(system: string, payload: unknown): Promise<RawPlan>;
+  /** The payload is a PlannerPayload from buildPayload. Only its prepDay is read here; the rest is sent as is. */
+  submitPlan(system: SystemText, payload: unknown): Promise<RawPlan>;
 }
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -191,24 +204,46 @@ export interface ToolDef {
   input_schema: object;
 }
 
+const isSplit = (payload: unknown): payload is SplitPayload =>
+  typeof payload === 'object' && payload !== null && Object.keys(payload).sort().join(',') === 'stable,variable';
+
+/**
+ * The user turn: one text block for a plain payload. A split payload is two blocks, the shared part first with a cache
+ * breakpoint, then the part that varies, so the shared bytes are read from the cache on every later attempt.
+ */
+function userContentOf(payload: unknown): unknown {
+  if (!isSplit(payload)) return JSON.stringify(payload);
+  return [
+    { type: 'text', text: JSON.stringify(payload.stable), cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: JSON.stringify(payload.variable) },
+  ];
+}
+
 /**
  * One Messages API call whose answer is the input of `tool`. The model is asked to answer only by
  * calling the tool; tool_choice stays auto, because forced tool use is rejected by claude-sonnet-5-5.
  * When the reply has no tool call, a JSON object in its text is used, and otherwise the model is asked
  * once more. Returns the tool's input as sent, not yet validated. `fetchImpl` is injectable so tests
- * never reach the network.
+ * never reach the network. `system` and `payload` may each be the split form (see SystemText, splitPayload).
  */
 export async function callTool(
   apiKey: string,
   model: string,
-  system: string,
+  system: SystemText,
   payload: unknown,
   tool: ToolDef,
   fetchImpl: typeof fetch = (...args) => fetch(...args),
   maxTokens = 8000,
 ): Promise<unknown> {
-  const systemText = `${system}\n\n${answerOnlyInstruction(tool.name)}`;
-  const userText = JSON.stringify(payload);
+  const answerOnly = answerOnlyInstruction(tool.name);
+  const systemBlocks =
+    typeof system === 'string'
+      ? [{ type: 'text', text: `${system}\n\n${answerOnly}`, cache_control: { type: 'ephemeral' } }]
+      : [
+          { type: 'text', text: `${system.cached}\n\n${answerOnly}`, cache_control: { type: 'ephemeral' } },
+          ...(system.uncached ? [{ type: 'text', text: system.uncached }] : []),
+        ];
+  const userContent = userContentOf(payload);
 
   // Streamed: a long plan takes minutes to write, and a single JSON reply would have to wait for all of it.
   const send = (messages: unknown[]): Promise<MessageResponse> =>
@@ -219,18 +254,18 @@ export async function callTool(
         model,
         max_tokens: maxTokens,
         stream: true,
-        system: [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }],
+        system: systemBlocks,
         tools: [tool],
         tool_choice: { type: 'auto' },
         messages,
       }),
     );
 
-  const first = await send([{ role: 'user', content: userText }]);
+  const first = await send([{ role: 'user', content: userContent }]);
   const answer = answerFrom(first.content, tool.name);
   if (answer !== undefined) return answer;
 
-  const second = await send(retryMessages(userText, textOf(first.content), tool.name));
+  const second = await send(retryMessages(userContent, textOf(first.content), tool.name));
   const retried = answerFrom(second.content, tool.name);
   if (retried !== undefined) return retried;
   throw new Error(`Claude did not call ${tool.name} (stop reason: ${second.stop_reason ?? 'unknown'})`);
@@ -247,7 +282,9 @@ export function anthropicClient(
 ): PlannerClient {
   return {
     async submitPlan(system, payload) {
-      const input = (await callTool(apiKey, model, system, payload, SUBMIT_PLAN_TOOL, fetchImpl, 16000)) as
+      // The tool has a `prep` property only for a household with a prep day. The payload is sent split: shared, then varying.
+      const tool = submitPlanTool((payload as Partial<PlannerPayload> | null)?.prepDay !== undefined);
+      const input = (await callTool(apiKey, model, system, splitPayload(payload as PlannerPayload), tool, fetchImpl, 16000)) as
         | Partial<RawPlan>
         | undefined;
       if (!input || !Array.isArray(input.meals)) {

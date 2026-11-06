@@ -36,14 +36,15 @@ describe('migration 0009 on a fresh database', () => {
     ).toThrow(/UNIQUE|constraint/i);
   });
 
-  it('is followed by the swap, price, site price, ingredient feedback, sync key and meal status migrations, which are now the last on disk', () => {
-    expect(migrationFiles().at(-7)?.name).toBe(MIGRATION);
-    expect(migrationFiles().at(-6)?.name).toBe('0010_swap.sql');
-    expect(migrationFiles().at(-5)?.name).toBe('0011_price_household.sql');
-    expect(migrationFiles().at(-4)?.name).toBe('0012_site_prices.sql');
-    expect(migrationFiles().at(-3)?.name).toBe('0013_ingredient_feedback.sql');
-    expect(migrationFiles().at(-2)?.name).toBe('0014_sync_keys.sql');
-    expect(migrationFiles().at(-1)?.name).toBe('0015_meal_status.sql');
+  it('is followed by the swap, price, site price, ingredient feedback, sync key and meal status migrations, which are now followed by 0016 on disk', () => {
+    expect(migrationFiles().at(-8)?.name).toBe(MIGRATION);
+    expect(migrationFiles().at(-7)?.name).toBe('0010_swap.sql');
+    expect(migrationFiles().at(-6)?.name).toBe('0011_price_household.sql');
+    expect(migrationFiles().at(-5)?.name).toBe('0012_site_prices.sql');
+    expect(migrationFiles().at(-4)?.name).toBe('0013_ingredient_feedback.sql');
+    expect(migrationFiles().at(-3)?.name).toBe('0014_sync_keys.sql');
+    expect(migrationFiles().at(-2)?.name).toBe('0015_meal_status.sql');
+    expect(migrationFiles().at(-1)?.name).toBe('0016_indexes.sql');
   });
 });
 

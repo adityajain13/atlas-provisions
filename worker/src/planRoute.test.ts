@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, type Household, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, call, householdWith, json, rows, setup } from './testing/app';
 import { toolReply } from './testing/sse';
+import { sentPlannerPayload } from './testing/payload';
 
 const H = API;
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
@@ -97,8 +98,8 @@ describe('POST /plan', () => {
 
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const sent = JSON.parse(JSON.parse(fetchMock.mock.calls[0]![1].body as string).messages[0].content) as { prepDay: unknown };
-    expect(sent.prepDay).toBeNull();
+    const sent = sentPlannerPayload(JSON.parse(fetchMock.mock.calls[0]![1].body as string)) as { prepDay?: unknown };
+    expect(sent.prepDay).toBeUndefined();
     const body = (await res.json()) as { prep?: unknown; issues: { check: string }[] };
     expect(body.prep).toBeUndefined();
     expect(body.issues.some((i) => i.check === 'prep')).toBe(false);
@@ -160,12 +161,13 @@ describe('never-buy rules on POST /plan', () => {
     const res = await call(`${H}/plan`, json('POST', REQUEST, cookies[OWNER]), env);
 
     expect(res.status).toBe(200);
-    const sent = JSON.parse(JSON.parse(fetchMock.mock.calls[0]![1].body as string).messages[0].content) as {
-      neverBuy: string[];
+    const sent = sentPlannerPayload(JSON.parse(fetchMock.mock.calls[0]![1].body as string)) as {
+      available: { id: string }[];
       neverBuyWords: string[];
     };
-    expect(sent.neverBuy).toEqual(expect.arrayContaining(['corn-cobs', 'frozen-corn', 'corn-tortillas', 'tortilla-chips', 'rolled-oats']));
-    expect(sent.neverBuy).not.toContain('canned-corn');
+    // Never-buy ids are not offered to the planner at all, so none of them is in the available list.
+    const offered = sent.available.map((a) => a.id);
+    for (const id of ['corn-cobs', 'frozen-corn', 'corn-tortillas', 'tortilla-chips', 'rolled-oats']) expect(offered).not.toContain(id);
     expect(sent.neverBuyWords).toEqual(['corn', 'oats']);
   });
 });

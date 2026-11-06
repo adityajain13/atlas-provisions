@@ -83,8 +83,8 @@ function planFor(cells: SlotCell[], ingredientId: string, qty: number): RawPlan 
 
 /** Client that returns the scripted plans in order and records a snapshot of each payload. */
 function fakeClient(plans: RawPlan[]) {
-  const seen: { system: string; payload: { feedback: { check: string; severity: string }[] | null } }[] = [];
-  const submitPlan = vi.fn(async (system: string, payload: unknown) => {
+  const seen: { system: unknown; payload: { feedback?: { check: string; severity: string }[] } }[] = [];
+  const submitPlan = vi.fn(async (system: unknown, payload: unknown) => {
     seen.push({ system, payload: structuredClone(payload) as (typeof seen)[number]['payload'] });
     const plan = plans[Math.min(seen.length - 1, plans.length - 1)];
     if (!plan) throw new Error('no scripted plan');
@@ -100,8 +100,8 @@ function fakeClient(plans: RawPlan[]) {
  * A repair's payload names only the slots it asks for, so an answer that fills only those is what the model would give.
  */
 function scriptedModel(answer: (payload: { slots: { id: string }[] }, call: number) => RawPlan) {
-  const seen: { system: string; payload: { feedback: { check: string; severity: string }[] | null; slots: { id: string }[] } & Record<string, unknown> }[] = [];
-  const submitPlan = vi.fn(async (system: string, payload: unknown) => {
+  const seen: { system: unknown; payload: { feedback?: { check: string; severity: string }[]; slots: { id: string }[] } & Record<string, unknown> }[] = [];
+  const submitPlan = vi.fn(async (system: unknown, payload: unknown) => {
     seen.push({ system, payload: structuredClone(payload) as (typeof seen)[number]['payload'] });
     return answer(payload as { slots: { id: string }[] }, seen.length);
   });
@@ -129,7 +129,7 @@ function mealsForSlots(all: SlotCell[], slots: { id: string }[], ingredientId: s
 }
 
 describe('runPlanner', () => {
-  it('repairs an over-budget plan by rewriting its two most expensive meals, then keeps the valid one', async () => {
+  it('repairs a plan far over budget by rewriting its three most expensive meals, then keeps the valid one', async () => {
     const h = household();
     const req = request({ budget: 150 });
     const cells = cellsOf(h, req);
@@ -142,9 +142,10 @@ describe('runPlanner', () => {
     const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
 
     expect(submitPlan).toHaveBeenCalledTimes(2);
-    expect(seen[0]!.payload.feedback).toBeNull();
-    // The repair asks only for the two expensive slots, and says so with the errors as feedback.
-    expect(seen[1]!.payload.slots.map((s) => s.id)).toEqual([`${cells[0]!.day}-${cells[0]!.slot}`, `${cells[1]!.day}-${cells[1]!.slot}`]);
+    expect(seen[0]!.payload.feedback).toBeUndefined(); // a first attempt has no feedback
+    // The repair asks only for the expensive slots (the gap is over 15% of the budget, so three), and says so with the errors as feedback.
+    expect(seen[1]!.payload.slots.map((s) => s.id).slice(0, 2)).toEqual([`${cells[0]!.day}-${cells[0]!.slot}`, `${cells[1]!.day}-${cells[1]!.slot}`]);
+    expect(seen[1]!.payload.slots).toHaveLength(3);
     expect(seen[1]!.payload.feedback?.some((i) => i.check === 'budget' && i.severity === 'error')).toBe(true);
     expect(plan.attempts).toBe(2);
     expect(plan.issues.filter((i) => i.severity === 'error')).toEqual([]);
@@ -326,7 +327,7 @@ describe('runPlanner: pantry and ratings', () => {
 
     const payload = seen[0]!.payload as unknown as { available: { source: string }[]; useFirst: string[] };
     expect(payload.available.some((a) => a.source === 'pantry')).toBe(false);
-    expect(payload.useFirst).toEqual([]);
+    expect(payload.useFirst).toBeUndefined();
   });
 
   it('sends favourites and avoid to the planner, and flags a never-again meal', async () => {
@@ -446,7 +447,7 @@ describe('runPlanner: prep in the same call', () => {
 
     const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
 
-    expect((seen[0]!.payload as unknown as { prepDay: unknown }).prepDay).toBeNull();
+    expect((seen[0]!.payload as unknown as { prepDay?: unknown }).prepDay).toBeUndefined();
     expect(plan.prep).toBeUndefined();
     expect(plan.issues.filter(isPrepIssue)).toEqual([]);
   });
@@ -498,7 +499,7 @@ describe('runPlanner: targeted repair', () => {
     expect(events).toEqual([
       { stage: 'writing', attempt: 1 },
       { stage: 'checking', attempt: 1 },
-      { stage: 'fixing', attempt: 2, meals: 2, reason: 'budget' },
+      { stage: 'fixing', attempt: 2, meals: 3, reason: 'budget' },
       { stage: 'checking', attempt: 2 },
     ]);
   });
@@ -623,3 +624,60 @@ describe('regular items offered to the planner', () => {
     expect(new Set(regular.map((a) => a.id)).size).toBe(regular.length);
   });
 });
+
+describe('runPlanner: cravings the household never buys, the time limit, and a week with no prep day', () => {
+  it('drops a craving the never-buy list names, with a warning, and does not send it to the planner', async () => {
+    const h = household({ itemRules: [{ id: 'nb1', name: 'beef', rule: 'never' }] });
+    const req = request({ cravings: ['beef stir-fry'] });
+    const cells = cellsOf(h, req);
+    const { client, seen } = scriptedModel((payload) => mealsForSlots(cells, payload.slots, DEAL_ID, () => DEAL_UNIT_QTY));
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(seen[0]!.payload).not.toHaveProperty('cravings');
+    expect(plan.request.cravings).toEqual([]);
+    expect(plan.issues).toContainEqual(
+      expect.objectContaining({ check: 'cravings', severity: 'warning', message: 'Craving "beef stir-fry" is on your never-buy list, so it is not planned.' }),
+    );
+  });
+
+  it('starts no new attempt once 150 seconds have passed, and returns the best attempt so far with its errors', async () => {
+    const h = household({ prepDay: null });
+    const req = request();
+    const cells = cellsOf(h, req);
+    const bad = planFor(cells, 'not-a-real-ingredient', 1);
+    let clock = 0;
+    const submitPlan = vi.fn(async () => {
+      clock += 100_000; // each call takes 100 s on the clock
+      return bad;
+    });
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client: { submitPlan }, recentDinnerNames: [], neverBuy: [], now: () => clock });
+
+    expect(submitPlan).toHaveBeenCalledTimes(2); // the second attempt ends at 200 s, so no third starts
+    expect(plan.attempts).toBe(2);
+    expect(plan.issues.some((i) => i.severity === 'error')).toBe(true);
+  });
+
+  it('sends a system prompt without the prep rules when the household has no prep day', async () => {
+    const h = household({ prepDay: null });
+    const req = request();
+    const cells = cellsOf(h, req);
+    const { client, seen } = scriptedModel((payload) => mealsForSlots(cells, payload.slots, DEAL_ID, () => DEAL_UNIT_QTY));
+
+    await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [], maxAttempts: 1 });
+
+    const system = seen[0]!.system as { cached: string; uncached?: string };
+    expect(system.cached).not.toContain('Prep rule:');
+    expect(system.uncached).toBeUndefined();
+  });
+
+  it('never offers an ingredient the never-buy list covers, even from pantry stock', () => {
+    const h = household();
+    const req = request();
+    const pantry = [{ id: 'p1', ingredientId: DEAL_ID, qty: 1, unit: INGREDIENT_BY_ID[DEAL_ID]!.baseUnit, addedOn: '2026-11-10', expiresOn: '2026-12-10', source: 'manual' as const }];
+    const frame = weekFrame({ household: h, request: req, deals, matched, neverBuy: [DEAL_ID], pantry, recentDinnerNames: [], today: '2026-11-12' });
+    expect(frame.available.some((a) => a.id === DEAL_ID)).toBe(false);
+  });
+});
+

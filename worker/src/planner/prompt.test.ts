@@ -1,21 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHousehold, expandWeek, INGREDIENT_BY_ID, type Deal, type FixedCost, type PlanRequest, type Household } from '@provisions/shared';
-import { buildAvailable, buildPayload, eachMeansFor, SUBMIT_PLAN_TOOL, SYSTEM_PROMPT } from './prompt';
+import { defaultHousehold, expandWeek, INGREDIENT_BY_ID, type Deal, type FixedCost, type PlanRequest, type Household, type SlotCell } from '@provisions/shared';
+import {
+  buildAvailable,
+  buildPayload,
+  eachMeansFor,
+  leftoverChainsOf,
+  plannerSystem,
+  SUBMIT_PLAN_TOOL,
+  splitPayload,
+  submitPlanTool,
+  SWAP_PROMPT,
+  SYSTEM_PROMPT,
+  swapPrompt,
+} from './prompt';
 
 const noFixed: FixedCost = { cost: 0, listItems: [], macrosByPerson: {}, leftovers: [], needs: [], issues: [] };
+const FULL = { prep: true, leftovers: true };
 
-function deal(ingredientId: string, score: number, staple = false): Deal {
-  return { ingredientId, store: 'No Frills', pricePerUnit: 3, packQty: 1, packPrice: 3, discountPct: 0.2, baseline: 4, validTo: '2026-11-18', score, ...(staple ? { staple: true } : {}) };
+function deal(ingredientId: string, score: number, staple = false, packPrice = 3): Deal {
+  return { ingredientId, store: 'No Frills', pricePerUnit: 3, packQty: 1, packPrice, discountPct: 0.2, baseline: 4, validTo: '2026-11-18', score, ...(staple ? { staple: true } : {}) };
 }
 
 describe('buildAvailable', () => {
-  it('gives each available item its ingredient shelf life, for the prep rules', () => {
-    const out = buildAvailable([deal('broccoli', 0.5)], noFixed, [
+  it('gives each deal its pack price, rounded to cents, and pantry stock a price of zero', () => {
+    const out = buildAvailable([deal('broccoli', 0.5, false, 2.4567)], noFixed, [
       { id: 'p1', ingredientId: 'greek-yogurt', qty: 0.4, unit: INGREDIENT_BY_ID['greek-yogurt']!.baseUnit, addedOn: '2026-11-10', expiresOn: '2026-11-13', source: 'manual' as const },
     ]);
-    const shelf = (id: string) => out.find((a) => a.id === id)?.shelfLifeDays;
-    expect(shelf('broccoli')).toBe(INGREDIENT_BY_ID['broccoli']!.shelfLifeDays);
-    expect(shelf('greek-yogurt')).toBe(INGREDIENT_BY_ID['greek-yogurt']!.shelfLifeDays);
+    expect(out.find((a) => a.id === 'broccoli')?.packPrice).toBe(2.46);
+    expect(out.find((a) => a.id === 'greek-yogurt')?.packPrice).toBe(0);
+  });
+
+  it('takes a regular item its estimated pack price', () => {
+    const out = buildAvailable([], noFixed, [], { regular: [{ id: 'broccoli', packQty: 1, packPrice: 4.2, basis: 'typical' }] });
+    expect(out[0]).toMatchObject({ id: 'broccoli', source: 'regular', packPrice: 4.2, estimate: { basis: 'typical' } });
   });
 
   it('keeps the best-scoring entry per ingredient and marks staples', () => {
@@ -27,7 +44,7 @@ describe('buildAvailable', () => {
   it('adds fixed-meal leftovers that no deal covers', () => {
     const fixed: FixedCost = { ...noFixed, leftovers: [{ ingredientId: 'greek-yogurt', qty: 0.4 }] };
     const out = buildAvailable([], fixed);
-    expect(out).toEqual([expect.objectContaining({ id: 'greek-yogurt', source: 'fixed-leftover', packQty: 0.4 })]);
+    expect(out).toEqual([expect.objectContaining({ id: 'greek-yogurt', source: 'fixed-leftover', packQty: 0.4, packPrice: 0 })]);
   });
 });
 
@@ -49,32 +66,22 @@ describe('each quantities', () => {
     const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: true };
     const { cells, fixed } = expandWeek(household, request);
     const available = buildAvailable([deal('white-bread', 0.5)], noFixed);
-    const payload = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available, neverBuy: [], recentDinnerNames: [] });
+    const payload = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available, recentDinnerNames: [] });
     expect(payload.available.find((a) => a.id === 'white-bread')?.eachMeans).toBe('1 = one loaf as sold (~675 g)');
     expect(SYSTEM_PROMPT).toContain('never slices or servings');
     expect(SYSTEM_PROMPT).toContain('two people having toast all week is 1 loaf, not 7');
   });
 
-  it('sends the never-buy names to the planner, and tells it not to build a meal around them', () => {
+  it('sends the never-buy words to the planner, and tells it not to build a meal around them', () => {
     const household: Household = { ...defaultHousehold() };
     const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false };
     const { cells, fixed } = expandWeek(household, request);
-    const payload = buildPayload({
-      household,
-      request,
-      cells,
-      fixed,
-      fixedCost: noFixed,
-      available: [],
-      neverBuy: ['ground-beef'],
-      neverBuyWords: ['beef'],
-      recentDinnerNames: [],
-    });
+    const payload = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: [], neverBuyWords: ['beef'], recentDinnerNames: [] });
     expect(payload.neverBuyWords).toEqual(['beef']);
     expect(SYSTEM_PROMPT).toContain("Never plan a meal built around a word in `neverBuyWords` (e.g. 'beef' rules out a beef stir-fry)");
-    // Without the field, the payload still has an empty list.
-    const bare = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
-    expect(bare.neverBuyWords).toEqual([]);
+    // Without any words, the field is left out.
+    const bare = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: [], recentDinnerNames: [] });
+    expect(bare).not.toHaveProperty('neverBuyWords');
   });
 });
 
@@ -88,7 +95,7 @@ describe('buildPayload', () => {
   };
   const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: ['tacos'], overrides: [], useItUp: true };
 
-  it('builds slots, allergies and the remaining budget after fixed meals', () => {
+  it('builds slots, allergies and the remaining budget after fixed meals, with a per-meal target', () => {
     const { cells, fixed } = expandWeek(household, request);
     const payload = buildPayload({
       household,
@@ -97,30 +104,48 @@ describe('buildPayload', () => {
       fixed,
       fixedCost: { ...noFixed, cost: 20 },
       available: [],
-      neverBuy: ['cheddar'],
       recentDinnerNames: [],
     });
     expect(payload.slots).toHaveLength(21);
     expect(payload.slots[0]).toEqual({ id: 'sun-breakfast', day: 'sun', slot: 'breakfast', eaters: ['ann', 'ben'] });
-    expect(payload.allergies).toEqual({ ann: ['dairy'], ben: [] });
+    expect(payload.allergies).toEqual({ ann: ['dairy'] });
     expect(payload.remainingBudget).toBe(130);
-    expect(payload.people[0]).toMatchObject({ id: 'ann', proteinTargetG: 80 });
-    expect(payload.feedback).toBeNull();
-    expect(payload.neverBuy).toEqual(['cheddar']);
+    expect(payload.perMealTarget).toBe(Math.round((130 / 21) * 100) / 100);
+    expect(payload.people[0]).toMatchObject({ id: 'ann', proteinTargetG: 80, dietTags: ['vegetarian'] });
+    expect(payload.people[1]).not.toHaveProperty('dietTags');
     expect(payload.prepDay).toBe('sun');
+  });
+
+  it('leaves out empty and null fields: no feedback on a first attempt, no neverBuy, no formsAllowed', () => {
+    const { cells, fixed } = expandWeek(household, { ...request, useItUp: false, cravings: [] });
+    const payload = buildPayload({ household, request: { ...request, cravings: [] }, cells, fixed, fixedCost: noFixed, available: [], recentDinnerNames: [] });
+    expect(payload).not.toHaveProperty('feedback');
+    expect(payload).not.toHaveProperty('ingredientFeedback');
+    expect(payload).not.toHaveProperty('useFirst');
+    expect(payload).not.toHaveProperty('cravings');
+    expect(payload).not.toHaveProperty('formsAllowed');
+    expect(payload).not.toHaveProperty('neverBuy');
+    expect(payload).not.toHaveProperty('onHandCustom');
+  });
+
+  it('sends the issues of the previous attempt as feedback, and only then', () => {
+    const { cells, fixed } = expandWeek(household, request);
+    const issues = [{ check: 'budget' as const, severity: 'error' as const, message: 'Over budget by $5.00.' }];
+    const retry = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: [], recentDinnerNames: [], issues });
+    expect(retry.feedback).toEqual(issues);
   });
 
   it('fills useFirst from fixed-meal leftovers only when use-it-up is on, and avoid only with the 14-day rule', () => {
     const { cells, fixed } = expandWeek(household, request);
     const available = buildAvailable([], { ...noFixed, leftovers: [{ ingredientId: 'greek-yogurt', qty: 0.4 }] });
-    const on = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available, neverBuy: [], recentDinnerNames: ['Chili'] });
+    const on = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available, recentDinnerNames: ['Chili'] });
     expect(on.useFirst).toEqual(['greek-yogurt']);
-    expect(on.avoid).toEqual([]);
+    expect(on).not.toHaveProperty('avoid');
 
     const ruleOn: Household = { ...household, varietyRules: { ...household.varietyRules, noRepeatDinner14: true } };
-    const off = buildPayload({ household, request: { ...request, useItUp: false }, cells, fixed, fixedCost: noFixed, available, neverBuy: [], recentDinnerNames: ['Chili'] });
-    expect(off.useFirst).toEqual([]);
-    const withRule = buildPayload({ household: ruleOn, request, cells, fixed, fixedCost: noFixed, available, neverBuy: [], recentDinnerNames: ['Chili'] });
+    const off = buildPayload({ household, request: { ...request, useItUp: false }, cells, fixed, fixedCost: noFixed, available, recentDinnerNames: ['Chili'] });
+    expect(off).not.toHaveProperty('useFirst');
+    const withRule = buildPayload({ household: ruleOn, request, cells, fixed, fixedCost: noFixed, available, recentDinnerNames: ['Chili'] });
     expect(withRule.avoid).toEqual(['Chili']);
   });
 
@@ -143,7 +168,6 @@ describe('buildPayload', () => {
       fixed,
       fixedCost: noFixed,
       available: [],
-      neverBuy: [],
       recentDinnerNames: ['Chili'],
       pantryUseFirst: ['spinach'],
       favourites: ['Tacos'],
@@ -154,11 +178,63 @@ describe('buildPayload', () => {
     expect(payload.avoid).toEqual(['Fish', 'Chili']); // the 14-day rule is off here, so recent dinners are not added
   });
 
-  it('system prompt has the prep rules, and says to omit prep without a prep day', () => {
-    expect(SYSTEM_PROMPT).toContain('If `prepDay` is null, omit `prep`.');
-    expect(SYSTEM_PROMPT).toContain('shelfLifeDays');
-    expect(SYSTEM_PROMPT).toContain('forMeals');
-    expect(SYSTEM_PROMPT).toContain('90 minutes');
+  it('sends each item with its pack price, and its allergens, vegetarian flag and shelf life only when they say something', () => {
+    const { cells, fixed } = expandWeek(household, request);
+    const available = buildAvailable([deal('broccoli', 0.5, false, 2.5), deal('milk-2-percent', 0.4, false, 4)], noFixed);
+    const payload = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available, recentDinnerNames: [] });
+    const broccoli = payload.available.find((a) => a.id === 'broccoli')!;
+    expect(broccoli.packPrice).toBe(2.5);
+    expect(broccoli).not.toHaveProperty('allergens');
+    expect(payload.available.find((a) => a.id === 'milk-2-percent')?.allergens).toEqual(INGREDIENT_BY_ID['milk-2-percent']!.allergens);
+    // A vegetarian is in the household, so each item says whether it is vegetarian.
+    expect(broccoli.vegetarian).toBe(INGREDIENT_BY_ID['broccoli']!.vegetarian);
+    for (const item of payload.available) {
+      if (item.shelfLifeDays !== undefined) expect(item.shelfLifeDays).toBeLessThan(7);
+    }
+  });
+
+  it('leaves the vegetarian flag out of items when nobody in the household is vegetarian', () => {
+    const plain: Household = { ...defaultHousehold(), people: [{ id: 'ben', name: 'Ben', dietTags: [], allergies: [] }] };
+    const { cells, fixed } = expandWeek(plain, request);
+    const payload = buildPayload({ household: plain, request, cells, fixed, fixedCost: noFixed, available: buildAvailable([deal('broccoli', 0.5)], noFixed), recentDinnerNames: [] });
+    expect(payload.available[0]).not.toHaveProperty('vegetarian');
+  });
+
+  it('system prompt asks for the submit_plan tool and the no-prices rule', () => {
+    expect(SYSTEM_PROMPT).toContain('submit_plan');
+    expect(SYSTEM_PROMPT).toContain('never the slot name');
+    expect(SYSTEM_PROMPT).toContain('Do not estimate prices');
+  });
+
+  it('system prompt says meal names carry no portion counts', () => {
+    expect(SYSTEM_PROMPT).toContain('Meal names describe the dish only');
+    expect(SYSTEM_PROMPT).toContain("'(2 portions)'");
+  });
+});
+
+describe('the system prompt variants', () => {
+  it('adds the prep rules only with a prep day', () => {
+    expect(plannerSystem({ prep: false, leftovers: false })).not.toContain('Prep rule:');
+    expect(plannerSystem({ prep: false, leftovers: false })).not.toContain('prep');
+    expect(plannerSystem({ prep: true, leftovers: false })).toContain('Batch prep: when `prepDay` is set');
+    expect(plannerSystem({ prep: true, leftovers: false })).toContain('Prep rule:');
+  });
+
+  it('adds the leftover-chain sentence only when the week has chains to make', () => {
+    expect(plannerSystem({ prep: false, leftovers: true })).toContain('Chain leftovers: make `leftoverChains` dinners');
+    expect(plannerSystem({ prep: false, leftovers: false })).not.toContain('Chain leftovers');
+  });
+
+  it('is the same text every time it is asked for, so the cached block does not change between attempts', () => {
+    expect(plannerSystem(FULL)).toBe(plannerSystem(FULL));
+    expect(SYSTEM_PROMPT).toBe(plannerSystem(FULL));
+  });
+
+  it('keeps the swap block separate, with the prep sentence only when there is a prep day', () => {
+    expect(SWAP_PROMPT).toBe(swapPrompt(true));
+    expect(swapPrompt(true)).toContain("Return the full week's prep list");
+    expect(swapPrompt(false)).not.toContain('prep');
+    expect(swapPrompt(false)).toContain('Keep every meal in keptMeals exactly as it is');
   });
 
   it('submit_plan takes an optional prep list whose steps link to meal ids', () => {
@@ -170,22 +246,64 @@ describe('buildPayload', () => {
     expect(prep.properties.steps.items.properties.forMeals.type).toBe('array');
   });
 
-  it('system prompt asks for the submit_plan tool and the no-prices rule', () => {
-    expect(SYSTEM_PROMPT).toContain('submit_plan');
-    expect(SYSTEM_PROMPT).toContain("never the meal slot name");
-    expect(SYSTEM_PROMPT).toContain('Do not estimate prices');
+  it('drops the prep property from the tool for a household with no prep day, without changing the shared tool', () => {
+    const without = submitPlanTool(false).input_schema as { properties: Record<string, unknown>; required: string[] };
+    expect(Object.keys(without.properties)).toEqual(['meals', 'notes']);
+    expect(without.required).toEqual(['meals', 'notes']);
+    expect(submitPlanTool(false)).toBe(submitPlanTool(false));
+    expect(submitPlanTool(true)).toBe(SUBMIT_PLAN_TOOL);
+    expect(Object.keys(SUBMIT_PLAN_TOOL.input_schema.properties)).toContain('prep');
+  });
+});
+
+describe('leftover chains', () => {
+  const cell = (day: SlotCell['day'], slot: SlotCell['slot']): SlotCell => ({ day, slot, eaters: ['ann'] });
+
+  it('counts the lunches that follow a dinner the day before, capped at two', () => {
+    expect(leftoverChainsOf([cell('sun', 'dinner'), cell('mon', 'lunch')])).toBe(1);
+    expect(leftoverChainsOf([cell('sun', 'dinner'), cell('mon', 'lunch'), cell('tue', 'dinner'), cell('wed', 'lunch'), cell('thu', 'dinner'), cell('fri', 'lunch')])).toBe(2);
   });
 
-  it('system prompt says meal names carry no portion counts', () => {
-    expect(SYSTEM_PROMPT).toContain('Meal names describe the dish only');
-    expect(SYSTEM_PROMPT).toContain("'(2 portions)'");
+  it('counts nothing when no dinner is on the day before, or the lunch is on the same day as the dinner', () => {
+    expect(leftoverChainsOf([cell('mon', 'lunch')])).toBe(0);
+    expect(leftoverChainsOf([cell('mon', 'dinner'), cell('mon', 'lunch')])).toBe(0);
+    expect(leftoverChainsOf([])).toBe(0);
+  });
+
+  it('sends leftoverChains for a new plan with a chain, and not for a swap', () => {
+    const household: Household = { ...defaultHousehold() };
+    const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false };
+    const { fixed } = expandWeek(household, request);
+    const cells = [cell('sun', 'dinner'), cell('mon', 'lunch')];
+    const fresh = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: [], recentDinnerNames: [] });
+    expect(fresh.leftoverChains).toBe(1);
+    const swap = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: [], recentDinnerNames: [], keptMeals: [] });
+    expect(swap).not.toHaveProperty('leftoverChains');
+    const none = buildPayload({ household, request, cells: [cell('mon', 'lunch')], fixed, fixedCost: noFixed, available: [], recentDinnerNames: [] });
+    expect(none).not.toHaveProperty('leftoverChains');
+  });
+});
+
+describe('splitPayload', () => {
+  it('puts the shared fields in stable and the varying ones in variable, with keys in a fixed order', () => {
+    const household: Household = { ...defaultHousehold() };
+    const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: ['tacos'], overrides: [], useItUp: false };
+    const { cells, fixed } = expandWeek(household, request);
+    const payload = buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: [], recentDinnerNames: [] });
+    const { stable, variable } = splitPayload(payload);
+    expect(Object.keys(variable).sort()).toEqual(['perMealTarget', 'remainingBudget', 'slots', 'weekOf'].filter((k) => k in payload).sort());
+    expect(stable).toHaveProperty('available');
+    expect(stable).toHaveProperty('cuisineMix');
+    expect(stable).not.toHaveProperty('slots');
+    expect(Object.keys(stable)).toEqual(Object.keys(stable).slice().sort());
+    expect(JSON.stringify(splitPayload(payload).stable)).toBe(JSON.stringify(stable));
   });
 });
 
 describe('food forms, dishes and storage in the planner payload', () => {
   const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false };
 
-  it('lists the dishes to avoid, the forms kept and the storage', () => {
+  it('lists the dishes to avoid and the storage, and no forms (blocked forms are already out of available)', () => {
     const household: Household = {
       ...defaultHousehold(),
       people: [{ id: 'ann', name: 'Ann', dietTags: [], allergies: [] }],
@@ -193,24 +311,22 @@ describe('food forms, dishes and storage in the planner payload', () => {
       forms: { fish: ['fresh', 'frozen'] },
       storage: { containers: 'few', freezer: false, zipBags: true, freezerBags: true },
     };
-    const payload = buildPayload({ household, request, cells: expandWeek(household, request).cells, fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
+    const payload = buildPayload({ household, request, cells: expandWeek(household, request).cells, fixed: [], fixedCost: noFixed, available: [], recentDinnerNames: [] });
     expect(payload.avoidDishes).toEqual(['slaw']);
-    expect(payload.formsAllowed.fish).toEqual(['fresh', 'frozen']);
-    expect(payload.formsAllowed.beans).toEqual(['dry', 'canned']);
+    expect(payload).not.toHaveProperty('formsAllowed');
     expect(payload.storage).toEqual({ containers: 'few', freezer: false, zipBags: true, freezerBags: true });
   });
 
-  it('gives a household saved before these fields an empty avoid list, every form and the default storage', () => {
+  it('leaves out the dishes list for a household saved before these fields, and keeps the default storage', () => {
     const household = defaultHousehold();
-    const payload = buildPayload({ household, request, cells: [], fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
-    expect(payload.avoidDishes).toEqual([]);
-    expect(payload.formsAllowed.fish).toEqual(['fresh', 'frozen', 'canned']);
+    const payload = buildPayload({ household, request, cells: [], fixed: [], fixedCost: noFixed, available: [], recentDinnerNames: [] });
+    expect(payload).not.toHaveProperty('avoidDishes');
     expect(payload.storage).toEqual({ containers: 'some', freezer: true, zipBags: true, freezerBags: true });
   });
 
-  it('tells the planner to avoid dishes by variant, and to respect the forms kept', () => {
+  it('tells the planner to avoid dishes by variant, and that an available form is the form it names', () => {
     expect(SYSTEM_PROMPT).toContain("Never plan a dish in `avoidDishes` or a close variant of it (e.g. 'slaw' rules out coleslaw");
-    expect(SYSTEM_PROMPT).toContain("Respect formsAllowed (e.g. no canned fish if canned isn't allowed).");
+    expect(SYSTEM_PROMPT).toContain('An available item with a `form` is that form.');
   });
 
   it('gives each available item its form, and none when it has no form', () => {
@@ -223,21 +339,22 @@ describe('food forms, dishes and storage in the planner payload', () => {
 describe('ingredient changes and variety in the planner prompt', () => {
   const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false };
 
-  it('sends the skipped ingredients and the preferred swaps, and an empty pair when there are none', () => {
+  it('sends the skipped ingredients and the preferred swaps only when there are some', () => {
     const household = defaultHousehold();
     const cells = expandWeek(household, request).cells;
-    const none = buildPayload({ household, request, cells, fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
-    expect(none.ingredientFeedback).toEqual({ oftenSkipped: [], preferredSwaps: [] });
+    const none = buildPayload({ household, request, cells, fixed: [], fixedCost: noFixed, available: [], recentDinnerNames: [] });
+    expect(none).not.toHaveProperty('ingredientFeedback');
 
     const feedback = { oftenSkipped: ['cilantro'], preferredSwaps: [{ from: 'sour-cream', to: 'Greek yogurt', toId: 'greek-yogurt' }] };
-    const some = buildPayload({ household, request, cells, fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [], feedback });
+    const some = buildPayload({ household, request, cells, fixed: [], fixedCost: noFixed, available: [], recentDinnerNames: [], feedback });
     expect(some.ingredientFeedback).toEqual(feedback);
   });
 
   it('tells the model to avoid the often-skipped ingredients, use the swaps, and keep each non-staple to three meals', () => {
-    expect(SYSTEM_PROMPT).toContain('Avoid ingredients in `ingredientFeedback.oftenSkipped`');
-    expect(SYSTEM_PROMPT).toContain('`ingredientFeedback.preferredSwaps`');
+    expect(SYSTEM_PROMPT).toContain('avoid `oftenSkipped` ingredients');
+    expect(SYSTEM_PROMPT).toContain('`preferredSwaps`');
     expect(SYSTEM_PROMPT).toContain('use a non-staple ingredient in at most 3 meals a week');
+    expect(SYSTEM_PROMPT).toContain('Ingredients of cravings are exempt from the 3-meal limit.');
     expect(SYSTEM_PROMPT).toContain('pick a different vegetable or accept some left over');
   });
 });
@@ -249,7 +366,7 @@ describe('seasonality, custom staples and the cravings and balance rules', () =>
   function payloadFor(over: Partial<Household> = {}) {
     const household: Household = { ...defaultHousehold(), ...over };
     const { cells, fixed } = expandWeek(household, request);
-    return buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: available(), neverBuy: [], recentDinnerNames: [] });
+    return buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: available(), recentDinnerNames: [] });
   }
 
   it('sends the plan month and the preference, and flags out-of-season and imported produce', () => {
@@ -268,9 +385,9 @@ describe('seasonality, custom staples and the cravings and balance rules', () =>
     expect(p.available.find((a) => a.id === 'mangoes')).toMatchObject({ imported: true });
   });
 
-  it('sends the staples with no catalogue id as plain names', () => {
+  it('sends the staples with no catalogue id as plain names, and leaves the field out when there are none', () => {
     expect(payloadFor({ onHandCustom: ['Lao Gan Ma-style chili crunch'] }).onHandCustom).toEqual(['Lao Gan Ma-style chili crunch']);
-    expect(payloadFor().onHandCustom).toEqual([]);
+    expect(payloadFor()).not.toHaveProperty('onHandCustom');
   });
 
   it('system prompt states the ingredient-craving minimum, the protein balance and the seasonal rule', () => {
@@ -278,6 +395,5 @@ describe('seasonality, custom staples and the cravings and balance rules', () =>
     expect(SYSTEM_PROMPT).toContain('at least a third of the dinners');
     expect(SYSTEM_PROMPT).toContain('substantial protein');
     expect(SYSTEM_PROMPT).toContain('When preferSeasonal: avoid produce marked outOfSeason or imported unless it is on a flyer deal this week');
-    expect(SYSTEM_PROMPT).not.toContain('Include each craving at least once');
   });
 });

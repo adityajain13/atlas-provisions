@@ -24,7 +24,7 @@ describe('anthropicClient', () => {
     const fetchImpl = fetchOf(() => toolReply(PLAN_INPUT));
     const client = anthropicClient('test-key', 'test-model', fetchImpl);
 
-    const out = await client.submitPlan('SYSTEM', { weekOf: '2026-11-15' });
+    const out = await client.submitPlan('SYSTEM', { weekOf: '2026-11-15', prepDay: 'sun' });
 
     expect(out).toEqual(PLAN_INPUT);
     const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
@@ -47,7 +47,27 @@ describe('anthropicClient', () => {
     ]);
     expect(body.tools).toEqual([SUBMIT_PLAN_TOOL]);
     expect(body.tool_choice).toEqual({ type: 'auto' });
-    expect(JSON.parse(body.messages[0].content)).toEqual({ weekOf: '2026-11-15' });
+    // The payload is sent in two parts: the shared part (cached) first, then the part that varies.
+    const [shared, varying] = body.messages[0].content;
+    expect(shared).toEqual({ type: 'text', text: JSON.stringify({ prepDay: 'sun' }), cache_control: { type: 'ephemeral' } });
+    expect(varying).toEqual({ type: 'text', text: JSON.stringify({ weekOf: '2026-11-15' }) });
+  });
+
+  it('sends the cached system part first and the swap part after it, uncached', async () => {
+    const fetchImpl = fetchOf(() => toolReply(PLAN_INPUT));
+    await anthropicClient('k', 'm', fetchImpl).submitPlan({ cached: 'BASE', uncached: 'SWAP' }, { weekOf: '2026-11-15' });
+    const body = bodyOf(fetchImpl.mock.calls[0] as unknown[]);
+    expect(body.system).toEqual([
+      { type: 'text', text: 'BASE\n\nAnswer only by calling the submit_plan tool, exactly once. Do not reply with text.', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: 'SWAP' },
+    ]);
+  });
+
+  it('uses the tool without a prep property when the payload has no prep day', async () => {
+    const fetchImpl = fetchOf(() => toolReply(PLAN_INPUT));
+    await anthropicClient('k', 'm', fetchImpl).submitPlan('s', { weekOf: '2026-11-15' });
+    const tool = bodyOf(fetchImpl.mock.calls[0] as unknown[]).tools[0];
+    expect(Object.keys(tool.input_schema.properties)).toEqual(['meals', 'notes']);
   });
 
   it('joins input_json_delta pieces that are split across chunks, mid-line and mid-character', async () => {
@@ -149,7 +169,7 @@ describe('anthropicClient without a forced tool call', () => {
     const retry = bodyOf(fetchImpl.mock.calls[1] as unknown[]);
     expect(retry.stream).toBe(true);
     expect(retry.messages).toEqual([
-      { role: 'user', content: JSON.stringify({ weekOf: '2026-11-15' }) },
+      { role: 'user', content: [{ type: 'text', text: '{}', cache_control: { type: 'ephemeral' } }, { type: 'text', text: JSON.stringify({ weekOf: '2026-11-15' }) }] },
       { role: 'assistant', content: 'I will plan the week now.' },
       { role: 'user', content: 'Call submit_plan now with your answer.' },
     ]);

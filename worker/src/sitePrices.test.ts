@@ -264,7 +264,7 @@ describe('what the batch leaves for the offers and the status', () => {
       { ingredientId: 'ground-beef', store: 'No Frills', pricePerUnit: 15, packQty: 1, packPrice: 15, estimate: { basis: 'site', date: '2026-11-03' } },
     ]);
 
-    expect((await priceHistory(DB, '2026-10-01')).map((h) => h.ingredientId)).not.toContain('ground-beef');
+    expect((await priceHistory(DB, 'h1', '2026-10-01')).map((h) => h.ingredientId)).not.toContain('ground-beef');
   });
 
   it('reports the latest run and the prices in the window, and waits ten minutes between hand refreshes', async () => {

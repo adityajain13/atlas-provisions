@@ -102,7 +102,40 @@ export async function getHousehold(): Promise<Household> {
   return HouseholdSchema.parse(await res.json());
 }
 
+// Reads the week screen repeats when the reader switches weeks. A value is reused for CACHE_MS, or until this page
+// saves it. The TTL bounds how stale a change by another member can be.
+const CACHE_MS = 60_000;
+interface Cached<T> {
+  value: Promise<T>;
+  at: number;
+}
+const householdCache: { entry: Cached<Household> | null } = { entry: null };
+const ratingsCache: { entry: Cached<Rating[]> | null } = { entry: null };
+
+function cachedRead<T>(cache: { entry: Cached<T> | null }, load: () => Promise<T>): Promise<T> {
+  const current = cache.entry;
+  if (current && Date.now() - current.at < CACHE_MS) return current.value;
+  const entry: Cached<T> = { value: load(), at: Date.now() };
+  cache.entry = entry;
+  // A failed read is not kept, so the next call asks again.
+  entry.value.catch(() => {
+    if (cache.entry === entry) cache.entry = null;
+  });
+  return entry.value;
+}
+
+/** getHousehold, reused for a minute or until the household is saved from this page. */
+export function getHouseholdCached(): Promise<Household> {
+  return cachedRead(householdCache, getHousehold);
+}
+
+/** getRatings, reused for a minute or until a rating is saved from this page. */
+export function getRatingsCached(): Promise<Rating[]> {
+  return cachedRead(ratingsCache, getRatings);
+}
+
 export async function saveHousehold(household: Household): Promise<Household> {
+  householdCache.entry = null;
   const res = await ensureOk(
     await authFetch(`${BASE}/household`, {
       method: 'PUT',
@@ -110,6 +143,7 @@ export async function saveHousehold(household: Household): Promise<Household> {
       body: JSON.stringify(household),
     }),
   );
+  householdCache.entry = null;
   return HouseholdSchema.parse(await res.json());
 }
 
@@ -294,10 +328,13 @@ export async function removePantryItem(id: string): Promise<void> {
 // ---- Meal ratings (milestone 3A) ----
 
 export async function getRatings(): Promise<Rating[]> {
-  return json(await authFetch(`${BASE}/ratings`), (raw) => RatingSchema.array().parse(raw));
+  const ratings = await json(await authFetch(`${BASE}/ratings`), (raw) => RatingSchema.array().parse(raw));
+  ratingsCache.entry = { value: Promise.resolve(ratings), at: Date.now() };
+  return ratings;
 }
 
 export async function saveRating(input: RatingInput): Promise<Rating> {
+  ratingsCache.entry = null;
   return json(
     await authFetch(`${BASE}/ratings`, {
       method: 'POST',

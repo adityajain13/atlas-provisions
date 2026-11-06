@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, expandWeek, type Household, type MealPlan, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, call, householdWith, json, rows, setup } from './testing/app';
 import { toolReply } from './testing/sse';
+import { sentPlannerPayload } from './testing/payload';
 
 const WEEK = '2026-11-08';
 const KEYED = { ANTHROPIC_API_KEY: 'test-key' };
@@ -51,7 +52,7 @@ interface Sent {
   slots: { id: string; eaters: string[] }[];
   allergies: Record<string, string[]>;
 }
-const sentPayload = (init: RequestInit): Sent => JSON.parse(JSON.parse(init.body as string).messages[0].content) as Sent;
+const sentPayload = (init: RequestInit): Sent => sentPlannerPayload(JSON.parse(init.body as string)) as unknown as Sent;
 
 /** One answer per slot the model is asked for. `ingredientsFor` lets a test put an ingredient in a chosen slot. */
 const answerFor = (payload: Sent, ingredientsFor: (slot: string) => { id: string; qty: number }[] = () => []) => ({
@@ -113,7 +114,7 @@ describe('POST /plan/:weekOf/swap with guests', () => {
 
     const sent = sentPayload(fetchMock.mock.calls[0]![1] as RequestInit);
     expect(sent.allergies['guest-1']).toEqual(['peanut']);
-    expect(sent.allergies['ann']).toEqual([]);
+    expect(sent.allergies['ann']).toBeUndefined(); // a person with no allergies is left out of the payload
   });
 
   it('holds a guest allergen out of the swapped slot, and names the guest in the error', async () => {

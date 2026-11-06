@@ -168,7 +168,7 @@ describe('migration 0008 on an empty database', () => {
     ).toThrow(/UNIQUE|constraint/i);
   });
 
-  it('is followed by the access, swap, price, site price, ingredient feedback, sync key and meal status migrations, which are now the last on disk', () => {
+  it('is followed by the access, swap, price, site price, ingredient feedback, sync key and meal status migrations, which are now followed by 0016 on disk', () => {
     const names = migrationFiles().map((f) => f.name);
     expect(names[names.indexOf(MIGRATION) + 1]).toBe('0009_access.sql');
     expect(names[names.indexOf(MIGRATION) + 2]).toBe('0010_swap.sql');
@@ -177,6 +177,7 @@ describe('migration 0008 on an empty database', () => {
     expect(names[names.indexOf(MIGRATION) + 5]).toBe('0013_ingredient_feedback.sql');
     expect(names[names.indexOf(MIGRATION) + 6]).toBe('0014_sync_keys.sql');
     expect(names[names.indexOf(MIGRATION) + 7]).toBe('0015_meal_status.sql');
-    expect(migrationFiles().at(-1)?.name).toBe('0015_meal_status.sql');
+    expect(names[names.indexOf(MIGRATION) + 8]).toBe('0016_indexes.sql');
+    expect(migrationFiles().at(-1)?.name).toBe('0016_indexes.sql');
   });
 });
