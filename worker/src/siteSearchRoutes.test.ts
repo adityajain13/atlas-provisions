@@ -102,11 +102,8 @@ describe('one banner, by postal code and by text', () => {
     const fetchMock = chainFetch();
     vi.stubGlobal('fetch', fetchMock);
     const { env, cookies } = await setup();
-    const got = (await (await call(`${API}/site-stores/tandt/locations?q=M5T%201R5&near=M5T%201R5`, withCookie(cookies[OWNER]!), env)).json()) as {
-      locations: unknown[];
-      unsupported?: boolean;
-    };
-    expect(got).toMatchObject({ locations: [], unsupported: true });
+    const got = await call(`${API}/site-stores/tandt/locations?q=M5T%201R5&near=M5T%201R5`, withCookie(cookies[OWNER]!), env);
+    expect(got.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,6 @@ import {
   MAX_MIN_SAVING,
   STORE_GROUPS,
   STORE_PRESETS,
-  hasLocationList,
   presetIdOfBanner,
   siteBannerOf,
   slugifyName,
@@ -127,7 +126,6 @@ export type BranchResult = { stores: Store[]; outcome: 'added' | 'updated'; name
  * banner has no location list or preset. One branch per chain: the list never gets a second store for the same chain.
  */
 export function withBranch(stores: Store[], branch: BranchChoice): BranchResult | null {
-  if (!hasLocationList(branch.banner)) return null;
   const preset = STORE_PRESETS.find((p) => p.id === presetIdOfBanner(branch.banner));
   if (!preset) return null;
   const siteStore = { banner: branch.banner, storeId: branch.storeId, label: branch.label };
@@ -140,12 +138,11 @@ export function withBranch(stores: Store[], branch: BranchChoice): BranchResult 
 }
 
 /**
- * Whether a store's regular prices are read: an enabled Loblaw-family store with a location picked, or an enabled T&T
- * store, which has no location (its prices are the same at every store). Counts the stores for the Regular prices row.
+ * Whether a store's regular prices are read: an enabled Loblaw-family store with a location picked. T&T is not read (its
+ * site blocks automated lookups), so it never counts. Counts the stores for the Regular prices row.
  */
 export function readsSitePrices(store: Store): boolean {
-  if (!store.enabled) return false;
-  return siteBannerOf(store.id) === 'tandt' || store.siteStore !== undefined;
+  return store.enabled && siteBannerOf(store.id) !== undefined && store.siteStore !== undefined;
 }
 
 /** Whether a store's chain is one whose branch is searched by address (a Loblaw-family banner). */

@@ -62,10 +62,6 @@ describe('withBranch', () => {
     expect(second.stores).toHaveLength(1);
     expect(second.stores[0]?.siteStore?.storeId).toBe('5555');
   });
-
-  it('is null for T&T, which has no location list to take a branch from', () => {
-    expect(withBranch([], { banner: 'tandt', storeId: '1', label: 'T&T' })).toBeNull();
-  });
 });
 
 describe('addresses', () => {
@@ -98,7 +94,7 @@ describe('addresses', () => {
 
   it('takes a branch only for a Loblaw-family store', () => {
     expect(takesBranch('no-frills')).toBe(true);
-    expect(takesBranch('tt-supermarket')).toBe(true);
+    expect(takesBranch('tt-supermarket')).toBe(false);
     expect(takesBranch('metro')).toBe(false);
   });
 });

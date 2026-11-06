@@ -1,17 +1,16 @@
 // The store fields and banner helpers the branch search and the address rules rely on. Pure.
 import { describe, expect, it } from 'vitest';
-import { LOCATION_BANNER_IDS, StoreSchema, hasLocationList, presetIdOfBanner, siteBannerOf } from './index';
+import { SITE_BANNER_IDS, StoreSchema, presetIdOfBanner, siteBannerOf } from './index';
 
 describe('banner helpers', () => {
-  it('lists every banner except T&T as searchable', () => {
-    expect(LOCATION_BANNER_IDS).toEqual(['loblaws', 'nofrills', 'superstore', 'zehrs', 'independent', 'fortinos', 'valumart']);
-    expect(hasLocationList('nofrills')).toBe(true);
-    expect(hasLocationList('tandt')).toBe(false);
+  it('lists the Loblaw-family banners whose regular prices are read, not T&T (its site blocks automated lookups)', () => {
+    expect(SITE_BANNER_IDS).toEqual(['loblaws', 'nofrills', 'superstore', 'zehrs', 'independent', 'fortinos', 'valumart']);
+    expect(siteBannerOf('tt-supermarket')).toBeUndefined();
   });
 
   it('gives the preset id of a banner, the inverse of siteBannerOf', () => {
     expect(presetIdOfBanner('nofrills')).toBe('no-frills');
-    expect(presetIdOfBanner('tandt')).toBe('tt-supermarket');
+    expect(presetIdOfBanner('valumart')).toBe('valu-mart');
     expect(siteBannerOf(presetIdOfBanner('superstore')!)).toBe('superstore');
   });
 });

@@ -177,7 +177,6 @@ export const PCX_BANNER_IDS: Record<string, string> = {
   superstore: 'superstore',
   zehrs: 'zehrs',
   independent: 'independent',
-  tandt: 'tandt',
   fortinos: 'fortinos',
   valumart: 'valumart',
   independentcitymarket: 'independentcitymarket',

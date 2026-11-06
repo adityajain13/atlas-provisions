@@ -185,9 +185,11 @@ describe('orderStores', () => {
 });
 
 describe('readsSitePrices', () => {
-  it('reads an enabled T&T store with no location, since its prices are the same everywhere', () => {
-    expect(readsSitePrices(store({ id: 'tt-supermarket', name: 'T&T Supermarket', enabled: true }))).toBe(true);
-    expect(readsSitePrices(store({ id: 'tt-supermarket', name: 'T&T Supermarket', enabled: false }))).toBe(false);
+  it('never counts T&T, whose site blocks automated lookups, even with a location saved from before', () => {
+    expect(readsSitePrices(store({ id: 'tt-supermarket', name: 'T&T Supermarket', enabled: true }))).toBe(false);
+    expect(
+      readsSitePrices(store({ id: 'tt-supermarket', name: 'T&T Supermarket', enabled: true, siteStore: { banner: 'nofrills', storeId: '1', label: 'x' } })),
+    ).toBe(false);
   });
 
   it('reads a Loblaw-family store only once its location is picked', () => {

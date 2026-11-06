@@ -83,12 +83,12 @@ describe('site store locations', () => {
     expect(await got.json()).toEqual({ locations: [], unsupported: true, status: 400 });
   });
 
-  it('never asks the site for T&T locations: the answer is unsupported with no request', async () => {
+  it('refuses T&T locations as an unknown chain, with no request to the site', async () => {
     const fetchMock = vi.fn(async () => reply({ pickupLocations: [] }));
     vi.stubGlobal('fetch', fetchMock);
     const { env, cookies } = await setup();
     const got = await call(`${API}/site-stores/tandt/locations?q=L5A%203V7`, withCookie(cookies[OWNER]!), env);
-    expect(await got.json()).toEqual({ locations: [], unsupported: true, status: null });
+    expect(got.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
