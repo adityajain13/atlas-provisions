@@ -2,7 +2,7 @@
 // kinds, and the price shapes a search result can come back in. No network.
 import { describe, expect, it, vi } from 'vitest';
 import { beforeEach } from 'vitest';
-import { listLocations, normaliseLocation, normaliseProduct, PCX_API_KEY, PCX_BANNER_IDS, resetAnsweringIds, searchIdsFor, searchLocations, searchProducts, siteHeaders } from './pcexpress';
+import { coordsOf, listLocations, locationLabel, normaliseLocation, normaliseProduct, PCX_API_KEY, PCX_BANNER_IDS, resetAnsweringIds, searchIdsFor, searchLocations, searchProducts, siteHeaders } from './pcexpress';
 import { comparisonPerBase, matchLocations, parseSiteSize, pickSiteResult, sitePackPrice } from './sitePrices';
 import { INGREDIENT_BY_ID } from '@provisions/shared';
 
@@ -378,5 +378,35 @@ describe('searchLocations', () => {
       label: 'T&T Supermarket · 7161 Woodbine Ave, Markham',
       postalCode: 'L3R0Y3',
     });
+  });
+});
+
+describe('coordinates of a location', () => {
+  it('reads a geo point, a location, or plain fields, in the shapes the site uses', () => {
+    expect(coordsOf({ geoPoint: { latitude: 43.66, longitude: -79.4 } })).toEqual({ lat: 43.66, lng: -79.4 });
+    expect(coordsOf({ location: { lat: '43.66', lng: '-79.4' } })).toEqual({ lat: 43.66, lng: -79.4 });
+    expect(coordsOf({ address: { geoPoint: { latitude: 43.66, longitude: -79.4 } } })).toEqual({ lat: 43.66, lng: -79.4 });
+    expect(coordsOf({ latitude: 43.66, longitude: -79.4 })).toEqual({ lat: 43.66, lng: -79.4 });
+  });
+
+  it('refuses coordinates out of range, zero, or missing one half', () => {
+    expect(coordsOf({ geoPoint: { latitude: 143, longitude: -79.4 } })).toBeNull();
+    expect(coordsOf({ geoPoint: { latitude: 0, longitude: 0 } })).toBeNull();
+    expect(coordsOf({ geoPoint: { latitude: 43.66 } })).toBeNull();
+    expect(coordsOf({ name: 'no coordinates' })).toBeNull();
+  });
+
+  it('keeps coordinates on the normalised location, and leaves them off when there are none', () => {
+    expect(normaliseLocation({ storeId: '1', name: 'No Frills', geoPoint: { latitude: 43.66, longitude: -79.4 } })).toMatchObject({ lat: 43.66, lng: -79.4 });
+    const plain = normaliseLocation({ storeId: '1', name: 'No Frills' });
+    expect(plain).not.toHaveProperty('lat');
+    expect(plain).not.toHaveProperty('lng');
+  });
+});
+
+describe('locationLabel', () => {
+  it('is the chain, then the street and city; the chain alone with no address', () => {
+    expect(locationLabel('nofrills', { line1: '425 Bloor St W', city: 'Toronto' })).toBe('No Frills · 425 Bloor St W, Toronto');
+    expect(locationLabel('nofrills', {})).toBe('No Frills');
   });
 });

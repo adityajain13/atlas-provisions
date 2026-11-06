@@ -40,6 +40,8 @@ import {
   type Rating,
   type UsageKind,
   estimateOffers,
+  LOCATION_BANNER_IDS,
+  hasLocationList,
   isSiteBanner,
   normalizePostalCode,
   siteOffers,
@@ -92,7 +94,7 @@ import { feedbackRoutes, planFeedback } from './feedbackRoutes';
 import { capMessage, recordUsage } from './usage';
 import { householdHasAdmin } from './access';
 import { SITE_BUDGET, SITE_PRICE_DAYS, SCHEDULED_SUBREQUEST_LIMIT, cachedLocations, runScheduledSite, runSitePrices, siteStatus, siteTargets, siteWaitMinutes } from './sitePrices';
-import { searchLocations } from './pcexpress';
+import { rankStores, originPoint, type Candidate } from './locationSearch';
 
 type Env = AuthEnv & {
   ASSETS: Fetcher;
@@ -556,18 +558,65 @@ app.get(`${API}/flyers/status`, async (c) => {
 
 const SITE_AUTH_MESSAGE = "Loblaw's site needs a PC id sign-in for store search, so store locations aren't available yet.";
 
-// The store locations of a Loblaw-family banner that match the search text. Cached for a week. When the site lists no
-// locations for the banner (or refuses the listing), the answer is 200 with unsupported set, and the picker offers a
-// store number instead.
+// The store locations of a Loblaw-family banner: the ones that match the search text, or the nearest to a postal code.
+// q is a street, city, name or postal code; near is the household's postal code (used for an empty search, and for
+// distances on a text search). Cached for a week. When the site lists no locations for the banner (or refuses the
+// listing), the answer is 200 with unsupported set, and the picker offers a store number instead. T&T has no list.
 app.get(`${API}/site-stores/:banner/locations`, async (c) => {
   const banner = c.req.param('banner');
   if (!isSiteBanner(banner)) return c.text('Unknown store chain', 400);
-  const got = await cachedLocations(c.env.DB, banner, fetch, new Date());
+  if (!hasLocationList(banner)) return c.json({ locations: [], unsupported: true, status: null });
+  const q = (c.req.query('q') ?? '').slice(0, 60);
+  const near = (c.req.query('near') ?? '').slice(0, 12);
+  if (q.trim() === '' && near.trim() === '') return c.json({ locations: [] });
+  const now = new Date();
+  const got = await cachedLocations(c.env.DB, banner, fetch, now);
   if (!got.ok) {
     if (got.error.kind === 'auth') return c.text(SITE_AUTH_MESSAGE, 409);
     return c.json({ locations: [], unsupported: true, status: got.error.status ?? null });
   }
-  return c.json({ locations: searchLocations(got.value, banner, c.req.query('q') ?? '') });
+  const origin = await originPoint(c.env.DB, fetch, now, q, near);
+  const hits = rankStores(
+    got.value.map((loc) => ({ banner, loc })),
+    q,
+    origin,
+  );
+  return c.json({
+    locations: hits.map(({ storeId, label, postalCode, distanceKm }) => ({
+      storeId,
+      label,
+      postalCode,
+      ...(distanceKm !== undefined ? { distanceKm } : {}),
+    })),
+    ...(origin?.approx ? { approx: true } : {}),
+  });
+});
+
+// The locations of every banner the app searches, for one search. A text search lists the matches by name, street,
+// city or postal code; a postal code or an empty search lists the nearest to that postal code (or, when empty, to the
+// household's). Banners whose list cannot be read are named in unavailable. T&T is not searched.
+app.get(`${API}/site-stores/search`, async (c) => {
+  const q = (c.req.query('q') ?? '').slice(0, 60);
+  const near = (c.req.query('near') ?? '').slice(0, 12);
+  if (q.trim() === '' && near.trim() === '') return c.json({ locations: [], unavailable: [] });
+  const now = new Date();
+  const origin = await originPoint(c.env.DB, fetch, now, q, near);
+  if (q.trim() === '' && origin === null) return c.json({ locations: [], unavailable: [] });
+  const candidates: Candidate[] = [];
+  const unavailable: string[] = [];
+  for (const banner of LOCATION_BANNER_IDS) {
+    const got = await cachedLocations(c.env.DB, banner, fetch, now);
+    if (!got.ok) {
+      unavailable.push(banner);
+      continue;
+    }
+    for (const loc of got.value) candidates.push({ banner, loc });
+  }
+  return c.json({
+    locations: rankStores(candidates, q, origin),
+    unavailable,
+    ...(origin?.approx ? { approx: true } : {}),
+  });
 });
 
 // Reads the regular prices of the household's stores now. Limited to once per 10 minutes per household.

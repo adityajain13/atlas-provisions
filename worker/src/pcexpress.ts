@@ -21,13 +21,15 @@ export interface SiteError {
 
 export type SiteResult<T> = { ok: true; value: T } | { ok: false; error: SiteError };
 
-/** A pickup location, as the picker shows it. */
+/** A pickup location, as the picker shows it. lat and lng are set when the site gives coordinates. */
 export interface SiteLocation {
   storeId: string;
   name: string;
   line1?: string;
   city?: string;
   postalCode?: string;
+  lat?: number;
+  lng?: number;
 }
 
 /** One search result, normalised. Prices are dollars for the whole pack as sold. */
@@ -130,18 +132,38 @@ function listIn(json: unknown, keys: string[]): unknown[] | null {
   return null;
 }
 
+/**
+ * The coordinates of a location record, when the site gives them in one of the shapes it uses (a geo point, a location,
+ * or plain fields on the record or its address). Null when there are none or they are out of range.
+ */
+export function coordsOf(raw: Record<string, unknown>): { lat: number; lng: number } | null {
+  const address = isObject(raw.address) ? raw.address : {};
+  const shapes = [raw.geoPoint, raw.location, raw.coordinates, raw.geo, address.geoPoint, address.location, raw];
+  for (const shape of shapes) {
+    if (!isObject(shape)) continue;
+    const lat = num(shape.latitude ?? shape.lat);
+    const lng = num(shape.longitude ?? shape.lng ?? shape.lon);
+    if (lat === undefined || lng === undefined) continue;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) continue;
+    return { lat, lng };
+  }
+  return null;
+}
+
 /** A pickup location from one record of the list, or null when it has no store id. */
 export function normaliseLocation(raw: unknown): SiteLocation | null {
   if (!isObject(raw)) return null;
   const storeId = scalarText(raw.storeId ?? raw.store_id ?? raw.id);
   if (!storeId) return null;
   const address = isObject(raw.address) ? raw.address : {};
+  const coords = coordsOf(raw);
   return {
     storeId,
     name: str(raw.name) ?? str(raw.storeName) ?? 'Store',
     line1: str(address.line1) ?? str(address.addressLine1) ?? str(address.street),
     city: str(address.town) ?? str(address.city),
     postalCode: (str(address.postalCode) ?? str(address.postal_code) ?? str(raw.postalCode))?.toUpperCase().replace(/\s+/g, ''),
+    ...(coords ?? {}),
   };
 }
 
@@ -235,6 +257,13 @@ export async function listLocations(banner: string, fetchImpl: typeof fetch = fe
 /** Normalised text for matching: lower case, no spaces, so "M5T 1R5" and "m5t1r5" are the same. */
 const squash = (s: string): string => s.toLowerCase().replace(/\s+/g, '');
 
+/** The label the picker shows for a location: the chain, then its street and city. */
+export function locationLabel(banner: string, loc: Pick<SiteLocation, 'line1' | 'city'>): string {
+  const bannerName = isSiteBanner(banner) ? SITE_BANNER_NAMES[banner] : banner;
+  const address = [loc.line1, loc.city].filter(Boolean).join(', ');
+  return address ? `${bannerName} · ${address}` : bannerName;
+}
+
 /**
  * The locations a search matches. Every word of the query must appear in the name, street, city or postal code, with
  * spaces ignored on both sides. A query that starts like a postal code lists the locations whose postal code starts
@@ -249,14 +278,12 @@ export function searchLocations(
   if (words.length === 0) return [];
   const postal = words.join('');
   const postalLike = /^[a-z]\d[a-z]/.test(postal);
-  const bannerName = isSiteBanner(banner) ? SITE_BANNER_NAMES[banner] : banner;
 
   const hits = locations.flatMap((loc) => {
     const fields = [loc.name, loc.line1, loc.city, loc.postalCode].filter((v): v is string => typeof v === 'string' && v !== '').map(squash);
     if (!words.every((w) => fields.some((f) => f.includes(w)))) return [];
     const rank = postalLike && loc.postalCode && squash(loc.postalCode).startsWith(postal) ? 0 : 1;
-    const address = [loc.line1, loc.city].filter(Boolean).join(', ');
-    return [{ rank, storeId: loc.storeId, label: address ? `${bannerName} · ${address}` : bannerName, postalCode: loc.postalCode ?? null }];
+    return [{ rank, storeId: loc.storeId, label: locationLabel(banner, loc), postalCode: loc.postalCode ?? null }];
   });
   // Array.prototype.sort is stable, so the site's order holds within each rank.
   hits.sort((a, b) => a.rank - b.rank);

@@ -16,7 +16,10 @@ import {
   DAY_LONG,
   HouseholdSchema,
   SLOTS,
+  SITE_BANNER_NAMES,
   STORE_PRESETS,
+  isSiteBanner,
+  type SiteBanner,
   UNITS,
   VARIETY_RULES,
   newId,
@@ -60,6 +63,8 @@ import {
   renameHousehold,
   revokeAccess,
   saveHousehold,
+  searchStoreBranches,
+  type StoreBranchOption,
 } from '../api';
 import { accessOutcome, accessSourceLabel, inviteOutcome, leaveCopy, removeAccessCopy, roleLabel } from '../lib/members';
 import {
@@ -71,7 +76,7 @@ import {
   neverExpansion,
 } from '../lib/itemRules';
 import { FlyerRefresh } from '../components/FlyerRefresh';
-import { RegularPriceLocation } from '../components/SiteLocation';
+import { RegularPriceLocation, kmLabel } from '../components/SiteLocation';
 import { SitePrices } from '../components/SitePrices';
 import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { Header } from '../components/Header';
@@ -94,6 +99,10 @@ import { TimeCapGrid } from '../components/TimeCapGrid';
 import {
   MAX_FLIPP_NAMES,
   addCustomStore,
+  addressOf,
+  takesBranch,
+  withAddress,
+  withBranch,
   addFlippName,
   clampMaxStores,
   dropIndex,
@@ -1483,6 +1492,7 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
                 >
                   <StoreRow
                     store={s}
+                    postalCode={h.postalCode}
                     open={openId === s.id}
                     onToggle={() => setOpenId((cur) => (cur === s.id ? null : s.id))}
                     change={changeStores}
@@ -1581,6 +1591,7 @@ function StoresSection({ h, update }: { h: Household; update: Update }) {
         onClose={() => setPickerOpen(false)}
         stores={h.stores}
         change={changeStores}
+        postalCode={h.postalCode}
       />
     </Section>
   );
@@ -1640,12 +1651,14 @@ function MinSavingField({ value, onChange }: { value: number; onChange: (n: numb
 
 function StoreRow({
   store: s,
+  postalCode,
   open,
   onToggle,
   change,
   rank,
 }: {
   store: Store;
+  postalCode?: string;
   open: boolean;
   onToggle: () => void;
   change: StoresUpdate;
@@ -1744,6 +1757,7 @@ function StoreRow({
           {group && <span className="ml-2 text-[12px] text-muted">{group}</span>}
         </>
       }
+      detail={addressOf(s)}
       summary={
         s.priceMatches ? (
           <span className="inline-block rounded-full border border-herb/40 px-2 py-0.5 text-[11px] text-herbLight">
@@ -1788,10 +1802,41 @@ function StoreRow({
       </label>
 
       <FlippNames store={s} change={change} />
-      <div className="mt-6">
-        <RegularPriceLocation store={s} change={change} />
-      </div>
+      {takesBranch(s.id) ? (
+        <div className="mt-6">
+          <RegularPriceLocation store={s} change={change} near={postalCode} />
+        </div>
+      ) : (
+        <StoreAddress store={s} change={change} />
+      )}
     </Disclosure>
+  );
+}
+
+/** The address typed for a store with no location picker. Saved when the field loses focus. */
+function StoreAddress({ store: s, change }: { store: Store; change: StoresUpdate }) {
+  const [text, setText] = useState(s.address ?? '');
+  function save() {
+    const next = text.trim();
+    if (next === (s.address ?? '')) return;
+    change((list) => list.map((x) => (x.id === s.id ? withAddress(x, next) : x)));
+  }
+  return (
+    <label className="block">
+      <span className={eyebrow}>Address</span>
+      <input
+        className={`${fieldCls} mt-2`}
+        placeholder="Optional"
+        value={text}
+        maxLength={160}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+          if (e.key === 'Enter') save();
+        }}
+      />
+      <span className="mt-2 block text-[12px] text-muted">The branch you shop at, so you can tell stores apart.</span>
+    </label>
   );
 }
 
@@ -1856,21 +1901,25 @@ function FlippNames({ store: s, change }: { store: Store; change: StoresUpdate }
   );
 }
 
-/** Native dialog: a bottom sheet on a phone, a centred card on desktop. Presets to add, search, and a custom store. */
+/** Native dialog: a bottom sheet on a phone, a centred card on desktop. Find a branch by address, presets to add, and a custom store. */
 function StorePicker({
   open,
   onClose,
   stores,
   change,
+  postalCode,
 }: {
   open: boolean;
   onClose: () => void;
   stores: Store[];
   change: StoresUpdate;
+  postalCode?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState('');
   const [added, setAdded] = useState<string | null>(null);
+  const [addressFor, setAddressFor] = useState<string | null>(null);
+  const [addressText, setAddressText] = useState('');
 
   useEffect(() => {
     const d = ref.current;
@@ -1881,6 +1930,8 @@ function StorePicker({
       d.close();
       setQuery('');
       setAdded(null);
+      setAddressFor(null);
+      setAddressText('');
     }
   }, [open]);
 
@@ -1895,9 +1946,11 @@ function StorePicker({
   const q = query.trim().toLowerCase();
   const groups = groupPresets(q ? notListed.filter((p) => p.name.toLowerCase().includes(q)) : notListed);
 
-  function addPreset(p: StorePreset) {
-    change((list) => (list.some((x) => x.id === p.id) ? list : [...list, storeFromPreset(p)]));
-    setAdded(p.name);
+  function addPreset(p: StorePreset, address?: string) {
+    change((list) => (list.some((x) => x.id === p.id) ? list : [...list, storeFromPreset(p, address)]));
+    setAddressFor(null);
+    setAddressText('');
+    setAdded(`Added ${p.name}`);
   }
 
   return (
@@ -1913,54 +1966,98 @@ function StorePicker({
       <div className="flex max-h-[85vh] flex-col rounded-t-2xl border border-b-0 border-edge bg-field lg:max-h-[80vh] lg:rounded-xl lg:border-b">
         <div aria-hidden="true" className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-edge lg:hidden" />
         <div className="flex shrink-0 items-center justify-between gap-4 px-5 pt-3 lg:pt-5">
-          <h2
-            id="store-picker-title"
-            className="font-display text-[20px] font-semibold tracking-[-0.01em] text-paper"
-          >
+          <h2 id="store-picker-title" className="font-display text-[20px] font-semibold tracking-[-0.01em] text-paper">
             Add a store
           </h2>
           <button type="button" onClick={onClose} className={linkBtn}>
             Close
           </button>
         </div>
-        <div className="shrink-0 px-5 pt-4">
-          <input
-            type="text"
-            className={fieldCls}
-            placeholder="Search stores"
-            aria-label="Search stores"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6">
           <p role="status" aria-live="polite" className="h-5 pt-2 text-[13px] text-herbLight">
-            {added ? `Added ${added}` : ''}
+            {added ?? ''}
           </p>
+
+          {/* Mounted only while open, so a search from an earlier visit does not show again. */}
+          {open && <FindBranch stores={stores} change={change} postalCode={postalCode} onAdded={setAdded} />}
+
+          <div className="mt-6 border-t border-line2 pt-4">
+            <p className={eyebrow}>Chains</p>
+            <input
+              type="text"
+              className={`${fieldCls} mt-3`}
+              placeholder="Filter stores by name"
+              aria-label="Filter stores by name"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+
           {groups.length === 0 && (
-            <p className="text-[14px] text-muted">
-              {notListed.length === 0
-                ? 'Every store we know about is already in your list.'
-                : `No stores match "${query.trim()}".`}
+            <p className="mt-4 text-[14px] text-muted">
+              {notListed.length === 0 ? 'Every store we know about is already in your list.' : `No stores match "${query.trim()}".`}
             </p>
           )}
           {groups.map((g) => (
             <div key={g.group} className="mt-5 first:mt-0">
               <p className={eyebrow}>{g.group}</p>
               <ul className="mt-2">
-                {g.presets.map((p) => (
-                  <li key={p.id} className="flex min-h-12 items-center justify-between gap-3 border-b border-line2">
-                    <span className="min-w-0 truncate text-[15px] text-paper">{p.name}</span>
-                    <button
-                      type="button"
-                      aria-label={`Add ${p.name}`}
-                      onClick={() => addPreset(p)}
-                      className="h-11 shrink-0 rounded-lg border border-herb px-4 text-[14px] text-herbLight"
-                    >
-                      Add
-                    </button>
-                  </li>
-                ))}
+                {g.presets.map((p) => {
+                  const needsAddress = !takesBranch(p.id);
+                  const typing = addressFor === p.id;
+                  return (
+                    <li key={p.id} className="border-b border-line2">
+                      <div className="flex min-h-12 items-center justify-between gap-3">
+                        <span className="min-w-0 truncate text-[15px] text-paper">{p.name}</span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {needsAddress && (
+                            <button
+                              type="button"
+                              aria-expanded={typing}
+                              aria-label={`Add ${p.name} with an address`}
+                              onClick={() => {
+                                setAddressFor(typing ? null : p.id);
+                                setAddressText('');
+                              }}
+                              className={`${linkBtn} text-[13px]`}
+                            >
+                              With address
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`Add ${p.name}`}
+                            onClick={() => addPreset(p)}
+                            className="h-11 shrink-0 rounded-lg border border-herb px-4 text-[14px] text-herbLight"
+                          >
+                            Add
+                          </button>
+                        </span>
+                      </div>
+                      {typing && (
+                        <form
+                          className="flex gap-2 pb-3"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            addPreset(p, addressText);
+                          }}
+                        >
+                          <input
+                            className={fieldCls}
+                            placeholder="Address (optional)"
+                            aria-label={`Address for ${p.name} (optional)`}
+                            value={addressText}
+                            maxLength={160}
+                            onChange={(e) => setAddressText(e.target.value)}
+                          />
+                          <button type="submit" aria-label={`Add ${p.name} at this address`} className={addBtn}>
+                            Add
+                          </button>
+                        </form>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ))}
@@ -1975,6 +2072,128 @@ function StorePicker({
   );
 }
 
+/**
+ * Finds a branch of a Loblaw-family chain by street, city or postal code. Empty, with the household's postal code, it
+ * lists the nearest across the chains. Adding a branch adds its chain, or replaces that chain's branch.
+ */
+function FindBranch({
+  stores,
+  change,
+  postalCode,
+  onAdded,
+}: {
+  stores: Store[];
+  change: StoresUpdate;
+  postalCode?: string;
+  onAdded: (message: string) => void;
+}) {
+  const [text, setText] = useState('');
+  const [found, setFound] = useState<StoreBranchOption[]>([]);
+  const [unavailable, setUnavailable] = useState<string[]>([]);
+  const [approx, setApprox] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const query = text.trim();
+  const near = postalCode ?? '';
+  const nearby = query === '' && near !== '';
+  const active = nearby || query.length >= 2;
+
+  useEffect(() => {
+    if (!active) return;
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      searchStoreBranches(query, near)
+        .then((reply) => {
+          if (!alive) return;
+          setFound(reply.locations);
+          setUnavailable(reply.unavailable ?? []);
+          setApprox(reply.approx === true);
+          setError(null);
+        })
+        .catch((e: unknown) => {
+          if (!alive) return;
+          setFound([]);
+          setError(errorMessage(e));
+        })
+        .finally(() => {
+          if (alive) setSearching(false);
+        });
+    }, 300);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [active, query, near]);
+
+  // Nothing is listed until something is typed or a postal code is saved. The nearest list shows six.
+  const shown = active ? found.slice(0, nearby ? 6 : found.length) : [];
+
+  function addBranch(loc: StoreBranchOption) {
+    const branch = { banner: loc.banner as SiteBanner, storeId: loc.storeId, label: loc.label };
+    const result = withBranch(stores, branch);
+    if (!result) return;
+    change((list) => withBranch(list, branch)?.stores ?? list);
+    onAdded(result.outcome === 'added' ? `Added ${result.name}` : `Updated ${result.name} location`);
+  }
+
+  const unavailableNames = unavailable.map((b) => (isSiteBanner(b) ? SITE_BANNER_NAMES[b] : b));
+
+  return (
+    <div className="mt-4">
+      <label className="block">
+        <span className={eyebrow}>Find a store by address or postal code</span>
+        <input
+          type="search"
+          className={`${fieldCls} mt-3`}
+          placeholder="Street, city or postal code"
+          aria-label="Find a store by address or postal code"
+          value={text}
+          maxLength={60}
+          onChange={(e) => setText(e.target.value)}
+        />
+      </label>
+      <p className="mt-2 text-[12px] text-muted">Flyers are the same at every branch; the branch is used for shelf prices and distance.</p>
+
+      {!active && <p className="mt-3 text-[13px] text-muted">Add your postal code under Stores to see the nearest branches.</p>}
+      {active && nearby && shown.length > 0 && !searching && <p className="mt-3 text-[12px] text-muted">Near {near}</p>}
+      {searching && <p className="mt-2 text-[12px] text-muted">Searching&hellip;</p>}
+      {error && (
+        <p role="alert" className={`mt-2 text-[13px] ${ERROR_TEXT}`}>
+          {error}
+        </p>
+      )}
+      {active && !searching && !error && shown.length === 0 && (
+        <p className="mt-3 text-[13px] text-muted">
+          {nearby ? 'No branches found near your postal code yet.' : `No branches match "${query}". Try a city or a postal code.`}
+        </p>
+      )}
+      {shown.length > 0 && (
+        <ul className="mt-3 divide-y divide-line2 overflow-hidden rounded-lg border border-edge">
+          {shown.map((loc) => (
+            <li key={`${loc.banner}-${loc.storeId}`} className="flex min-h-12 items-center justify-between gap-3 px-4 py-2">
+              <span className="min-w-0">
+                <span className="block truncate text-[14px] text-paper">{loc.label}</span>
+                {loc.distanceKm !== undefined && <span className="block text-[12px] text-muted">{kmLabel(loc.distanceKm)}</span>}
+              </span>
+              <button
+                type="button"
+                aria-label={`Add ${loc.label}`}
+                onClick={() => addBranch(loc)}
+                className="h-11 shrink-0 rounded-lg border border-herb px-4 text-[14px] text-herbLight"
+              >
+                Add
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {approx && shown.length > 0 && !searching && <p className="mt-2 text-[12px] text-muted">Distances are approximate.</p>}
+      {unavailableNames.length > 0 && <p className="mt-2 text-[12px] text-muted">Couldn&apos;t read {unavailableNames.join(', ')} right now.</p>}
+    </div>
+  );
+}
+
 function AddCustomStore({
   stores,
   change,
@@ -1982,27 +2201,29 @@ function AddCustomStore({
 }: {
   stores: Store[];
   change: StoresUpdate;
-  onAdded: (name: string) => void;
+  onAdded: (message: string) => void;
 }) {
   const [name, setName] = useState('');
   const [flipp, setFlipp] = useState('');
+  const [where, setWhere] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   function add(e: FormEvent) {
     e.preventDefault();
-    const result = addCustomStore(stores, name, flipp);
+    const result = addCustomStore(stores, name, flipp, where);
     if (!result.ok) {
       setError(result.error);
       return;
     }
     const store = result.store;
     change((list) => {
-      const again = addCustomStore(list, name, flipp);
+      const again = addCustomStore(list, name, flipp, where);
       return again.ok && again.store.id === store.id ? [...list, again.store] : list;
     });
-    onAdded(store.name);
+    onAdded(`Added ${store.name}`);
     setName('');
     setFlipp('');
+    setWhere('');
     setError(null);
   }
 
@@ -2020,6 +2241,14 @@ function AddCustomStore({
             setName(e.target.value);
             setError(null);
           }}
+        />
+        <input
+          className={fieldCls}
+          placeholder="Address (optional)"
+          aria-label="Address (optional)"
+          value={where}
+          maxLength={160}
+          onChange={(e) => setWhere(e.target.value)}
         />
         <input
           className={fieldCls}

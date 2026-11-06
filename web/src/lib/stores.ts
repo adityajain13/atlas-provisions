@@ -4,8 +4,12 @@ import {
   MAX_MIN_SAVING,
   STORE_GROUPS,
   STORE_PRESETS,
+  hasLocationList,
+  presetIdOfBanner,
+  siteBannerOf,
   slugifyName,
   type ItemRule,
+  type SiteBanner,
   type Store,
   type StoreGroup,
   type StorePreset,
@@ -29,8 +33,9 @@ export function groupPresets(presets: StorePreset[]): { group: StoreGroup; prese
   );
 }
 
-/** The store a preset chip adds: enabled, with the preset's price-match default and Flipp names. */
-export function storeFromPreset(preset: StorePreset): Store {
+/** The store a preset chip adds: enabled, with the preset's price-match default, Flipp names and an optional address. */
+export function storeFromPreset(preset: StorePreset, address?: string): Store {
+  const trimmed = address?.trim() ?? '';
   return {
     id: preset.id,
     name: preset.name,
@@ -38,7 +43,23 @@ export function storeFromPreset(preset: StorePreset): Store {
     priceMatches: preset.priceMatches,
     group: preset.group,
     ...(preset.flippNames ? { flippNames: [...preset.flippNames] } : {}),
+    ...(trimmed ? { address: trimmed.slice(0, MAX_ADDRESS) } : {}),
   };
+}
+
+/** Longest address a store keeps. The schema allows the same. */
+export const MAX_ADDRESS = 160;
+
+/** The address a store row shows: the branch it is at, else the address typed for it. Undefined when there is none. */
+export function addressOf(store: Store): string | undefined {
+  return store.siteStore?.label ?? store.address;
+}
+
+/** The store with its address replaced. Blank text removes it. Every other field is kept. */
+export function withAddress(store: Store, text: string): Store {
+  const { address: _old, ...rest } = store;
+  const trimmed = text.trim().slice(0, MAX_ADDRESS);
+  return trimmed ? { ...rest, address: trimmed } : rest;
 }
 
 /** Comma-separated Flipp names as typed: trimmed, no empties, no repeats ignoring case, at most 10. */
@@ -59,11 +80,11 @@ export function parseFlippNames(text: string): string[] {
 export type AddStoreResult = { ok: true; store: Store } | { ok: false; error: string };
 
 /**
- * A store the user typed: group Other, enabled, no price match, id from the name. Rejected when the name is
- * blank, too long, has no letters or digits, or matches a store already in the list (name ignoring case,
+ * A store the user typed: group Other, enabled, no price match, id from the name, and an optional address. Rejected when
+ * the name is blank, too long, has no letters or digits, or matches a store already in the list (name ignoring case,
  * or the same id).
  */
-export function addCustomStore(stores: Store[], name: string, flippText: string): AddStoreResult {
+export function addCustomStore(stores: Store[], name: string, flippText: string, address = ''): AddStoreResult {
   const trimmed = name.trim();
   if (!trimmed) return { ok: false, error: 'Type a store name.' };
   if (trimmed.length > MAX_NAME) return { ok: false, error: `Store names are ${MAX_NAME} characters or fewer.` };
@@ -76,6 +97,7 @@ export function addCustomStore(stores: Store[], name: string, flippText: string)
   if (stores.some((s) => s.id === id)) return { ok: false, error: 'A store with a similar name is already in your list.' };
 
   const flippNames = parseFlippNames(flippText);
+  const where = address.trim().slice(0, MAX_ADDRESS);
   return {
     ok: true,
     store: {
@@ -85,22 +107,51 @@ export function addCustomStore(stores: Store[], name: string, flippText: string)
       priceMatches: false,
       group: 'Other',
       ...(flippNames.length > 0 ? { flippNames } : {}),
+      ...(where ? { address: where } : {}),
     },
   };
 }
 
-/** Replaces the Flipp names of one store. Blank text removes them. */
+/** A branch the search found: its chain's banner, the store id to read prices from, and its label. */
+export interface BranchChoice {
+  banner: SiteBanner;
+  storeId: string;
+  label: string;
+}
+
+export type BranchResult = { stores: Store[]; outcome: 'added' | 'updated'; name: string };
+
+/**
+ * The list with a branch added for its chain. A chain already in the list keeps its place and flags and gets the
+ * branch in place of its old one ('updated'). A new chain is added enabled, from its preset ('added'). Null when the
+ * banner has no location list or preset. One branch per chain: the list never gets a second store for the same chain.
+ */
+export function withBranch(stores: Store[], branch: BranchChoice): BranchResult | null {
+  if (!hasLocationList(branch.banner)) return null;
+  const preset = STORE_PRESETS.find((p) => p.id === presetIdOfBanner(branch.banner));
+  if (!preset) return null;
+  const siteStore = { banner: branch.banner, storeId: branch.storeId, label: branch.label };
+  const lower = preset.name.trim().toLowerCase();
+  const existing = stores.find((s) => s.id === preset.id || s.name.trim().toLowerCase() === lower);
+  if (existing) {
+    return { stores: stores.map((s) => (s === existing ? { ...s, siteStore } : s)), outcome: 'updated', name: preset.name };
+  }
+  return { stores: [...stores, { ...storeFromPreset(preset), siteStore }], outcome: 'added', name: preset.name };
+}
+
+/** Whether a store's chain is one whose branch is searched by address (a Loblaw-family banner). */
+export function takesBranch(storeId: string): boolean {
+  return siteBannerOf(storeId) !== undefined;
+}
+
+/**
+ * Replaces the Flipp names of one store. Blank text removes them. Every other field is kept, including the location
+ * and the address (rebuilding the store used to drop them).
+ */
 export function withFlippNames(store: Store, text: string): Store {
-  const { id, name, enabled, priceMatches, group } = store;
+  const { flippNames: _old, ...rest } = store;
   const names = parseFlippNames(text);
-  return {
-    id,
-    name,
-    enabled,
-    priceMatches,
-    ...(group ? { group } : {}),
-    ...(names.length > 0 ? { flippNames: names } : {}),
-  };
+  return names.length > 0 ? { ...rest, flippNames: names } : rest;
 }
 
 /** The group a store shows under. A store saved before groups existed takes its preset's group, if it has one. */
