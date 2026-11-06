@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MealPlan } from '@provisions/shared';
 import { anthropicPrepClient } from './claude';
+import { toolReply } from '../testing/sse';
 import { attachPrep, buildPrepPayload, generatePrep, prepSystemPrompt, type PrepClient } from './prep';
 
 function plan(over: Partial<MealPlan> = {}): MealPlan {
@@ -134,10 +135,7 @@ describe('attachPrep', () => {
 
 describe('anthropicPrepClient', () => {
   it('calls the submit_prep tool and returns its input', async () => {
-    const fetchImpl = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ content: [{ type: 'tool_use', name: 'submit_prep', input: GOOD }] }), { status: 200 }),
-    ) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () => toolReply(GOOD, 'submit_prep')) as unknown as typeof fetch;
     const out = await anthropicPrepClient('key', 'haiku-test', fetchImpl).submitPrep('SYS', { a: 1 });
 
     expect(out).toEqual(GOOD);

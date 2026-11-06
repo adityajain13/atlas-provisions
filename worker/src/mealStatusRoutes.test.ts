@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultExpiry, defaultHousehold, expandWeek, INGREDIENT_BY_ID, type Household, type MealPlan, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, PARTNER, call, householdWith, json, rows, setup } from './testing/app';
+import { toolReply } from './testing/sse';
 
 const WEEK = '2026-11-08';
 const REQUEST: PlanRequest = { weekOf: WEEK, budget: 150, cravings: [], overrides: [], useItUp: false };
@@ -229,7 +230,7 @@ describe('POST /plan clears the marks of the week it plans again', () => {
     );
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_plan', input: { meals, notes: 'fake' } }] }), { status: 200 })),
+      vi.fn(async () => toolReply({ meals, notes: 'fake' })),
     );
     const request = { weekOf: NEW_WEEK, budget: 150, cravings: [], overrides: [], useItUp: false };
     expect((await call(`${API}/plan`, json('POST', request, cookies[OWNER]), env)).status).toBe(200);

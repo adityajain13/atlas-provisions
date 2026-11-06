@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CUISINES,
   INGREDIENT_BY_ID,
   defaultHousehold,
   expandWeek,
@@ -16,7 +17,7 @@ import {
 } from '@provisions/shared';
 import flyer from '../../fixtures/flyer-sample.json';
 import type { PlannerClient } from './claude';
-import { runPlanner, validationContext, weekFrame, type PlanProgress } from './run';
+import { REGULAR_LIMIT, runPlanner, validationContext, weekFrame, type PlanProgress } from './run';
 
 const matched: MatchedItem[] = (flyer as FlyerItem[])
   .map(matchFlyerItem)
@@ -602,5 +603,23 @@ describe('ingredient changes reach the planner', () => {
 
     const payload = seen[0]!.payload as unknown as { ingredientFeedback: unknown };
     expect(payload.ingredientFeedback).toEqual(feedback);
+  });
+});
+
+describe('regular items offered to the planner', () => {
+  it('are capped at REGULAR_LIMIT, even when every cuisine is often', () => {
+    const everyCuisineOften = Object.fromEntries(CUISINES.map((c) => [c.key, 'often' as const]));
+    const frame = weekFrame({
+      household: household({ cuisines: everyCuisineOften }),
+      request: request(),
+      deals,
+      matched,
+      recentDinnerNames: [],
+      neverBuy: [],
+      today: '2026-11-06',
+    });
+    const regular = frame.available.filter((a) => a.source === 'regular');
+    expect(regular).toHaveLength(REGULAR_LIMIT);
+    expect(new Set(regular.map((a) => a.id)).size).toBe(regular.length);
   });
 });
