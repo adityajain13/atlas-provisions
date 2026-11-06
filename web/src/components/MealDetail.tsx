@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import {
   INGREDIENT_BY_ID,
   DAY_LONG,
+  annotateSteps,
   formatCookAmount,
+  type AnnotatedStep,
   type Day,
   type FeedbackKind,
   type GuestsInput,
@@ -11,6 +13,8 @@ import {
   type MealStatusInput,
   type PlannedMeal,
   type RatingKind,
+  type StepEdit,
+  type StepSegment,
   type WeekFeedback,
 } from '@provisions/shared';
 import { Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -94,6 +98,14 @@ export default function MealDetail({
   const [changeError, setChangeError] = useState<string | null>(null);
   const [openIngredient, setOpenIngredient] = useState<string | null>(null);
   const mealId = planned?.id;
+  // The steps, with the skipped and replaced ingredients marked in the text they name.
+  const stepsAnnotated: AnnotatedStep[] = planned
+    ? annotateSteps(
+        planned.steps,
+        stepEditsFor(planned, mealId ? (changes[mealId] ?? {}) : {}),
+        planned.ingredients.map((i) => INGREDIENT_BY_ID[i.ingredientId]?.name ?? i.ingredientId),
+      )
+    : [];
   const canChange = Boolean(weekOf && mealId);
 
   useEffect(() => {
@@ -339,10 +351,22 @@ export default function MealDetail({
           <section className="mt-8 border-t border-line pt-4">
             <h3 className="font-display font-semibold tracking-[-0.01em] text-paper text-[20px]">Steps</h3>
             <ol className="mt-3 space-y-3">
-              {planned.steps.map((step, i) => (
-                <li key={i} className="flex gap-3 text-[14px] leading-[1.5] text-paper">
+              {stepsAnnotated.map((step, i) => (
+                <li
+                  key={i}
+                  className={`flex gap-3 text-[14px] leading-[1.5] ${step.wholeStepSkipped ? 'text-muted' : 'text-paper'}`}
+                >
                   <span className="w-5 shrink-0 text-muted">{i + 1}.</span>
-                  <span className="min-w-0">{step}</span>
+                  <span className="min-w-0">
+                    {step.wholeStepSkipped ? (
+                      <>
+                        <span className="line-through">{planned.steps[i]}</span>
+                        <span className="ml-2 text-[12px] text-muted">Skipped</span>
+                      </>
+                    ) : (
+                      step.segments.map((seg, j) => <StepText key={j} segment={seg} />)
+                    )}
+                  </span>
                 </li>
               ))}
             </ol>
@@ -501,6 +525,30 @@ function IngredientChange({
       )}
     </div>
   );
+}
+
+/** The skipped and replaced ingredients of one meal, as the step text is marked from them. */
+function stepEditsFor(planned: PlannedMeal, changed: Record<string, { kind: FeedbackKind; replacement?: string }>): StepEdit[] {
+  return planned.ingredients.flatMap((ing): StepEdit[] => {
+    const change = changed[ing.ingredientId];
+    if (!change || (change.kind !== 'skipped' && change.kind !== 'replaced')) return [];
+    const cat = INGREDIENT_BY_ID[ing.ingredientId];
+    return [
+      {
+        name: cat?.name ?? ing.ingredientId,
+        aliases: cat?.aliases ?? [],
+        kind: change.kind,
+        ...(change.replacement ? { replacement: change.replacement } : {}),
+      },
+    ];
+  });
+}
+
+/** One piece of a step: a skipped or replaced ingredient is struck through; a replacement shows in herb green. */
+function StepText({ segment }: { segment: StepSegment }) {
+  if (segment.kind === 'skipped' || segment.kind === 'replacedFrom') return <span className="text-muted line-through">{segment.text}</span>;
+  if (segment.kind === 'replacedTo') return <span className="text-herbLight">{segment.text}</span>;
+  return <>{segment.text}</>;
 }
 
 function MealLink({ reference, onOpen }: { reference: MealRef; onOpen: (id: string) => void }) {

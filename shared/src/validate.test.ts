@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { INGREDIENTS } from './catalog';
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
-import { buildList, toPlannedMeals, validate, type ValidateContext } from './validate';
+import { buildList, cravingDinnerMinimum, toPlannedMeals, validate, type ValidateContext } from './validate';
 import { repairFor } from './repair';
 import { defaultHousehold, type Household } from './index';
 import { expandWeek } from './grid';
@@ -44,8 +44,8 @@ function meal(day: Day, slot: Slot, extra: Partial<PlannedMeal> = {}): PlannedMe
   };
 }
 
-// Seven vegetables, each in exactly three meals of the 21: the repeat limit holds.
-const VEG_ROTATION = ['broccoli', 'carrots', 'kale', 'green-beans', 'zucchini', 'white-mushrooms', 'celery'];
+// Seven year-round vegetables (in season in November), each in exactly three meals of the 21: the repeat limit holds.
+const VEG_ROTATION = ['broccoli', 'carrots', 'kale', 'potatoes', 'white-mushrooms', 'celery', 'yellow-onion'];
 
 /** A plan that passes every check: each cell has one plain vegetable meal, rotated so no one is in more than three. */
 function cleanMeals(cells = allCells()): PlannedMeal[] {
@@ -55,6 +55,28 @@ function cleanMeals(cells = allCells()): PlannedMeal[] {
       ingredients: [{ ingredientId: VEG_ROTATION[Math.floor(i / 3) % VEG_ROTATION.length]!, qty: 0.2, unit: 'kg' }],
     }),
   );
+}
+
+/**
+ * Adds the protein the balance rule asks for, rotated over three sources per slot so no one repeats more than three times:
+ * dinners get meat, fish or tofu; lunches get eggs or legumes. Breakfast is not checked.
+ */
+function withProtein(meals: PlannedMeal[]): PlannedMeal[] {
+  const dinnerPick = ['chicken-thigh-boneless', 'salmon-fillet', 'tofu-firm'];
+  const lunchPick = ['eggs-large', 'chickpeas-dry', 'lentils-red-dry'];
+  let dinners = 0;
+  let lunches = 0;
+  return meals.map((m) => {
+    if (m.slot === 'dinner') {
+      const id = dinnerPick[dinners++ % dinnerPick.length]!;
+      return { ...m, ingredients: [...m.ingredients, { ingredientId: id, qty: 0.3, unit: 'kg' }] };
+    }
+    if (m.slot === 'lunch') {
+      const id = lunchPick[lunches++ % lunchPick.length]!;
+      return { ...m, ingredients: [...m.ingredients, { ingredientId: id, qty: 0.2, unit: 'kg' }] };
+    }
+    return m;
+  });
 }
 
 function planOf(meals: PlannedMeal[], over: Partial<MealPlan> = {}, requestOver: Partial<MealPlan['request']> = {}): MealPlan {
@@ -107,7 +129,7 @@ const checksOf = (issues: { check: string; severity: string }[], severity: 'erro
 
 describe('validate: clean plan', () => {
   it('reports nothing for a plan that meets every rule', () => {
-    expect(validate(planOf(cleanMeals()), ctxOf())).toEqual([]);
+    expect(validate(planOf(withProtein(cleanMeals())), ctxOf())).toEqual([]);
   });
 });
 
@@ -816,5 +838,119 @@ describe('validate: repetition', () => {
     const issues = validate(plan, ctx).filter((i) => i.check === 'repetition');
     const repair = repairFor(plan, ctx, issues);
     expect(repair?.replaceIds).toEqual([plan.meals[3]!.id]);
+  });
+});
+
+describe('validate: ingredient cravings', () => {
+  /** The clean plan, with the given ingredient added to the first `n` dinners and to no other meal. */
+  const withDinnerIngredient = (ingredientId: string, n: number, slot: Slot = 'dinner') => {
+    let seen = 0;
+    return cleanMeals().map((m) => {
+      if (m.slot !== slot) return m;
+      if (slot === 'dinner' && seen++ >= n) return m;
+      return { ...m, ingredients: [...m.ingredients, { ingredientId, qty: 0.3, unit: 'kg' as const }] };
+    });
+  };
+  const cravingIssues = (meals: PlannedMeal[], cravings: string[]) =>
+    validate(planOf(meals, {}, { cravings }), ctxOf()).filter((i) => i.check === 'cravings');
+
+  it('needs a third of the dinners (at least 2) to feature an ingredient craving', () => {
+    expect(cravingDinnerMinimum(7)).toBe(3);
+    expect(cravingDinnerMinimum(6)).toBe(2);
+    expect(cravingDinnerMinimum(1)).toBe(1);
+    expect(cravingDinnerMinimum(0)).toBe(0);
+    expect(cravingDinnerMinimum(10)).toBe(4);
+  });
+
+  it('is an error when an ingredient craving is in too few dinners, with the count', () => {
+    const [issue] = cravingIssues(withDinnerIngredient('chicken-thigh-boneless', 1), ['chicken']);
+    expect(issue!.severity).toBe('error');
+    expect(issue!.message).toContain('chicken appears in 1 of 7 dinners; cravings need at least 3');
+  });
+
+  it('is satisfied when the ingredient is in enough dinners', () => {
+    expect(cravingIssues(withDinnerIngredient('chicken-thigh-boneless', 3), ['chicken'])).toEqual([]);
+  });
+
+  it('does not count lunches toward an ingredient craving', () => {
+    const [issue] = cravingIssues(withDinnerIngredient('chicken-thigh-boneless', 7, 'lunch'), ['chicken']);
+    expect(issue!.message).toContain('appears in 0 of 7 dinners');
+  });
+
+  it('does not count a stock or other pantry item as the craving ingredient', () => {
+    const meals = withDinnerIngredient('chicken-stock', 7);
+    expect(cravingIssues(meals, ['chicken'])[0]!.message).toContain('appears in 0 of 7 dinners');
+  });
+
+  it('keeps a dish craving a name match, as a warning', () => {
+    const issues = validate(planOf(cleanMeals(), {}, { cravings: ['butter chicken'] }), ctxOf()).filter((i) => i.check === 'cravings');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.severity).toBe('warning');
+  });
+});
+
+describe('validate: seasonal produce', () => {
+  const withProduce = (ingredientId: string, weekOf = '2026-11-15') => {
+    const meals = withProtein(cleanMeals());
+    meals[0] = { ...meals[0]!, ingredients: [{ ingredientId, qty: 0.2, unit: 'kg' }] };
+    return planOf(meals, {}, { weekOf });
+  };
+  const seasonIssues = (plan: MealPlan, over: Partial<ValidateContext> = {}) => validate(plan, ctxOf(over)).filter((i) => i.check === 'season');
+
+  it('warns for produce out of season this month', () => {
+    const [issue] = seasonIssues(withProduce('zucchini'));
+    expect(issue!.severity).toBe('warning');
+    expect(issue!.message).toContain('Zucchini is out of season in November');
+  });
+
+  it('does not warn for produce in season this month', () => {
+    expect(seasonIssues(withProduce('zucchini', '2026-07-12'))).toEqual([]);
+  });
+
+  it('warns for imported produce even in its listed months, unless it is on a deal', () => {
+    expect(seasonIssues(withProduce('mangoes', '2026-07-12'))[0]!.message).toContain('Mangoes is imported');
+    expect(seasonIssues(withProduce('mangoes'), { onDeal: new Set(['mangoes']) })).toEqual([]);
+  });
+
+  it('does not warn for out-of-season produce that is on a flyer deal this week', () => {
+    expect(seasonIssues(withProduce('zucchini'), { onDeal: new Set(['zucchini']) })).toEqual([]);
+  });
+
+  it('does nothing when the household turns the preference off', () => {
+    expect(seasonIssues(withProduce('zucchini'), { household: household({ preferSeasonal: false }) })).toEqual([]);
+  });
+});
+
+describe('validate: protein balance', () => {
+  const balanceIssues = (meals: PlannedMeal[], over: Partial<ValidateContext> = {}) =>
+    validate(planOf(meals), ctxOf(over)).filter((i) => i.check === 'balance');
+
+  it('warns for a lunch or dinner with no substantial protein', () => {
+    const meals = withProtein(cleanMeals());
+    meals[1 * 3 + 1] = { ...meals[1 * 3 + 1]!, name: 'Plain lunch', ingredients: [{ ingredientId: 'broccoli', qty: 0.2, unit: 'kg' }] };
+    const issues = balanceIssues(meals);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toContain('"Plain lunch" has no substantial protein');
+  });
+
+  it('does not check breakfast or a leftover meal', () => {
+    const meals = cleanMeals().map((m) => (m.slot === 'lunch' ? { ...m, usesLeftoversFrom: 'x' } : m));
+    expect(balanceIssues(meals.filter((m) => m.slot !== 'dinner').map((m) => ({ ...m, usesLeftoversFrom: m.usesLeftoversFrom ?? 'x' })))).toEqual([]);
+    expect(balanceIssues(meals.filter((m) => m.slot === 'breakfast'))).toEqual([]);
+  });
+
+  it('warns when more than two dinners have no meat or fish', () => {
+    const meals = withProtein(cleanMeals()).map((m) =>
+      m.slot === 'dinner' ? { ...m, ingredients: [...m.ingredients.filter((i) => i.ingredientId !== 'chicken-thigh-boneless' && i.ingredientId !== 'salmon-fillet'), { ingredientId: 'tofu-firm', qty: 0.3, unit: 'kg' as const }] } : m,
+    );
+    expect(balanceIssues(meals).some((i) => i.message.includes('7 dinners have no meat or fish'))).toBe(true);
+  });
+
+  it('allows meatless dinners when someone in the household is vegetarian', () => {
+    const meals = withProtein(cleanMeals()).map((m) =>
+      m.slot === 'dinner' ? { ...m, ingredients: [...m.ingredients.filter((i) => i.ingredientId !== 'chicken-thigh-boneless' && i.ingredientId !== 'salmon-fillet'), { ingredientId: 'tofu-firm', qty: 0.3, unit: 'kg' as const }] } : m,
+    );
+    const veg = household({ people: [{ ...people[0]!, dietTags: ['Vegetarian'] }, people[1]!] });
+    expect(balanceIssues(meals, { household: veg }).some((i) => i.message.includes('no meat or fish'))).toBe(false);
   });
 });

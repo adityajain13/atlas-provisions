@@ -120,3 +120,18 @@ describe('setupDone', () => {
     expect(HouseholdSchema.safeParse({ ...defaultHousehold(), setupDone: 'no' }).success).toBe(false);
   });
 });
+
+describe('seasonal preference and staples with no catalogue id', () => {
+  it('defaults the season preference on and the custom staples to none, for a household saved before them', () => {
+    const { preferSeasonal: _p, onHandCustom: _o, ...old } = defaultHousehold();
+    const parsed = HouseholdSchema.parse(old);
+    expect(parsed.preferSeasonal).toBe(true);
+    expect(parsed.onHandCustom).toEqual([]);
+  });
+
+  it('keeps a turned-off preference and a custom staple', () => {
+    const parsed = HouseholdSchema.parse({ ...defaultHousehold(), preferSeasonal: false, onHandCustom: ['Lao Gan Ma'] });
+    expect(parsed.preferSeasonal).toBe(false);
+    expect(parsed.onHandCustom).toEqual(['Lao Gan Ma']);
+  });
+});

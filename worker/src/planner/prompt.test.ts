@@ -241,3 +241,43 @@ describe('ingredient changes and variety in the planner prompt', () => {
     expect(SYSTEM_PROMPT).toContain('pick a different vegetable or accept some left over');
   });
 });
+
+describe('seasonality, custom staples and the cravings and balance rules', () => {
+  const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: ['chicken'], overrides: [], useItUp: false };
+  const available = () => buildAvailable([deal('zucchini', 0.5), deal('mangoes', 0.4), deal('broccoli', 0.5)], noFixed);
+
+  function payloadFor(over: Partial<Household> = {}) {
+    const household: Household = { ...defaultHousehold(), ...over };
+    const { cells, fixed } = expandWeek(household, request);
+    return buildPayload({ household, request, cells, fixed, fixedCost: noFixed, available: available(), neverBuy: [], recentDinnerNames: [] });
+  }
+
+  it('sends the plan month and the preference, and flags out-of-season and imported produce', () => {
+    const p = payloadFor();
+    expect(p.month).toBe('November');
+    expect(p.preferSeasonal).toBe(true);
+    expect(p.available.find((a) => a.id === 'zucchini')).toMatchObject({ outOfSeason: true });
+    expect(p.available.find((a) => a.id === 'mangoes')).toMatchObject({ imported: true });
+    expect(p.available.find((a) => a.id === 'broccoli')).not.toHaveProperty('outOfSeason');
+  });
+
+  it('flags nothing by season when the household turns the preference off', () => {
+    const p = payloadFor({ preferSeasonal: false });
+    expect(p.preferSeasonal).toBe(false);
+    expect(p.available.find((a) => a.id === 'zucchini')).not.toHaveProperty('outOfSeason');
+    expect(p.available.find((a) => a.id === 'mangoes')).toMatchObject({ imported: true });
+  });
+
+  it('sends the staples with no catalogue id as plain names', () => {
+    expect(payloadFor({ onHandCustom: ['Lao Gan Ma-style chili crunch'] }).onHandCustom).toEqual(['Lao Gan Ma-style chili crunch']);
+    expect(payloadFor().onHandCustom).toEqual([]);
+  });
+
+  it('system prompt states the ingredient-craving minimum, the protein balance and the seasonal rule', () => {
+    expect(SYSTEM_PROMPT).toContain('An ingredient craving');
+    expect(SYSTEM_PROMPT).toContain('at least a third of the dinners');
+    expect(SYSTEM_PROMPT).toContain('substantial protein');
+    expect(SYSTEM_PROMPT).toContain('When preferSeasonal: avoid produce marked outOfSeason or imported unless it is on a flyer deal this week');
+    expect(SYSTEM_PROMPT).not.toContain('Include each craving at least once');
+  });
+});

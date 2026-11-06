@@ -1,6 +1,6 @@
-import { CATEGORY_ORDER, INGREDIENT_BY_ID, type Category } from './catalog';
+import { CATEGORY_ORDER, INGREDIENT_BY_ID, INGREDIENTS, inSeason, type Category } from './catalog';
 import { CUISINES, cuisineKey, cuisineLevel } from './cuisines';
-import { DAY_LONG, DAYS, isWeeknight, type Day, type Slot } from './calendar';
+import { DAY_LONG, DAYS, MONTH_NAMES, isWeeknight, monthOfWeek, type Day, type Slot } from './calendar';
 import type { FixedCost } from './fixed';
 import type { Household, ItemRule } from './index';
 import type { ListItem, MealPlan, PlannedMeal, RawMeal, SlotCell, ValidationIssue } from './plan';
@@ -423,6 +423,7 @@ export interface ValidateContext {
   neverMeals?: string[]; // meal names rated 'never'
   formBlocked?: ReadonlySet<string>; // ingredient ids whose form the household does not keep
   avoidDishes?: string[]; // dish words the household does not want, as typed
+  onDeal?: ReadonlySet<string>; // ingredient ids on a flyer deal this week: exempt from the season check
 }
 
 function proteinOf(meal: PlannedMeal): string | undefined {
@@ -717,20 +718,63 @@ function nameMatches(mealName: string, craving: string): boolean {
   return words(craving).some((w) => mealWords.has(w));
 }
 
+/** Protein tags a single-word craving can name: "chicken", "eggs", "fish". */
+const CRAVING_PROTEINS: ReadonlySet<string> = new Set(['chicken', 'beef', 'pork', 'turkey', 'fish', 'seafood', 'egg', 'tofu', 'legume']);
+
 /**
- * Each craving needs a meal whose name matches it (whole-word overlap of 4+ letters, or a
- * substring). A craving with no name match can take a meal tagged 'craving' that no other
- * craving has claimed.
+ * Catalogue ids a craving names as an ingredient: a craving equal to an ingredient's name or alias (singular or plural,
+ * "shrimp", "paneer", "butter"), or one protein word ("chicken", "eggs") that covers every ingredient with that protein.
+ * Pantry staples such as stock do not count. A dish name ("butter chicken", "ramen") names no ingredient here.
+ */
+function featuredIdsOf(craving: string): Set<string> {
+  const c = craving.toLowerCase().replace(/\s+/g, ' ').trim();
+  const ids = new Set<string>();
+  if (!c) return ids;
+  const forms = new Set([c, c.endsWith('s') ? c.slice(0, -1) : `${c}s`, c.endsWith('es') ? c.slice(0, -2) : `${c}es`]);
+  const proteinWords = [...forms].filter((f) => CRAVING_PROTEINS.has(f));
+  for (const ing of INGREDIENTS) {
+    if (ing.category === 'pantry' || ing.category === 'household') continue;
+    const named = [ing.name.toLowerCase(), ...ing.aliases].some((n) => forms.has(n));
+    const protein = ing.protein !== undefined && proteinWords.includes(ing.protein);
+    if (named || protein) ids.add(ing.id);
+  }
+  return ids;
+}
+
+/** Dinners an ingredient craving must feature in: a third of the dinners, at least 2, never more than there are. */
+export function cravingDinnerMinimum(dinnerCount: number): number {
+  return Math.min(dinnerCount, Math.max(2, Math.ceil(dinnerCount / 3)));
+}
+
+/**
+ * A dish craving ("butter chicken", "ramen") needs a meal whose name matches it (whole-word overlap of 4+ letters, or a
+ * substring). A craving with no name match can take a meal tagged 'craving' that no other craving has claimed.
+ * An ingredient craving ("chicken") must be a main ingredient in a third of the dinners (see cravingDinnerMinimum): an error.
  */
 function checkCravings(plan: MealPlan): ValidationIssue[] {
   const claimed = new Set<string>();
   const unmatched: string[] = [];
+  const dinners = plan.meals.filter((m) => m.slot === 'dinner');
+  const out: ValidationIssue[] = [];
   for (const craving of plan.request.cravings) {
+    const featured = featuredIdsOf(craving);
+    if (featured.size > 0) {
+      const count = dinners.filter((m) => m.ingredients.some((i) => featured.has(i.ingredientId))).length;
+      const need = cravingDinnerMinimum(dinners.length);
+      if (count < need) {
+        const more = need - count;
+        out.push({
+          check: 'cravings',
+          severity: 'error',
+          message: `${craving} appears in ${count} of ${dinners.length} dinners; cravings need at least ${need}. Feature ${craving} as a main ingredient in ${more} more dinner${more === 1 ? '' : 's'}.`,
+        });
+      }
+      continue;
+    }
     const hit = plan.meals.find((m) => !claimed.has(m.id) && nameMatches(m.name, craving));
     if (hit) claimed.add(hit.id);
     else unmatched.push(craving);
   }
-  const out: ValidationIssue[] = [];
   for (const craving of unmatched) {
     const tagged = plan.meals.find((m) => !claimed.has(m.id) && m.tags.includes('craving'));
     if (tagged) {
@@ -812,6 +856,74 @@ function checkVariety(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
         message: 'No dinner is vegetarian this week. Make one dinner from beans, lentils, tofu or vegetables only.',
       });
     }
+  }
+  return out;
+}
+
+/**
+ * With preferSeasonal on: produce out of season this month, or imported, that is not on a flyer deal this week. A
+ * warning, shown to the household, never retried.
+ */
+function checkSeason(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  if (!ctx.household.preferSeasonal) return [];
+  const month = monthOfWeek(plan.request.weekOf);
+  const seen = new Set<string>();
+  const out: ValidationIssue[] = [];
+  for (const meal of plan.meals) {
+    for (const ing of meal.ingredients) {
+      const id = ing.ingredientId;
+      const c = INGREDIENT_BY_ID[id];
+      if (!c || c.category !== 'produce' || seen.has(id) || ctx.onDeal?.has(id)) continue;
+      if (inSeason(c, month) && !c.imported) continue;
+      seen.add(id);
+      const why = c.imported ? 'imported' : `out of season in ${MONTH_NAMES[month - 1]}`;
+      out.push({
+        check: 'season',
+        severity: 'warning',
+        message: `${c.name} is ${why} and not on a deal this week, used in "${meal.name}". Prefer in-season produce, or turn off "Prefer in-season produce".`,
+      });
+    }
+  }
+  return out;
+}
+
+/** Meat, fish and seafood: the proteins that make a dinner meat-based. */
+const MEAT_PROTEINS: ReadonlySet<string> = new Set(['chicken', 'beef', 'pork', 'turkey', 'fish', 'seafood']);
+
+/** A protein that makes a meal substantial: meat, fish, eggs, tofu, legumes, and paneer. Yogurt and cheese do not count. */
+function isSubstantialProtein(id: string): boolean {
+  const c = INGREDIENT_BY_ID[id];
+  if (!c) return false;
+  if (id === 'paneer') return true;
+  return c.protein !== undefined && c.protein !== 'dairy';
+}
+
+const hasProteinIn = (meal: PlannedMeal, test: (id: string) => boolean) => meal.ingredients.some((i) => test(i.ingredientId));
+
+/**
+ * Lunches and dinners that are not leftovers need a substantial protein. More than two dinners a week with no meat or
+ * fish is a warning too, unless someone in the household is vegetarian. Warnings, never retried: the prompt states the rule.
+ */
+function checkBalance(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  const out: ValidationIssue[] = [];
+  const cooked = plan.meals.filter((m) => m.slot !== 'breakfast' && !m.usesLeftoversFrom && m.ingredients.length > 0);
+  for (const meal of cooked) {
+    if (hasProteinIn(meal, isSubstantialProtein)) continue;
+    out.push({
+      check: 'balance',
+      severity: 'warning',
+      message: `"${meal.name}" has no substantial protein (meat, fish, eggs, tofu, paneer or legumes). Add one.`,
+    });
+  }
+  const vegetarianHousehold = ctx.household.people.some((p) => p.dietTags.some((t) => /vegetarian|vegan/i.test(t)));
+  if (vegetarianHousehold) return out;
+  const meatless = cooked.filter((m) => m.slot === 'dinner' && !hasProteinIn(m, (id) => MEAT_PROTEINS.has(INGREDIENT_BY_ID[id]?.protein ?? '')));
+  if (meatless.length > 2) {
+    out.push({
+      check: 'balance',
+      severity: 'warning',
+      message: `${meatless.length} dinners have no meat or fish this week; keep it to 2 unless someone in the household is vegetarian.`,
+    });
   }
   return out;
 }
@@ -951,5 +1063,7 @@ export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[
     ...checkNeverAgain(plan, ctx),
     ...checkRepetition(plan),
     ...checkCuisine(plan, ctx),
+    ...checkSeason(plan, ctx),
+    ...checkBalance(plan, ctx),
   ];
 }

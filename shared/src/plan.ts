@@ -138,6 +138,8 @@ export interface ValidationIssue {
     | 'prep-timing'
     | 'prices'
     | 'repetition'
+    | 'season'
+    | 'balance'
     | 'cuisine';
   severity: 'error' | 'warning';
   message: string; // written as an instruction to the planner

@@ -18,12 +18,14 @@ export {
   DAYS,
   SLOTS,
   DAY_LONG,
+  MONTH_NAMES,
   PLAN_RETENTION_WEEKS,
   WEEKS_AHEAD,
   WEEKS_BACK,
   addWeeks,
   isSunday,
   isWeeknight,
+  monthOfWeek,
   weekRangeLabel,
   weekShortRange,
   type Day,
@@ -191,6 +193,10 @@ export const HouseholdSchema = z.object({
   cuisines: z.record(z.string(), z.enum(CUISINE_LEVELS)).default(defaultCuisines),
   // Catalogue ids of the spices and staples the household keeps: plans use them freely and they never go on the list.
   onHand: z.array(z.string().min(1).max(80)).max(300).default(() => [...DEFAULT_ON_HAND]),
+  // Staples the household keeps that have no catalogue entry, as typed ("chili oil" before it was added). Free, like onHand, never on the list.
+  onHandCustom: z.array(z.string().trim().min(1).max(60)).max(100).default([]),
+  // Prefer produce that is in season in Ontario this month. Off: the planner ignores the calendar.
+  preferSeasonal: z.boolean().default(true),
   // False while the first-time setup wizard is unfinished. Missing means done, so existing households never see it.
   setupDone: z.boolean().optional(),
 });
@@ -235,6 +241,8 @@ export function defaultHousehold(): Household {
     storePreference: { ...DEFAULT_STORE_PREFERENCE },
     cuisines: defaultCuisines(),
     onHand: [...DEFAULT_ON_HAND],
+    onHandCustom: [],
+    preferSeasonal: true,
   };
 }
 
@@ -250,6 +258,7 @@ export {
   COOK_AMOUNTS,
   INGREDIENTS,
   INGREDIENT_BY_ID,
+  inSeason,
   type Category,
   type BaseUnit,
   type CookAmount,
@@ -287,3 +296,4 @@ export * from './feedback';
 export * from './tntSyncScript';
 export * from './tntBookmarklet';
 export * from './cuisines';
+export * from './stepEdits';
