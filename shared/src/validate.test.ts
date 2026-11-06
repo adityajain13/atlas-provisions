@@ -498,6 +498,42 @@ describe('buildList: store choice', () => {
   });
 });
 
+describe('buildList: custom fixed-meal items', () => {
+  const deals = [deal('broccoli', 'A', 5)];
+  const meals = oneMeal([{ id: 'broccoli', qty: 1 }]);
+  const withCustom: FixedCost = {
+    ...NO_FIXED,
+    customNeeds: [{ name: 'Fruit cup', qty: 750, unit: 'g', usedIn: ['yogurt@mon-breakfast'] }],
+  };
+
+  it('lists a custom item as unpriced, with its typed name, quantity text and where it is used', () => {
+    const list = buildList(meals, withCustom, deals, [], ['A'], 1);
+    const item = list.find((i) => i.custom)!;
+    expect(item).toMatchObject({
+      custom: true,
+      store: 'Unpriced',
+      name: 'Fruit cup',
+      label: 'Fruit cup',
+      qtyText: '750 g',
+      total: 0,
+      packs: 0,
+      usedIn: ['yogurt@mon-breakfast'],
+    });
+    expect(item.ingredientId.startsWith('custom:')).toBe(true);
+  });
+
+  it('keeps priced items as they were and sorts custom items after them', () => {
+    const list = buildList(meals, withCustom, deals, [], ['A'], 1);
+    expect(list.find((i) => i.ingredientId === 'broccoli')!.store).toBe('A');
+    expect(list[list.length - 1]!.custom).toBe(true);
+  });
+
+  it('adds nothing when there are no custom needs', () => {
+    const list = buildList(meals, NO_FIXED, deals, [], ['A'], 1);
+    expect(list.some((i) => i.custom)).toBe(false);
+  });
+});
+
 describe('buildList: price-match hint', () => {
   // With maxStores 1, the subset {A} covers spinach, which only A sells, so A is chosen for
   // broccoli even though B is cheaper for broccoli. That is the case a price-match hint is for.
@@ -671,6 +707,12 @@ describe('validate: store cap warning', () => {
     const issues = validate(planOf(cleanMeals(), { list: plain }), ctxOf());
     expect(issues.some((i) => i.check === 'store-cap')).toBe(false);
     expect(issues.some((i) => i.check === 'unknown-ingredient' && i.severity === 'warning')).toBe(true);
+  });
+
+  it('does not give a custom fixed-meal item the shelf-price warning', () => {
+    const custom = item('fruit-cup', { store: 'Unpriced', packs: 0, packQty: 0, packPrice: 0, total: 0, name: 'Fruit cup', custom: true, qtyText: '125 g' });
+    const issues = validate(planOf(cleanMeals(), { list: [custom] }), ctxOf());
+    expect(issues.some((i) => i.check === 'unknown-ingredient' && i.message.includes('Fruit cup'))).toBe(false);
   });
 
   it('does not repeat the unpriced warning for items another enabled store sells', () => {

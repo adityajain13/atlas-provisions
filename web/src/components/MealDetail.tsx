@@ -36,10 +36,12 @@ type Props = {
   onClose: () => void;
   // Opens another planned meal, from a leftover link.
   onOpenMeal: (id: string) => void;
+  // Swaps this meal (and the meals linked to it by leftovers). Absent for fixed meals and past weeks.
+  onSwap?: () => void;
 };
 
 /** Desktop side panel with the whole meal: ingredients, steps, tags and the rating buttons. */
-export default function MealDetail({ day, meal, planned, rating, ratingError, onRate, onClose, onOpenMeal }: Props) {
+export default function MealDetail({ day, meal, planned, rating, ratingError, onRate, onClose, onOpenMeal, onSwap }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
   // Read through a ref so a parent re-render does not refocus the close button.
   const onCloseRef = useRef(onClose);
@@ -143,6 +145,12 @@ export default function MealDetail({ day, meal, planned, rating, ratingError, on
           </div>
         )}
         {ratingError && <p className="mt-3 text-[13px] text-[#D98C7A]">Could not save rating: {ratingError}</p>}
+
+        {onSwap && (
+          <button type="button" onClick={onSwap} className="mt-4 flex h-11 items-center justify-center rounded-lg border border-edge text-[14px] text-paper outline-none hover:border-muted focus-visible:ring-2 focus-visible:ring-herb">
+            Swap this meal
+          </button>
+        )}
 
         {planned && planned.ingredients.length > 0 && (
           <section className="mt-8 border-t border-line pt-4">

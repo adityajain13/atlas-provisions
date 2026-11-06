@@ -121,6 +121,31 @@ export async function regeneratePrep(weekOf: string): Promise<MealPlan> {
   return readStoredPlan((await res.json()) as MealPlan) as MealPlan;
 }
 
+/** A swap's result: the whole week after it, and which meals were replaced and which are new. */
+export type SwapOutcome = MealPlan & { swapped: string[]; added: string[] };
+
+/**
+ * Swaps the chosen meals of a week, and the meals linked to them by leftovers. The server adds the linked meals and
+ * keeps the rest of the week. Takes up to a minute. Errors carry the server's message as-is (a 429 names the cap).
+ */
+export async function swapMeals(weekOf: string, mealIds: string[], note?: string): Promise<SwapOutcome> {
+  const res = await ensureOk(
+    await authFetch(`${BASE}/plan/${weekOf}/swap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mealIds, ...(note && note.trim() ? { note: note.trim() } : {}) }),
+    }),
+  );
+  const body = (await res.json()) as SwapOutcome;
+  return { ...(readStoredPlan(body) as MealPlan), swapped: body.swapped, added: body.added };
+}
+
+/** Puts back the plan that the last swap or new plan replaced. Returns the restored week. */
+export async function undoSwap(weekOf: string): Promise<MealPlan> {
+  const res = await ensureOk(await authFetch(`${BASE}/plan/${weekOf}/undo`, { method: 'POST' }));
+  return readStoredPlan((await res.json()) as MealPlan) as MealPlan;
+}
+
 /** The saved plan for a week, or null when there is none. */
 export async function getPlan(weekOf: string): Promise<MealPlan | null> {
   const res = await authFetch(`${BASE}/plan/${weekOf}`);

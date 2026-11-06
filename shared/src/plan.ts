@@ -100,6 +100,10 @@ export interface ListItem {
   needed?: number; // unpriced items only: base units the plan needs, since packs are 0
   // Unpriced items an enabled store sells, but not one of the chosen stores: the cheapest of them.
   cheapestElsewhere?: { store: string; price: number };
+  // A fixed-meal ingredient that is not in the catalogue. It has no price and is listed as typed.
+  custom?: boolean;
+  label?: string; // the name as typed, for custom items
+  qtyText?: string; // the quantity as typed, e.g. "750 g", for custom items
 }
 
 export interface ValidationIssue {

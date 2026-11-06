@@ -87,6 +87,27 @@ describe('expandWeek', () => {
     expect(cells).toHaveLength(20);
   });
 
+  it('eatingOut on a fixed-meal slot drops the cell and the fixed placement', () => {
+    const h = household({ fixedMeals: [fixedMeal({ personIds: ['ann'] })] });
+    const { cells, fixed } = expandWeek(
+      h,
+      request({ overrides: [{ day: 'mon', slot: 'breakfast', eatingOut: true }] }),
+    );
+    expect(cellAt(cells, 'mon', 'breakfast')).toBeUndefined();
+    expect(fixed).toEqual([]);
+    expect(cells).toHaveLength(20);
+  });
+
+  it('skipFixed on a partly covered slot plans only the covered people normally', () => {
+    const h = household({ fixedMeals: [fixedMeal({ personIds: ['ann'] })] });
+    const { cells, fixed } = expandWeek(
+      h,
+      request({ overrides: [{ day: 'mon', slot: 'breakfast', skipFixed: true }] }),
+    );
+    expect(cellAt(cells, 'mon', 'breakfast')!.eaters).toEqual(['ann', 'ben']);
+    expect(fixed).toEqual([]);
+  });
+
   it('headcount adds guest ids when it exceeds the people eating', () => {
     const { cells } = expandWeek(household(), request({ overrides: [{ day: 'sat', slot: 'lunch', headcount: 4 }] }));
     expect(cellAt(cells, 'sat', 'lunch')!.eaters).toEqual(['ann', 'ben', 'guest-1', 'guest-2']);

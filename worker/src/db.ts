@@ -189,15 +189,45 @@ export async function loadPlan(db: D1Database, householdId: string, weekOf: stri
   return readStoredPlan(JSON.parse(row.data) as MealPlan) as MealPlan;
 }
 
-/** Insert or replace the household's plan for its week. */
-export async function savePlan(db: D1Database, householdId: string, plan: MealPlan): Promise<void> {
+/** The stored JSON of the household's plan for its week, as saved. Null when there is no plan. */
+export async function loadPlanData(db: D1Database, householdId: string, weekOf: string): Promise<string | null> {
+  const row = await db
+    .prepare('SELECT data FROM meal_plans WHERE household_id = ? AND week_of = ?')
+    .bind(householdId, weekOf)
+    .first<{ data: string }>();
+  return row ? row.data : null;
+}
+
+/**
+ * Insert or replace the household's plan for its week. `previous` is the JSON of the plan this one replaces,
+ * kept so the change can be undone. Null or undefined keeps whatever previous plan is stored.
+ */
+export async function savePlan(db: D1Database, householdId: string, plan: MealPlan, previous?: string | null): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO meal_plans (household_id, week_of, data, created_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT(household_id, week_of) DO UPDATE SET data = excluded.data, created_at = excluded.created_at`,
+      `INSERT INTO meal_plans (household_id, week_of, data, created_at, previous) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(household_id, week_of) DO UPDATE SET
+         data = excluded.data,
+         created_at = excluded.created_at,
+         previous = COALESCE(excluded.previous, meal_plans.previous)`,
     )
-    .bind(householdId, plan.weekOf, JSON.stringify(plan), plan.generatedAt)
+    .bind(householdId, plan.weekOf, JSON.stringify(plan), plan.generatedAt, previous ?? null)
     .run();
+}
+
+/**
+ * Undo: the plan and the plan it replaced trade places, in one statement. Returns false when the week has no
+ * plan or nothing to go back to.
+ */
+export async function undoPlan(db: D1Database, householdId: string, weekOf: string): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `UPDATE meal_plans SET data = previous, previous = data
+       WHERE household_id = ? AND week_of = ? AND previous IS NOT NULL`,
+    )
+    .bind(householdId, weekOf)
+    .run();
+  return (res.meta.changes ?? 0) > 0;
 }
 
 // ---- Pantry (milestone 3A) ----

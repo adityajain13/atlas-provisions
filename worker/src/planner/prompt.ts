@@ -37,6 +37,14 @@ export const SYSTEM_PROMPT = [
   'Return the plan only via the submit_plan tool.',
 ].join('\n');
 
+/** Added to SYSTEM_PROMPT for a swap, where `keptMeals` is in the payload: the rest of the week stays as it is. */
+export const SWAP_PROMPT = [
+  'This is a swap: part of a week is already planned and the household is changing only some of its meals.',
+  'Fill only the slots listed. Keep every meal in keptMeals exactly as it is; new meals may share leftovers only with other new meals.',
+  "Don't reuse any name in `replacing`. Follow swapNote if given.",
+  "Return the full week's prep list (kept + new meals) in `prep`, when prepDay is set.",
+].join('\n');
+
 export const SUBMIT_PLAN_TOOL = {
   name: 'submit_plan',
   description: 'Submit the planned meals for the week. Call this exactly once, with one meal per slot in `slots`.',
@@ -168,10 +176,21 @@ export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryIt
   return [...byId.values()];
 }
 
+/** A meal that stays in the week during a swap. The planner must not change it. */
+export interface KeptMealPayload {
+  id: string;
+  day: string;
+  slot: string;
+  name: string;
+  ingredients: { id: string; qty: number; unit: string }[];
+  usesLeftoversFrom?: string;
+  makesLeftoversFor?: string;
+}
+
 export interface PayloadInput {
   household: Household;
   request: PlanRequest;
-  cells: SlotCell[];
+  cells: SlotCell[]; // the cells to fill: the whole week, or only the slots being swapped
   fixed: FixedPlacement[];
   fixedCost: FixedCost;
   available: AvailableItem[];
@@ -181,6 +200,11 @@ export interface PayloadInput {
   favourites?: string[]; // meal names the household has liked
   avoid?: string[]; // meal names to skip, from ratings
   neverBuyWords?: string[]; // never-buy names as typed, e.g. "beef"
+  // Swap only: the meals that stay, what they cost, the names being replaced, and the household's note.
+  keptMeals?: KeptMealPayload[];
+  keptCost?: number;
+  replacing?: string[];
+  swapNote?: string;
 }
 
 export interface PlannerPayload {
@@ -201,6 +225,9 @@ export interface PlannerPayload {
   avoid: string[];
   feedback: ValidationIssue[] | null;
   prepDay: Day | null;
+  keptMeals?: KeptMealPayload[];
+  replacing?: string[];
+  swapNote?: string;
 }
 
 export function buildPayload(input: PayloadInput): PlannerPayload {
@@ -230,7 +257,7 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
       dietTags: p.dietTags,
     })),
     allergies: Object.fromEntries(household.people.map((p) => [p.id, p.allergies])),
-    remainingBudget: Math.max(0, Math.round((request.budget - input.fixedCost.cost) * 100) / 100),
+    remainingBudget: Math.max(0, Math.round((request.budget - input.fixedCost.cost - (input.keptCost ?? 0)) * 100) / 100),
     cravings: request.cravings,
     neverBuy: input.neverBuy,
     neverBuyWords: input.neverBuyWords ?? [],
@@ -248,5 +275,12 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
     favourites: input.favourites ?? [],
     avoid: [...new Set([...(noRepeat ? input.recentDinnerNames : []), ...(input.avoid ?? [])])],
     feedback: null,
+    ...(input.keptMeals
+      ? {
+          keptMeals: input.keptMeals,
+          replacing: input.replacing ?? [],
+          ...(input.swapNote ? { swapNote: input.swapNote } : {}),
+        }
+      : {}),
   };
 }

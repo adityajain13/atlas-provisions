@@ -5,12 +5,20 @@ import type { ListItem, ValidationIssue } from './plan';
 import { matchIngredient, type MatchedItem } from './match';
 import { collectOffers, cheapest, packsFor } from './offers';
 import type { Deal } from './scoring';
-import { nutrientTotals, round2, toBaseUnitQty } from './units';
+import { nutrientTotals, round2, toBaseUnitQty, type InputUnit } from './units';
 
 /** What fixed meals need from the shop, in base units, shared with the planned meals. */
 export interface FixedNeed {
   ingredientId: string;
   qty: number;
+  usedIn: string[]; // placement ids
+}
+
+/** A fixed-meal ingredient that is not in the catalogue, as typed, summed over the week. */
+export interface CustomNeed {
+  name: string;
+  qty: number;
+  unit: InputUnit;
   usedIn: string[]; // placement ids
 }
 
@@ -20,14 +28,17 @@ export interface FixedCost {
   macrosByPerson: Record<string, { protein: number; kcal: number }>; // week totals
   leftovers: { ingredientId: string; qty: number }[]; // pack remainders
   needs: FixedNeed[];
+  // Not in the catalogue: listed without a price. Optional, so older FixedCost values still type-check.
+  customNeeds?: CustomNeed[];
   issues: ValidationIssue[];
 }
 
 /**
  * Cost the fixed meals. Each placement counts once per person eating it, so an ingredient's
- * quantity is qty x eaters x placements. Ingredients that do not match the catalogue, or whose
- * units do not convert, get a warning and cost nothing. Unpriced ingredients keep their need,
- * so the joint list can show them.
+ * quantity is qty x eaters x placements. Ingredients that do not match the catalogue are returned
+ * as customNeeds, summed by lowercase name and unit, so the list can show them without a price.
+ * Ingredients whose units do not convert get a warning and cost nothing. Unpriced catalogue
+ * ingredients keep their need, so the joint list can show them.
  */
 export function costFixedMeals(
   fixed: FixedPlacement[],
@@ -41,6 +52,7 @@ export function costFixedMeals(
   const offers = collectOffers(deals, matchedItems, storeOk);
 
   const needs = new Map<string, { qty: number; usedIn: string[] }>();
+  const customs = new Map<string, CustomNeed>();
   const macrosByPerson: Record<string, { protein: number; kcal: number }> = {};
   const issues: ValidationIssue[] = [];
   const warned = new Set<string>();
@@ -57,7 +69,13 @@ export function costFixedMeals(
       const match = matchIngredient(ing.name);
       const catalog = match ? INGREDIENT_BY_ID[match.ingredientId] : undefined;
       if (!catalog) {
-        warn(`${meal.id}|${ing.name}`, `Fixed meal "${meal.name}" lists "${ing.name}", which is not in the catalogue, so it is not costed. Rename it to a common grocery name.`);
+        const name = ing.name.trim();
+        warn(`${meal.id}|${ing.name}`, `"${name}" isn't in the catalogue, so it's on the list without a price.`);
+        const key = `${name.toLowerCase()}|${ing.unit}`;
+        const custom = customs.get(key) ?? { name, qty: 0, unit: ing.unit, usedIn: [] };
+        custom.qty += ing.qty * placement.eaters.length;
+        if (!custom.usedIn.includes(placement.id)) custom.usedIn.push(placement.id);
+        customs.set(key, custom);
         continue;
       }
       const perPerson = toBaseUnitQty(ing.qty, ing.unit, catalog.baseUnit);
@@ -116,6 +134,7 @@ export function costFixedMeals(
     macrosByPerson,
     leftovers,
     needs: [...needs].map(([ingredientId, n]) => ({ ingredientId, qty: n.qty, usedIn: n.usedIn })),
+    customNeeds: [...customs.values()].filter((c) => c.qty > 0),
     issues,
   };
 }

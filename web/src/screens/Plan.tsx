@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type KeyboardEvent } from 'react';
+import { Fragment, useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   DAYS,
@@ -20,6 +20,7 @@ import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatu
 import { Section } from '../components/Section';
 import WeekSwitcher from '../components/WeekSwitcher';
 import { useConfirm } from '../components/ConfirmDialog';
+import { FixedMealMenu, type FixedChoice } from '../components/FixedMealMenu';
 import { addBtn, chipBase, ctaBtn, eyebrow, fieldCls, removeIconBtn, secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
 import { formatTimeCap, spokenCap } from '../lib/timeCaps';
@@ -34,6 +35,15 @@ export default function Plan() {
   // Headcount overrides per cell, keyed `${slot}-${day}`. Absent means default.
   const [overrides, setOverrides] = useState<Record<string, number>>({});
   const [useItUp, setUseItUp] = useState(true);
+  // What each fixed cell does this week, keyed by week and cell. Absent means keep the fixed meal.
+  const [fixedChoice, setFixedChoice] = useState<Record<string, FixedChoice>>({});
+  const [fixedMenu, setFixedMenu] = useState<{
+    day: Day;
+    slot: Slot;
+    fixed: FixedMeal;
+    anchor: HTMLElement;
+    desktop: boolean;
+  } | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const { track } = useSaveStatus();
@@ -81,8 +91,27 @@ export default function Plan() {
     return household?.fixedMeals.find((m) => m.active && m.slot === slot && m.days.includes(day));
   }
 
-  function isFixed(day: Day, slot: Slot): boolean {
-    return fixedMealAt(day, slot) !== undefined;
+  const choiceKey = (day: Day, slot: Slot) => `${weekOf}|${slot}-${day}`;
+  const choiceAt = (day: Day, slot: Slot): FixedChoice => fixedChoice[choiceKey(day, slot)] ?? 'keep';
+
+  function openFixedMenu(day: Day, slot: Slot, fixed: FixedMeal, anchor: HTMLElement) {
+    setFixedMenu({ day, slot, fixed, anchor, desktop: window.matchMedia('(min-width: 1024px)').matches });
+  }
+
+  const closeFixedMenu = useCallback(
+    (returnFocus: boolean) => {
+      if (returnFocus && fixedMenu?.anchor.isConnected) fixedMenu.anchor.focus();
+      setFixedMenu(null);
+    },
+    [fixedMenu],
+  );
+
+  function pickFixedChoice(value: FixedChoice) {
+    if (!fixedMenu) return;
+    const { day, slot } = fixedMenu;
+    const key = choiceKey(day, slot);
+    setFixedChoice((prev) => ({ ...prev, [key]: value }));
+    closeFixedMenu(true);
   }
 
   // 0, 1, 2 ... up to people + 2, then back to the default (no override).
@@ -97,12 +126,18 @@ export default function Plan() {
     });
   }
 
-  // Only cells that differ from the default headcount. Out (0) becomes eatingOut.
+  // Fixed cells send skipFixed or eatingOut when changed. Other cells send only a headcount that differs
+  // from the default. Out (0) becomes eatingOut.
   function buildOverrides(): WeekOverride[] {
     const out: WeekOverride[] = [];
     for (const day of DAYS) {
       for (const slot of SLOTS) {
-        if (isFixed(day, slot)) continue;
+        if (fixedMealAt(day, slot)) {
+          const choice = choiceAt(day, slot);
+          if (choice === 'plan') out.push({ day, slot, skipFixed: true });
+          if (choice === 'out') out.push({ day, slot, eatingOut: true });
+          continue;
+        }
         const value = overrides[`${slot}-${day}`];
         if (value === undefined || value === defaultCount(day, slot)) continue;
         out.push(value === 0 ? { day, slot, eatingOut: true } : { day, slot, headcount: value });
@@ -191,6 +226,18 @@ export default function Plan() {
         </p>
       )}
 
+      {fixedMenu && (
+        <FixedMealMenu
+          key={choiceKey(fixedMenu.day, fixedMenu.slot)}
+          title={`${DAY_LONG[fixedMenu.day]} ${SLOT_LABEL[fixedMenu.slot].toLowerCase()} · ${fixedMenu.fixed.name}`}
+          anchor={fixedMenu.anchor}
+          desktop={fixedMenu.desktop}
+          value={choiceAt(fixedMenu.day, fixedMenu.slot)}
+          onPick={pickFixedChoice}
+          onClose={closeFixedMenu}
+        />
+      )}
+
       {/* Phone: one column in this order. Desktop: budget, cravings and options on the left, who's eating on the right. */}
       <div className="lg:mt-12 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] lg:items-start lg:gap-x-12 lg:gap-y-12">
       <Section title="Budget" className="lg:col-start-1 lg:row-start-1">
@@ -267,15 +314,25 @@ export default function Plan() {
                   const fixed = fixedMealAt(day, slot);
                   const dayName = `${DAY_LONG[day]} ${SLOT_LABEL[slot].toLowerCase()}`;
                   if (fixed) {
+                    const choice = choiceAt(day, slot);
+                    const changed = choice !== 'keep';
+                    // Short words: a cell is about 30px wide on a phone.
+                    const word = choice === 'plan' ? 'Plan' : choice === 'out' ? 'Out' : 'Fixed';
                     return (
-                      <span
+                      <button
                         key={key}
-                        aria-label={`Fixed meal: ${fixed.name}`}
-                        title={`Fixed meal: ${fixed.name}`}
-                        className="flex h-11 items-center justify-center overflow-hidden rounded-md border border-edge text-[11px] text-muted lg:h-12"
+                        type="button"
+                        aria-haspopup="menu"
+                        onClick={(e) => openFixedMenu(day, slot, fixed, e.currentTarget)}
+                        aria-label={`${dayName}, fixed meal: ${fixed.name}${
+                          changed ? (choice === 'plan' ? ', planned instead' : ', out') : ''
+                        }`}
+                        className={`flex h-11 items-center justify-center overflow-hidden rounded-md border lg:h-12 ${
+                          changed ? 'border-herb text-[10px] tracking-tight text-herbLight' : 'border-edge text-[11px] text-muted'
+                        }`}
                       >
-                        Fixed
-                      </span>
+                        <span className="text-center leading-[1.1]">{word}</span>
+                      </button>
                     );
                   }
                   const def = defaultCount(day, slot);
