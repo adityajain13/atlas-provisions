@@ -1,6 +1,7 @@
-// Regular shelf prices for a household's Loblaw-family stores: a batch of searches on the store location the household
-// picked, the prices written to price_history (source 'site'), and a row in site_price_runs. One batch is capped by a
-// request budget, and an ingredient looked up at a location is not looked up there again for six days.
+// Regular shelf prices for a household's Loblaw-family stores (on the store location the household picked) and for T&T
+// (its storefront search, one price for the province): a batch of searches, the prices written to price_history (source
+// 'site'), and a row in site_price_runs. One batch is capped by a request budget, and an ingredient looked up at a
+// location is not looked up there again for six days.
 import {
   INGREDIENT_BY_ID,
   LB_KG,
@@ -27,6 +28,7 @@ import {
 import { loadHousehold, loadPantry, loadPlan } from './db';
 import { createBudget } from './flipp';
 import { listLocations, searchProducts, type SiteLocation, type SiteProduct, type SiteResult } from './pcexpress';
+import { TNT_BLOCKED_MESSAGE, fsaOf, searchTnt, tntRegionOf, tntStoreId, type TntOptions, type TntProduct } from './tnt';
 
 /** Searches one batch may send. Stays under the Worker's 50 requests per run, with room for the rest of a run. */
 export const SITE_BUDGET = 40;
@@ -82,10 +84,15 @@ export interface SiteTarget {
   storeId: string;
 }
 
-/** The enabled household stores that have a location picked, on a banner the app reads. */
+/**
+ * The enabled household stores whose regular prices are read: the Loblaw-family stores that have a location picked, and
+ * T&T, which has no locations (its prices are the same at every store), keyed by the province the site prices.
+ */
 export function siteTargets(household: Household): SiteTarget[] {
   return household.stores.flatMap((store) => {
-    if (!store.enabled || !store.siteStore) return [];
+    if (!store.enabled) return [];
+    if (siteBannerOf(store.id) === 'tandt') return [{ store, banner: 'tandt' as const, storeId: tntStoreId(household.postalCode) }];
+    if (!store.siteStore) return [];
     const banner = store.siteStore.banner;
     if (!isSiteBanner(banner) || siteBannerOf(store.id) === undefined) return [];
     return [{ store, banner, storeId: store.siteStore.storeId }];
@@ -164,6 +171,69 @@ export function pickSiteResult(products: SiteProduct[], ing: CatalogIngredient):
   return null;
 }
 
+/** A priced match, the same for every banner: the price per base unit, the base units in the pack, and the regular price. */
+export interface PriceHit {
+  pricePerUnit: number;
+  packQty: number;
+  onSale: boolean;
+  /** The regular price per base unit when the store showed one, else null. */
+  regularPerUnit: number | null;
+}
+
+/**
+ * A T&T product priced per base unit: per kilogram for a weight-priced item (pounds converted), else the pack price over
+ * the pack size in its name. Null when the product is not in the ingredient's unit or has no size.
+ */
+export function tntPackPrice(p: TntProduct, baseUnit: CatalogIngredient['baseUnit']): PriceHit | null {
+  if (p.perWeight) {
+    if (baseUnit !== 'kg') return null;
+    const toKg = p.perWeight === 'lb' ? 1 / LB_KG : 1;
+    const pricePerUnit = p.price * toKg;
+    if (!Number.isFinite(pricePerUnit) || pricePerUnit <= 0) return null;
+    const onSale = p.onSale;
+    return { pricePerUnit, packQty: 1, onSale, regularPerUnit: onSale ? p.regularPrice * toKg : null };
+  }
+  const size = parseSiteSize(p.name);
+  if (!size) return null;
+  const qty = toBaseQty(size, baseUnit);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  return {
+    pricePerUnit: p.price / qty,
+    packQty: qty,
+    onSale: p.onSale,
+    regularPerUnit: p.onSale ? p.regularPrice / qty : null,
+  };
+}
+
+/** The first in-stock T&T product that is the ingredient and has a price in its unit, in the storefront's order. */
+export function pickTntResult(products: TntProduct[], ing: CatalogIngredient): PriceHit | null {
+  for (const product of products) {
+    if (!product.inStock) continue;
+    if (matchIngredient(product.name)?.ingredientId !== ing.id) continue;
+    const hit = tntPackPrice(product, ing.baseUnit);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** The Loblaw-family result as a priced match: its regular price is the was price when the site showed one. */
+function siteHit(products: SiteProduct[], ing: CatalogIngredient): PriceHit | null {
+  const hit = pickSiteResult(products, ing);
+  if (!hit) return null;
+  return {
+    pricePerUnit: hit.pricePerUnit,
+    packQty: hit.packQty,
+    onSale: hit.product.onSale,
+    regularPerUnit: hit.product.wasPrice !== undefined ? hit.product.wasPrice / hit.packQty : null,
+  };
+}
+
+/** The T&T search options for a household: its province, and the postal code's first three characters when it has one. */
+export function tntOptionsOf(household: Household): TntOptions {
+  const postcode = fsaOf(household.postalCode);
+  return { region: tntRegionOf(household.postalCode), ...(postcode ? { postcode } : {}) };
+}
+
 type Db = D1Database;
 
 /** Every household's last regular-price run, for the Sunday job: the household that has waited longest is next. */
@@ -226,6 +296,7 @@ export async function runSitePrices(
   const since = new Date(now.getTime() - LOOKUP_DAYS * 86_400_000).toISOString();
 
   const budget = createBudget(budgetLimit);
+  const tntOptions = tntOptionsOf(household);
   const errors: string[] = [];
   const sample: unknown[] = [];
   const writes: D1PreparedStatement[] = [];
@@ -250,11 +321,15 @@ export async function runSitePrices(
       const ing = INGREDIENT_BY_ID[ingredientId]!;
       const term = searchTermFor(ing);
       lookups++;
-      const got = await searchProducts(t.banner, t.storeId, term, fetchImpl);
+      const tnt = t.banner === 'tandt';
+      const got = tnt
+        ? await searchTnt(term, tntOptions, fetchImpl)
+        : await searchProducts(t.banner, t.storeId, term, fetchImpl);
       if (!got.ok) {
         const e = got.error;
         if (sample.length < SAMPLE_SIZE && e.sample !== undefined) sample.push({ store: label, term, kind: e.kind, sample: e.sample });
-        if (errors.length < MAX_ERRORS) errors.push(`${label}, ${term}: ${e.message}`);
+        const message = tnt && e.kind === 'blocked' ? TNT_BLOCKED_MESSAGE : `${label}, ${term}: ${e.message}`;
+        if (errors.length < MAX_ERRORS) errors.push(message);
         if (e.kind === 'auth') {
           authNeeded = true;
           stopped.add(t.banner);
@@ -268,7 +343,7 @@ export async function runSitePrices(
         continue;
       }
       successes++;
-      const hit = pickSiteResult(got.value, ing);
+      const hit = tnt ? pickTntResult(got.value as TntProduct[], ing) : siteHit(got.value as SiteProduct[], ing);
       if (sample.length < SAMPLE_SIZE && got.value.length > 0) {
         sample.push({ store: label, term, results: got.value.slice(0, 3) });
       }
@@ -281,7 +356,6 @@ export async function runSitePrices(
       );
       if (!hit) continue;
       matched++;
-      const regular = hit.product.wasPrice !== undefined ? hit.product.wasPrice / hit.packQty : null;
       writes.push(
         db
           .prepare(
@@ -289,7 +363,7 @@ export async function runSitePrices(
                (ingredient_id, store, date, price_per_unit, on_sale, source, household_id, pack_qty, site_store_id, regular_price_per_unit)
              VALUES (?, ?, ?, ?, ?, 'site', '', ?, ?, ?)`,
           )
-          .bind(ingredientId, t.store.name, today, hit.pricePerUnit, hit.product.onSale ? 1 : 0, hit.packQty, t.storeId, regular),
+          .bind(ingredientId, t.store.name, today, hit.pricePerUnit, hit.onSale ? 1 : 0, hit.packQty, t.storeId, hit.regularPerUnit),
       );
     }
   }

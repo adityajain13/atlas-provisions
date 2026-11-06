@@ -11,7 +11,7 @@ const MIN_QUERY = 2;
 /** The nearest locations listed under the search before anything is typed. */
 const NEAREST_SHOWN = 5;
 const BASE = '/provisions/api';
-export const TANDT_NO_LOCATIONS = "Regular prices aren't available for T&T yet. Prices from your scanned receipts still count.";
+export const TANDT_NO_LOCATIONS = 'T&T has the same prices at every store, so no branch is needed.';
 
 /** What the search answers: the matches, whether the chain lists no locations at all, and whether distances are rough. */
 interface SearchReply {
@@ -116,6 +116,7 @@ export function RegularPriceLocation({ store: s, change, near = '' }: { store: S
       <div>
         <span className={eyebrow}>Location for regular prices</span>
         <p className="mt-2 text-[13px] text-muted">{TANDT_NO_LOCATIONS}</p>
+        {s.address && <p className="mt-2 text-[14px] text-paper">{s.address}</p>}
       </div>
     );
   }

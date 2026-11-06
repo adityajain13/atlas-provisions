@@ -139,6 +139,15 @@ export function withBranch(stores: Store[], branch: BranchChoice): BranchResult 
   return { stores: [...stores, { ...storeFromPreset(preset), siteStore }], outcome: 'added', name: preset.name };
 }
 
+/**
+ * Whether a store's regular prices are read: an enabled Loblaw-family store with a location picked, or an enabled T&T
+ * store, which has no location (its prices are the same at every store). Counts the stores for the Regular prices row.
+ */
+export function readsSitePrices(store: Store): boolean {
+  if (!store.enabled) return false;
+  return siteBannerOf(store.id) === 'tandt' || store.siteStore !== undefined;
+}
+
 /** Whether a store's chain is one whose branch is searched by address (a Loblaw-family banner). */
 export function takesBranch(storeId: string): boolean {
   return siteBannerOf(storeId) !== undefined;

@@ -10,7 +10,7 @@ import {
   type RatingKind,
   type WeekFeedback,
 } from '@provisions/shared';
-import { Fragment } from 'react';
+import { Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { clearIngredientFeedback, errorMessage, getWeekFeedback, saveIngredientFeedback } from '../api';
 import type { MealRef, ViewMeal, ViewTag } from '../lib/planView';
 import { SLOT_LABEL } from '../lib/labels';
@@ -45,10 +45,29 @@ type Props = {
   onSwap?: () => void;
   // The week of the saved plan this meal is in. With it, each ingredient can be marked skipped or replaced.
   weekOf?: string;
+  // 'panel' is the desktop side panel. 'sheet' is the full-screen sheet on a phone, with a Back button.
+  presentation?: 'panel' | 'sheet';
+  // A fixed meal's ingredients as typed on Household. Read-only: a fixed meal has no plan to change.
+  fixedIngredients?: { name: string; qty: number; unit: string }[];
 };
 
 /** Desktop side panel with the whole meal: ingredients, steps, tags and the rating buttons. */
-export default function MealDetail({ day, meal, planned, rating, ratingError, onRate, onClose, onOpenMeal, onSwap, weekOf }: Props) {
+export default function MealDetail({
+  day,
+  meal,
+  planned,
+  rating,
+  ratingError,
+  onRate,
+  onClose,
+  onOpenMeal,
+  onSwap,
+  weekOf,
+  presentation = 'panel',
+  fixedIngredients,
+}: Props) {
+  const sheet = presentation === 'sheet';
+  const sheetRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   // Changes saved for this week, by meal and ingredient. Loaded once per meal shown; edits update it at once.
   const [changes, setChanges] = useState<WeekFeedback>({});
@@ -110,32 +129,42 @@ export default function MealDetail({ day, meal, planned, rating, ratingError, on
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // A sheet holds the page still behind it, and gives the page back when it closes.
+  useEffect(() => {
+    if (!sheet) return;
+    const before = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = before;
+    };
+  }, [sheet]);
+
+  // Tab goes round the sheet's controls and does not reach the page behind it.
+  function keepFocusIn(e: ReactKeyboardEvent<HTMLDivElement>) {
+    const root = sheetRef.current;
+    if (e.key !== 'Tab' || !root) return;
+    const items = Array.from(root.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'));
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (!first || !last) {
+      e.preventDefault();
+      return;
+    }
+    const active = document.activeElement;
+    const outside = !(active instanceof Node) || !root.contains(active);
+    if (e.shiftKey && (active === first || outside)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (active === last || outside)) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   const cost = meal.cost !== null ? `$${meal.cost.toFixed(2)}` : null;
 
-  return (
-    <div className="fixed inset-0 z-30 flex justify-end">
-      <button type="button" aria-label="Close meal details" tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-black/60" />
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="meal-detail-title"
-        className="relative flex h-full w-[460px] max-w-full flex-col overflow-y-auto border-l border-line bg-ink p-8"
-      >
-        <div className="flex items-start justify-between gap-4">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-muted">
-            {DAY_LONG[day]} &middot; {SLOT_LABEL[meal.slot]} &middot; {meal.who}
-          </p>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            aria-label="Close meal details"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-edge text-[18px] text-muted outline-none hover:text-paper focus-visible:ring-2 focus-visible:ring-herb"
-          >
-            &times;
-          </button>
-        </div>
-
+  const body = (
+    <>
         <h2 id="meal-detail-title" className="mt-4 font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-paper">
           {meal.name}
         </h2>
@@ -259,6 +288,20 @@ export default function MealDetail({ day, meal, planned, rating, ratingError, on
           </section>
         )}
 
+        {!planned && fixedIngredients && fixedIngredients.length > 0 && (
+          <section className="mt-8 border-t border-line pt-4">
+            <h3 className="font-display font-semibold tracking-[-0.01em] text-paper text-[20px]">Ingredients</h3>
+            <ul className="mt-3">
+              {fixedIngredients.map((ing, i) => (
+                <li key={`${ing.name}-${i}`} className="flex items-baseline justify-between gap-4 border-b border-line2 py-2 text-[14px]">
+                  <span className="min-w-0 text-paper">{ing.name}</span>
+                  <span className="shrink-0 text-muted">{fixedAmount(ing)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {planned && planned.steps.length > 0 && (
           <section className="mt-8 border-t border-line pt-4">
             <h3 className="font-display font-semibold tracking-[-0.01em] text-paper text-[20px]">Steps</h3>
@@ -272,9 +315,72 @@ export default function MealDetail({ day, meal, planned, rating, ratingError, on
             </ol>
           </section>
         )}
+    </>
+  );
+
+  // The phone sheet: a full-screen page with a Back button. Tab stays inside it, and the page behind does not scroll.
+  if (sheet) {
+    return (
+      <div
+        ref={sheetRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="meal-detail-title"
+        onKeyDown={keepFocusIn}
+        className="fixed inset-0 z-30 flex flex-col bg-ink"
+      >
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-line px-4 py-3">
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            className="flex h-11 items-center rounded-md px-2 text-[15px] text-paper outline-none hover:text-herbLight focus-visible:ring-2 focus-visible:ring-herb"
+          >
+            &larr; Back
+          </button>
+          <p className="min-w-0 truncate text-[11px] uppercase tracking-[0.14em] text-muted">
+            {DAY_LONG[day]} &middot; {SLOT_LABEL[meal.slot]} &middot; {meal.who}
+          </p>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-12 pt-6">{body}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-30 flex justify-end">
+      <button type="button" aria-label="Close meal details" tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-black/60" />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="meal-detail-title"
+        className="relative flex h-full w-[460px] max-w-full flex-col overflow-y-auto border-l border-line bg-ink p-8"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-muted">
+            {DAY_LONG[day]} &middot; {SLOT_LABEL[meal.slot]} &middot; {meal.who}
+          </p>
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close meal details"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-edge text-[18px] text-muted outline-none hover:text-paper focus-visible:ring-2 focus-visible:ring-herb"
+          >
+            &times;
+          </button>
+        </div>
+
+        {body}
       </section>
     </div>
   );
+}
+
+/** A fixed-meal ingredient's amount as typed: "250 g", "2 each", "1.5 l". */
+export function fixedAmount(ing: { qty: number; unit: string }): string {
+  const qty = Number(ing.qty.toFixed(2));
+  return ing.unit === 'each' ? `${qty}` : `${qty} ${ing.unit}`;
 }
 
 /**
