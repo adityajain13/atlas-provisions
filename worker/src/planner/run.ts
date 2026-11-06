@@ -269,6 +269,7 @@ export function validationContext(frame: WeekFrame): ValidateContext {
     neverMeals: frame.ratings.never,
     formBlocked: frame.formBlocked,
     avoidDishes: frame.household.avoidDishes,
+    onDeal: new Set(frame.available.filter((a) => a.source === 'deal').map((a) => a.id)),
   };
 }
 

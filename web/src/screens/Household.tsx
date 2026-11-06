@@ -1377,6 +1377,17 @@ function VarietySection({ h, update }: { h: Household; update: Update }) {
             </label>
           </li>
         ))}
+        <li>
+          <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-4 border-b border-line2">
+            <span className="text-[15px] text-paper">Prefer in-season produce</span>
+            <input
+              type="checkbox"
+              className="h-5 w-5 shrink-0"
+              checked={h.preferSeasonal}
+              onChange={(e) => update((prev) => ({ ...prev, preferSeasonal: e.target.checked }))}
+            />
+          </label>
+        </li>
       </ul>
     </Section>
   );
@@ -2330,7 +2341,7 @@ function StoreSelect({
       aria-label={label}
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value || undefined)}
-      className="h-9 max-w-[11rem] rounded-md border border-edge bg-ink px-2 text-[13px] text-paper"
+      className="h-9 w-[9.5rem] max-w-[11rem] rounded-md border border-edge bg-ink px-2 text-[13px] text-paper"
     >
       {cheapestLabel !== undefined && <option value="">{cheapestLabel}</option>}
       {stores.map((name) => (
@@ -2469,78 +2480,108 @@ function RuleList({
     <div>
       <p className={eyebrow}>{title}</p>
       {rule === 'never' ? (
-        <ul className="mt-2 space-y-2">
+        // Chips wrap side by side. An open chip's panel is a full-width item right after it, so it sits on its own line.
+        <ul className="mt-2 flex flex-wrap items-start gap-2">
           {items.map((item) => {
             const expansion = neverExpansion(item);
             const blocked = expansion.filter((e) => e.blocked).length;
             const isOpen = openId === item.id;
+            const panelId = `never-panel-${item.id}`;
             return (
-              <li key={item.id}>
-                <Disclosure
-                  variant="compact"
-                  open={isOpen}
-                  onToggle={() => setOpenId(isOpen ? null : item.id)}
-                  title={<span className={`${chipBase} border-edge px-4 text-paper`}>{neverChipLabel(item.name, blocked)}</span>}
-                >
-                  {expansion.length === 0 ? (
-                    <p className="text-[13px] text-muted">{EMPTY_EXPANSION_TEXT}</p>
-                  ) : (
-                    <>
-                      <p className="mb-1 text-[12px] text-muted">Ticked ingredients are blocked. Untick one to allow it.</p>
-                      <ul>
-                        {expansion.map((e) => (
-                          <li key={e.id}>
-                            <label className="flex min-h-11 items-center gap-3 text-[15px] text-paper">
-                              <input
-                                type="checkbox"
-                                checked={e.blocked}
-                                onChange={(ev) => {
-                                  const nowBlocked = ev.target.checked;
-                                  update((prev) => ({
-                                    ...prev,
-                                    itemRules: prev.itemRules.map((r) =>
-                                      r.id === item.id ? withExcept(r, exceptAfter(r.except, e.id, nowBlocked)) : r,
-                                    ),
-                                  }));
-                                }}
-                                className="h-5 w-5 accent-herb"
-                              />
-                              {e.name}
-                            </label>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenId(null);
-                        removeRule(item.id);
-                      }}
-                      className="min-h-11 text-[14px] text-[#D98C7A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb"
+              <Fragment key={item.id}>
+                <li>
+                  <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    aria-controls={panelId}
+                    onClick={() => setOpenId(isOpen ? null : item.id)}
+                    className={`${chipBase} gap-1.5 border-edge pl-4 pr-3 text-paper transition-colors hover:border-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb`}
+                  >
+                    {neverChipLabel(item.name, blocked)}
+                    <span
+                      className={`flex shrink-0 text-muted transition-transform duration-200 ease-out motion-reduce:transition-none ${isOpen ? 'rotate-180' : ''}`}
                     >
-                      Remove {item.name}
-                    </button>
-                  </div>
-                </Disclosure>
-              </li>
+                      <Svg size={16}>
+                        <path d="M6 9l6 6 6-6" />
+                      </Svg>
+                    </span>
+                  </button>
+                </li>
+                {isOpen && (
+                  <li
+                    id={panelId}
+                    role="region"
+                    aria-label={`Ingredients ${item.name} covers`}
+                    className="basis-full rounded-lg border border-line2 bg-field/60 p-3"
+                  >
+                    {expansion.length === 0 ? (
+                      <p className="text-[13px] text-muted">{EMPTY_EXPANSION_TEXT}</p>
+                    ) : (
+                      <>
+                        <p className="mb-1 text-[12px] text-muted">Ticked ingredients are blocked. Untick one to allow it.</p>
+                        <ul>
+                          {expansion.map((e) => (
+                            <li key={e.id}>
+                              <label className="flex min-h-11 items-center gap-3 text-[15px] text-paper">
+                                <input
+                                  type="checkbox"
+                                  checked={e.blocked}
+                                  onChange={(ev) => {
+                                    const nowBlocked = ev.target.checked;
+                                    update((prev) => ({
+                                      ...prev,
+                                      itemRules: prev.itemRules.map((r) =>
+                                        r.id === item.id ? withExcept(r, exceptAfter(r.except, e.id, nowBlocked)) : r,
+                                      ),
+                                    }));
+                                  }}
+                                  className="h-5 w-5 accent-herb"
+                                />
+                                {e.name}
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpenId(null);
+                          removeRule(item.id);
+                        }}
+                        className="min-h-11 text-[14px] text-[#D98C7A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb"
+                      >
+                        Remove {item.name}
+                      </button>
+                    </div>
+                  </li>
+                )}
+              </Fragment>
             );
           })}
         </ul>
       ) : (
-        <ul className="mt-2 flex flex-wrap gap-2">
+        // Always-buy rows: name and match on the left, store select and remove on the right. One per line.
+        <ul className="mt-2 grid gap-2">
           {items.map((item) => {
             const matched = alwaysMatchName(item.name);
             return (
-              <li key={item.id} className={`${chipBase} gap-1 border-edge pl-4 pr-1 text-paper`}>
-                {item.name}
-                {matched ? (
-                  <span className="text-muted">&rarr; {matched}</span>
-                ) : (
-                  <span className={ERROR_TEXT}>{NO_MATCH_TEXT}</span>
-                )}
+              <li
+                key={item.id}
+                className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border border-edge py-1 pl-3 pr-1 text-[14px] text-paper"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate">{item.name}</span>
+                  {matched ? (
+                    matched.toLowerCase() !== item.name.toLowerCase() && (
+                      <span className="block truncate text-[12px] text-muted">&rarr; {matched}</span>
+                    )
+                  ) : (
+                    <span className={`block truncate text-[12px] ${ERROR_TEXT}`}>{NO_MATCH_TEXT}</span>
+                  )}
+                </span>
                 <StoreSelect
                   label={`Buy ${item.name} at`}
                   value={item.store}
@@ -3008,6 +3049,17 @@ export function SpiceRackSection({ h, update }: { h: Household; update: Update }
     });
   }
 
+  function addCustom(name: string) {
+    update((prev) => {
+      if (prev.onHandCustom.some((x) => x.toLowerCase() === name.toLowerCase())) return prev;
+      return { ...prev, onHandCustom: [...prev.onHandCustom, name] };
+    });
+  }
+
+  function removeCustom(name: string) {
+    update((prev) => ({ ...prev, onHandCustom: prev.onHandCustom.filter((x) => x !== name) }));
+  }
+
   return (
     <Section title="Spice rack & staples I keep" caption="Things you keep stocked. Plans can use them freely and they never go on the shopping list.">
       <ul>
@@ -3046,9 +3098,9 @@ export function SpiceRackSection({ h, update }: { h: Household; update: Update }
       <div className="mt-6">
         <p className={eyebrow}>Add anything else</p>
         <div className="mt-2">
-          <IngredientPicker onPick={(i) => setKept(i.id, true)} />
+          <IngredientPicker onPick={(i) => setKept(i.id, true)} onFreeText={addCustom} />
         </div>
-        {others.length > 0 && (
+        {(others.length > 0 || h.onHandCustom.length > 0) && (
           <ul className="mt-4 flex flex-wrap gap-2">
             {others.map((id) => (
               <li key={id} className={`${chipBase} gap-1 border-edge pl-4 pr-1 text-paper`}>
@@ -3059,6 +3111,14 @@ export function SpiceRackSection({ h, update }: { h: Household; update: Update }
                   onClick={() => setKept(id, false)}
                   className={removeIconBtn}
                 >
+                  &times;
+                </button>
+              </li>
+            ))}
+            {h.onHandCustom.map((name) => (
+              <li key={`custom-${name}`} className={`${chipBase} gap-1 border-edge pl-4 pr-1 text-paper`}>
+                {name}
+                <button type="button" aria-label={`Remove ${name}`} onClick={() => removeCustom(name)} className={removeIconBtn}>
                   &times;
                 </button>
               </li>

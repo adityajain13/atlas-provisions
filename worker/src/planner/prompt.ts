@@ -1,9 +1,12 @@
 import {
   DAYS,
   INGREDIENT_BY_ID,
+  MONTH_NAMES,
   VARIETY_RULES,
   formOf,
   formsAllowedFor,
+  inSeason,
+  monthOfWeek,
   type Day,
   type Deal,
   type FeedbackSignals,
@@ -31,7 +34,10 @@ export const SYSTEM_PROMPT = [
   "Never plan a meal built around a word in `neverBuyWords` (e.g. 'beef' rules out a beef stir-fry) even if no listed ingredient contains it.",
   'Prefer `useFirst` and pantry/fixed-meal leftovers, then higher-scored deals. Respect packQty: plan to use most of each pack bought.',
   'Chain leftovers: at least 2 dinners should produce a later lunch (set makesLeftoversFor / usesLeftoversFrom with meal ids). A leftover meal\'s ingredients and steps lists are empty and activeMinutes 5.',
-  'Include each craving at least once and tag it \'craving\'.',
+  "Cravings: a dish craving (e.g. 'butter chicken', 'ramen') is a meal name: plan at least one such dinner and tag it 'craving'. An ingredient craving (e.g. 'chicken', 'tofu') is a main ingredient in at least a third of the dinners (at least 2, rounded up), listed in those meals' ingredients.",
+  'Balance: every lunch and dinner that is not a leftover meal has a substantial protein (meat, fish, eggs, tofu, paneer or legumes). Unless someone is vegetarian, at most 2 dinners a week have no meat or fish.',
+  'Seasonality: payload.month is the plan month. When preferSeasonal: avoid produce marked outOfSeason or imported unless it is on a flyer deal this week; build meals around in-season and storage produce (root vegetables, squash, cabbage family, apples, citrus in winter).',
+  'onHandCustom lists staples the household keeps that have no catalogue id. They are free: use them in steps when a dish needs them, but never in a meal\'s ingredients (only ids from available go there), and they never go on the list.',
   'Keep output short: at most 4 steps per meal, each under 90 characters; at most 2 tags per meal; notes under 200 characters.',
   "Tags are short descriptors like 'craving', 'vegetarian', 'quick' — never the meal slot name.",
   'Meal names describe the dish only: no portion counts or notes like \'(2 portions)\' or \'x2\'.',
@@ -137,6 +143,8 @@ export interface AvailableItem {
   shelfLifeDays: number;
   eachMeans?: string; // for `each` items: what one unit of qty is, as sold
   form?: FoodForm; // for items sold in a form the household's forms apply to
+  imported?: true; // tropical or always-imported produce
+  outOfSeason?: true; // produce not in season this month (with preferSeasonal)
 }
 
 /** What one `each` unit means for this ingredient, from its catalogue weight. */
@@ -261,6 +269,9 @@ export interface PlannerPayload {
   allergies: Record<string, string[]>;
   remainingBudget: number;
   cravings: string[];
+  month: string; // the plan month, by name, from the week's Sunday
+  preferSeasonal: boolean;
+  onHandCustom: string[]; // staples with no catalogue id: free, named in steps only
   neverBuy: string[];
   neverBuyWords: string[];
   equipment: string[];
@@ -281,10 +292,21 @@ export interface PlannerPayload {
   swapNote?: string;
 }
 
+/** Season flags for one produce item: outOfSeason when the month is not in its season, imported when it is imported. */
+export function seasonFlags(id: string, month: number, preferSeasonal: boolean): Pick<AvailableItem, 'imported' | 'outOfSeason'> {
+  const c = INGREDIENT_BY_ID[id];
+  if (!c || c.category !== 'produce') return {};
+  return {
+    ...(c.imported ? { imported: true as const } : {}),
+    ...(preferSeasonal && !inSeason(c, month) ? { outOfSeason: true as const } : {}),
+  };
+}
+
 export function buildPayload(input: PayloadInput): PlannerPayload {
   const { household, request } = input;
   const names = new Map(household.fixedMeals.map((m) => [m.id, m.name]));
   const noRepeat = household.varietyRules.noRepeatDinner14 === true;
+  const month = monthOfWeek(request.weekOf);
   return {
     weekOf: request.weekOf,
     prepDay: household.prepDay,
@@ -313,11 +335,14 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
     },
     remainingBudget: Math.max(0, Math.round((request.budget - input.fixedCost.cost - (input.keptCost ?? 0)) * 100) / 100),
     cravings: request.cravings,
+    month: MONTH_NAMES[month - 1] ?? '',
+    preferSeasonal: household.preferSeasonal,
+    onHandCustom: household.onHandCustom,
     neverBuy: input.neverBuy,
     neverBuyWords: input.neverBuyWords ?? [],
     equipment: household.equipment.filter((e) => e.owned).map((e) => e.name),
     varietyRules: VARIETY_RULES.filter((r) => household.varietyRules[r.key] === true).map((r) => ({ key: r.key, label: r.label })),
-    available: input.available,
+    available: input.available.map((a) => ({ ...a, ...seasonFlags(a.id, month, household.preferSeasonal) })),
     useFirst: request.useItUp
       ? [
           ...new Set([

@@ -69,3 +69,12 @@ export function weekShortRange(weekOf: string, todayIso: string): string {
   }
   return `${dayLabel(weekOf, todayIso, false)} – ${dayLabel(saturday, todayIso, false)}`;
 }
+
+export const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December',
+] as const;
+
+/** The month (1-12) a plan week starts in, from its Sunday date. Read from the string, so no time zone can shift it. */
+export function monthOfWeek(weekOf: string): number {
+  return Number(weekOf.slice(5, 7));
+}

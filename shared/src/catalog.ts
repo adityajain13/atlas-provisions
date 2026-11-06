@@ -83,6 +83,8 @@ export interface Ingredient {
   formGroup?: FormGroupKey; // the group of foods this form choice belongs to
   cook?: CookAmount; // how a cook measures it, where that reads better than grams
   typicalPrice?: TypicalPrice; // approximate shelf price, used only when no flyer, site or receipt price is known
+  season?: number[]; // months (1-12) when it is local and cheap in Ontario. Absent: year-round, or no seasonal data
+  imported?: true; // tropical or always-imported produce, flagged so the planner prefers local food
 }
 
 /**
@@ -493,6 +495,8 @@ export const COOK_AMOUNTS: Record<string, CookAmount> = {
   'vegetable-oil': { unit: 'tbsp', gramsPer: 15 },
   'soy-sauce': { unit: 'tbsp', gramsPer: 16 },
   'balsamic-vinegar': { unit: 'tbsp', gramsPer: 15 },
+  'chili-oil': { unit: 'tbsp', gramsPer: 15 },
+  doubanjiang: { unit: 'tbsp', gramsPer: 16 },
   'maple-syrup': { unit: 'tbsp', gramsPer: 20 },
   tahini: { unit: 'tbsp', gramsPer: 15 },
   pesto: { unit: 'tbsp', gramsPer: 15 },
@@ -629,6 +633,10 @@ const seAsianStaples: Ingredient[] = [
     ['hoisin', 'hoisin sauce', 'lee kum kee hoisin sauce', 'lkk hoisin sauce'], { allergens: ['soy', 'gluten'] }),
   ing('chili-garlic-sauce', 'Chili garlic sauce', 'pantry', 'l', [40, 1.6, 8.0, 0.4, 1.0], 365, true,
     ['chili garlic sauce', 'chilli garlic sauce', 'chili garlic paste', 'lee kum kee chili garlic sauce', 'huy fong chili garlic sauce']),
+  ing('chili-oil', 'Chili oil', 'pantry', 'l', [560, 1.0, 8.0, 58.0, 1.0], 730, true,
+    ['chili oil', 'chilli oil', 'chili crisp', 'chilli crisp', 'lao gan ma', 'la you'], { allergens: ['soy'] }),
+  ing('doubanjiang', 'Doubanjiang (chili bean paste)', 'pantry', 'kg', [200, 9.0, 25.0, 6.0, 5.0], 365, true,
+    ['doubanjiang', 'douban jiang', 'chili bean paste', 'chilli bean paste', 'pixian doubanjiang', 'toban djan'], { allergens: ['soy'] }),
   ing('cane-vinegar', 'Cane vinegar', 'pantry', 'l', [18, 0, 0.04, 0, 0], 3650, true,
     ['cane vinegar', 'sukang iloko', 'filipino cane vinegar', 'datu puti vinegar']),
   ing('sinigang-mix', 'Sinigang sour soup mix', 'pantry', 'each', [280, 2.0, 70.0, 0.5, 5.0], 730, true,
@@ -1037,6 +1045,8 @@ export const TYPICAL_PRICES: Record<string, TypicalPrice> = {
   'thai-chilies': perEach(0.25),
   'indo-chinese-green-chili-sauce': perPack(4.49, 0.2),
   'red-chili-sauce': perPack(3.99, 0.25),
+  'chili-oil': perPack(4.49, 0.21),
+  doubanjiang: perPack(4.99, 0.227),
   'curry-paste-red': perPack(4.49, 0.4),
   'curry-paste-green': perPack(4.49, 0.4),
   'atta-flour': perPack(5.49, 2),
@@ -1157,6 +1167,35 @@ function withTypical(i: Ingredient): Ingredient {
 const withCookAmounts = (list: Ingredient[]): Ingredient[] =>
   list.map((i) => (COOK_AMOUNTS[i.id] ? { ...i, cook: COOK_AMOUNTS[i.id] } : i));
 
+/**
+ * Ontario season for produce that has one: the months (1-12) it is local and cheap. Storage crops (squash, apples,
+ * potatoes, onions, cabbage) keep through winter, so they carry no season or a long one. Tropical and always-imported
+ * produce is flagged `imported`.
+ */
+const SEASON: Record<string, Pick<Ingredient, 'season' | 'imported'>> = {
+  asparagus: { season: [5, 6] },
+  strawberries: { season: [6, 7] },
+  blueberries: { season: [7, 8] },
+  raspberries: { season: [7, 8] },
+  'corn-cobs': { season: [7, 8, 9] },
+  'roma-tomatoes': { season: [7, 8, 9] },
+  'cherry-tomatoes': { season: [7, 8, 9] },
+  zucchini: { season: [7, 8, 9] },
+  'green-beans': { season: [7, 8, 9] },
+  'butternut-squash': { season: [9, 10, 11, 12, 1, 2, 3] },
+  mangoes: { imported: true },
+  pineapple: { imported: true },
+};
+const withSeason = (i: Ingredient): Ingredient => (SEASON[i.id] ? { ...i, ...SEASON[i.id] } : i);
+
+/**
+ * Whether an ingredient is in season in `month` (1-12). True when it has no season data: year-round produce, and
+ * everything that is not produce. Imported produce has no season, so it stays true here; check `imported` separately.
+ */
+export function inSeason(ing: { season?: number[] }, month: number): boolean {
+  return ing.season === undefined || ing.season.includes(month);
+}
+
 export const INGREDIENTS: Ingredient[] = withCookAmounts([
   ...meat,
   ...seafood,
@@ -1169,7 +1208,7 @@ export const INGREDIENTS: Ingredient[] = withCookAmounts([
   ...pantry,
   ...household,
   ...cuisineStaples,
-]).map(withTypical);
+]).map(withTypical).map(withSeason);
 
 export const INGREDIENT_BY_ID: Record<string, Ingredient> = Object.fromEntries(
   INGREDIENTS.map((i) => [i.id, i]),

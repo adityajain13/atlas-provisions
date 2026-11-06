@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CATEGORY_ORDER, INGREDIENTS, INGREDIENT_BY_ID } from './catalog';
+import { CATEGORY_ORDER, INGREDIENTS, INGREDIENT_BY_ID, inSeason } from './catalog';
 import { ALLERGEN_PRESETS } from './index';
 
 describe('ingredient catalogue', () => {
@@ -79,5 +79,32 @@ describe('ingredient catalogue', () => {
     expect(INGREDIENT_BY_ID['tofu-firm']?.allergens).toContain('soy');
     expect(INGREDIENT_BY_ID['tahini']?.allergens).toContain('sesame');
     expect(INGREDIENT_BY_ID['pesto']?.allergens).toEqual(expect.arrayContaining(['tree nut', 'dairy']));
+  });
+});
+
+describe('chili oil and doubanjiang', () => {
+  it('are in the catalogue, found by their common names, with cook amounts and prices', () => {
+    expect(INGREDIENT_BY_ID['chili-oil']).toMatchObject({ name: 'Chili oil', category: 'pantry' });
+    expect(INGREDIENT_BY_ID['doubanjiang']).toMatchObject({ category: 'pantry' });
+    expect(INGREDIENTS.find((i) => i.aliases.includes('chili crisp'))?.id).toBe('chili-oil');
+    expect(INGREDIENTS.find((i) => i.aliases.includes('chili bean paste'))?.id).toBe('doubanjiang');
+    expect(INGREDIENT_BY_ID['chili-oil']!.cook).toBeDefined();
+    expect(INGREDIENT_BY_ID['chili-oil']!.typicalPrice).toBeDefined();
+  });
+});
+
+describe('seasons', () => {
+  it('gives Ontario produce its months and flags tropical produce as imported', () => {
+    expect(INGREDIENT_BY_ID['strawberries']!.season).toEqual([6, 7]);
+    expect(INGREDIENT_BY_ID['mangoes']!.imported).toBe(true);
+    expect(INGREDIENT_BY_ID['bananas']!.season).toBeUndefined();
+    expect(INGREDIENT_BY_ID['bananas']!.imported).toBeUndefined();
+  });
+
+  it('is in season in its months, out of season otherwise, and always in season with no data', () => {
+    expect(inSeason(INGREDIENT_BY_ID['zucchini']!, 8)).toBe(true);
+    expect(inSeason(INGREDIENT_BY_ID['zucchini']!, 11)).toBe(false);
+    expect(inSeason(INGREDIENT_BY_ID['carrots']!, 11)).toBe(true);
+    expect(inSeason({}, 1)).toBe(true);
   });
 });
