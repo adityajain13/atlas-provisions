@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { HouseholdSchema, defaultHousehold } from './index';
 import {
   cleanEmail,
   cleanHouseholdName,
@@ -103,5 +104,19 @@ describe('addresses and names', () => {
 
   it('names a new household after the address', () => {
     expect(defaultHouseholdName('alex@example.com')).toBe("alex's household");
+  });
+});
+
+describe('setupDone', () => {
+  it('is optional: a household saved before setup existed parses without it, and so counts as done', () => {
+    const { setupDone: _ignored, ...older } = { ...defaultHousehold(), setupDone: true };
+    const parsed = HouseholdSchema.parse(older);
+    expect(parsed.setupDone).toBeUndefined();
+  });
+
+  it('keeps true and false, and rejects anything that is not a boolean', () => {
+    expect(HouseholdSchema.parse({ ...defaultHousehold(), setupDone: false }).setupDone).toBe(false);
+    expect(HouseholdSchema.parse({ ...defaultHousehold(), setupDone: true }).setupDone).toBe(true);
+    expect(HouseholdSchema.safeParse({ ...defaultHousehold(), setupDone: 'no' }).success).toBe(false);
   });
 });

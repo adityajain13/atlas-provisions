@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ALLERGEN_PRESETS,
   CONTAINER_LABEL,
@@ -129,6 +130,7 @@ import {
   withPinnedStore,
 } from '../lib/stores';
 import { useSession } from '../session';
+import { useHouseholdDoc } from '../lib/useHouseholdDoc';
 
 type Update = (fn: (prev: Household) => Household) => void;
 
@@ -137,74 +139,23 @@ const ERROR_TEXT = 'text-[#D98C7A]';
 // ---------- screen: loads, holds state, autosaves ----------
 
 export default function HouseholdScreen() {
-  const [h, setH] = useState<Household | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const { track, setPending, setFailure, setFlush } = useSaveStatus();
-  useSaveScope('sync', h !== null);
-  // Only user edits trigger a save. Loading the document does not.
-  const edited = useRef(false);
-  const latest = useRef<Household | null>(null);
-  const pending = useRef<Household | null>(null);
-  const timer = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    let alive = true;
-    getHousehold()
-      .then((d) => {
-        if (alive) setH(d);
-      })
-      .catch((e: unknown) => {
-        if (alive) setLoadError(errorMessage(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Sends the pending edit now. Also used by the leave guard and on unmount, so an edit is not lost.
-  const saveNow = useCallback(() => {
-    window.clearTimeout(timer.current);
-    const data = pending.current;
-    if (!data) return;
-    pending.current = null;
-    const retry = () => saveHousehold(HouseholdSchema.parse(latest.current));
-    void track(saveHousehold(data), retry).catch(() => {});
-  }, [track]);
-
-  useEffect(() => {
-    setFlush(saveNow);
-    return () => {
-      setFlush(null);
-      saveNow();
-    };
-  }, [saveNow, setFlush]);
-
-  // Every edit shows Saving at once, then sends after a short pause.
-  useEffect(() => {
-    if (!h || !edited.current) return;
-    latest.current = h;
-    const parsed = HouseholdSchema.safeParse(h);
-    if (!parsed.success) {
-      window.clearTimeout(timer.current);
-      pending.current = null;
-      const first = parsed.error.issues[0];
-      setFailure(first ? first.message : 'Check the fields');
-      return;
-    }
-    pending.current = parsed.data;
-    setPending();
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(saveNow, 600);
-  }, [h, saveNow, setPending, setFailure]);
-
-  const update = useCallback<Update>((fn) => {
-    edited.current = true;
-    setH((prev) => (prev ? fn(prev) : prev));
-  }, []);
+  const { h, update, loadError } = useHouseholdDoc();
+  const navigate = useNavigate();
 
   return (
     <Page>
       <Header title="Household" status={<SaveStatus />} />
+
+      <button
+        type="button"
+        onClick={() => navigate('/setup')}
+        className="mt-6 flex min-h-11 w-full items-center justify-between gap-4 rounded-lg border border-line2 px-4 text-left text-[14px] text-paper hover:border-herb"
+      >
+        <span>Setup guide &mdash; walk through everything again</span>
+        <span aria-hidden="true" className="text-herb">
+          &rarr;
+        </span>
+      </button>
 
       {loadError && <p className={`mt-6 text-[14px] ${ERROR_TEXT}`}>Could not load: {loadError}</p>}
       {!h && !loadError && <p className="mt-10 text-[14px] text-muted">Loading&hellip;</p>}
@@ -704,7 +655,7 @@ function readableCount(n: number): string {
 
 // ---------- People ----------
 
-function PeopleSection({ h, update }: { h: Household; update: Update }) {
+export function PeopleSection({ h, update }: { h: Household; update: Update }) {
   const confirm = useConfirm();
   const [openId, setOpenId] = useState<string | null>(null);
   // The row added last, so its name field takes focus when it opens. Cleared on any toggle.
@@ -780,31 +731,12 @@ function PeopleSection({ h, update }: { h: Household; update: Update }) {
 }
 
 function PersonFields({ person, update }: { person: Person; update: Update }) {
-  const [custom, setCustom] = useState('');
-
   function patch(p: Partial<Person>) {
     update((prev) => ({
       ...prev,
       people: prev.people.map((x) => (x.id === person.id ? { ...x, ...p } : x)),
     }));
   }
-
-  function toggleAllergy(a: string) {
-    patch({
-      allergies: person.allergies.includes(a)
-        ? person.allergies.filter((x) => x !== a)
-        : [...person.allergies, a],
-    });
-  }
-
-  function addCustom() {
-    const v = custom.trim().toLowerCase();
-    setCustom('');
-    if (!v || person.allergies.includes(v)) return;
-    patch({ allergies: [...person.allergies, v] });
-  }
-
-  const customs = person.allergies.filter((a) => !ALLERGEN_PRESETS.includes(a));
 
   return (
     <>
@@ -832,6 +764,41 @@ function PersonFields({ person, update }: { person: Person; update: Update }) {
         />
       </label>
 
+      <AllergyFields person={person} update={update} />
+
+    </>
+  );
+}
+
+/**
+ * One person's allergies: the preset chips, any others typed in, and the box to add one. A plan with these is
+ * never shown. Used by the Household page and the setup wizard.
+ */
+export function AllergyFields({ person, update }: { person: Person; update: Update }) {
+  const [custom, setCustom] = useState('');
+
+  function setAllergies(allergies: string[]) {
+    update((prev) => ({
+      ...prev,
+      people: prev.people.map((x) => (x.id === person.id ? { ...x, allergies } : x)),
+    }));
+  }
+
+  function toggleAllergy(a: string) {
+    setAllergies(person.allergies.includes(a) ? person.allergies.filter((x) => x !== a) : [...person.allergies, a]);
+  }
+
+  function addCustom() {
+    const v = custom.trim().toLowerCase();
+    setCustom('');
+    if (!v || person.allergies.includes(v)) return;
+    setAllergies([...person.allergies, v]);
+  }
+
+  const customs = person.allergies.filter((a) => !ALLERGEN_PRESETS.includes(a));
+
+  return (
+    <>
       <div>
         <span className={eyebrow}>Allergies</span>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -882,14 +849,13 @@ function PersonFields({ person, update }: { person: Person; update: Update }) {
           </button>
         </div>
       </div>
-
     </>
   );
 }
 
 // ---------- Schedule ----------
 
-function ScheduleSection({ h, update }: { h: Household; update: Update }) {
+export function ScheduleSection({ h, update }: { h: Household; update: Update }) {
   return (
     <Section title="Schedule" caption="Default for every week.">
       {h.people.length === 0 && <p className="text-[14px] text-muted">Add people first.</p>}
@@ -939,7 +905,7 @@ function ScheduleSection({ h, update }: { h: Household; update: Update }) {
 
 // ---------- Batch prep ----------
 
-function PrepSection({ h, update }: { h: Household; update: Update }) {
+export function PrepSection({ h, update }: { h: Household; update: Update }) {
   return (
     <Section title="Batch prep" caption="Each new plan gets a prep list for this day.">
       <label className="flex items-center justify-between gap-4">
@@ -977,7 +943,7 @@ function TimeCaps({ h, update }: { h: Household; update: Update }) {
 
 // ---------- Fixed meals ----------
 
-function FixedMealsSection({ h, update }: { h: Household; update: Update }) {
+export function FixedMealsSection({ h, update }: { h: Household; update: Update }) {
   const confirm = useConfirm();
   const [openId, setOpenId] = useState<string | null>(null);
   const [freshId, setFreshId] = useState<string | null>(null);
@@ -1290,7 +1256,7 @@ function IngredientNameField({
 
 // ---------- Allergies (read-only summary) ----------
 
-function AllergiesSection({ h }: { h: Household }) {
+export function AllergiesSection({ h }: { h: Household }) {
   return (
     <Section title="Allergies" caption="Hard block. A plan with these is never shown.">
       {h.people.length === 0 && <p className="text-[14px] text-muted">Add people first.</p>}
@@ -1316,7 +1282,7 @@ function AllergiesSection({ h }: { h: Household }) {
 
 // ---------- Equipment ----------
 
-function EquipmentSection({ h, update }: { h: Household; update: Update }) {
+export function EquipmentSection({ h, update }: { h: Household; update: Update }) {
   const [text, setText] = useState('');
 
   function add() {
@@ -1420,7 +1386,7 @@ function VarietySection({ h, update }: { h: Household; update: Update }) {
 
 type StoresUpdate = (fn: (stores: Store[]) => Store[]) => void;
 
-function StoresSection({ h, update }: { h: Household; update: Update }) {
+export function StoresSection({ h, update }: { h: Household; update: Update }) {
   // Every change to the list goes through here, so the per-trip count stays within the enabled stores.
   const changeStores = useCallback<StoresUpdate>(
     (fn) =>
@@ -2330,7 +2296,7 @@ function PostalCodeField({ h, update }: { h: Household; update: Update }) {
 
 // ---------- Always / never buy ----------
 
-function ItemRulesSection({ h, update }: { h: Household; update: Update }) {
+export function ItemRulesSection({ h, update }: { h: Household; update: Update }) {
   return (
     <Section title="Always / never buy">
       <RuleList title="Always buy" rule="always" h={h} update={update} />
@@ -2625,7 +2591,7 @@ function RuleList({
 
 // ---------- Storage I have ----------
 
-function StorageSection({ h, update }: { h: Household; update: Update }) {
+export function StorageSection({ h, update }: { h: Household; update: Update }) {
   const storage = h.storage;
 
   function patch(p: Partial<HouseholdStorage>) {
@@ -2755,7 +2721,7 @@ function FormsSection({ h, update }: { h: Household; update: Update }) {
 // ---------- Weekly budget ----------
 
 /** The budget a new week starts with. Plans take the same limits as the budget field on Plan (1 to 2000). */
-function BudgetSection({ h, update }: { h: Household; update: Update }) {
+export function BudgetSection({ h, update }: { h: Household; update: Update }) {
   const [text, setText] = useState(String(h.defaultBudget));
   const amount = Number(text);
   const invalid = text.trim() === '' || !Number.isFinite(amount) || amount < 1 || amount > 2000;
@@ -2869,7 +2835,7 @@ function LearnedSection() {
 
 // ---------- Dishes I don't want ----------
 
-function DishesSection({ h, update }: { h: Household; update: Update }) {
+export function DishesSection({ h, update }: { h: Household; update: Update }) {
   const [text, setText] = useState('');
 
   function add() {
@@ -2928,7 +2894,7 @@ function DishesSection({ h, update }: { h: Household; update: Update }) {
 // ---------- Cuisines ----------
 
 /** How often the household eats each cuisine. Plans lean on 'often' cuisines and mix in the rest. */
-function CuisinesSection({ h, update }: { h: Household; update: Update }) {
+export function CuisinesSection({ h, update }: { h: Household; update: Update }) {
   function set(key: string, level: CuisineLevel) {
     update((prev) => ({ ...prev, cuisines: { ...prev.cuisines, [key]: level } }));
   }
@@ -3018,7 +2984,7 @@ function CuisinesSection({ h, update }: { h: Household; update: Update }) {
 // ---------- Spice rack & staples I keep ----------
 
 /** The staples the household keeps stocked, grouped by cuisine, and any other catalogue item it adds. Free in plans. */
-function SpiceRackSection({ h, update }: { h: Household; update: Update }) {
+export function SpiceRackSection({ h, update }: { h: Household; update: Update }) {
   const kept = new Set(h.onHand);
   const pantryIds = new Set(CUISINES.flatMap((c) => c.pantry));
   const others = h.onHand.filter((id) => !pantryIds.has(id) && INGREDIENT_BY_ID[id]);

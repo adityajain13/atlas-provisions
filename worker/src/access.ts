@@ -162,7 +162,7 @@ export async function resolveAccess(
   await db.batch([
     db
       .prepare('INSERT INTO households (id, name, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(householdId, defaultHouseholdName(e), JSON.stringify(defaultHousehold()), joinedAt, joinedAt),
+      .bind(householdId, defaultHouseholdName(e), JSON.stringify({ ...defaultHousehold(), setupDone: false }), joinedAt, joinedAt),
     db
       .prepare(`INSERT OR IGNORE INTO household_members (household_id, email, role, joined_at) VALUES (?, ?, 'owner', ?)`)
       .bind(householdId, e, joinedAt),
