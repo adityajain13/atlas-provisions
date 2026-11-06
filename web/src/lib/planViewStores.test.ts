@@ -42,9 +42,14 @@ describe('planToList: quantity labels', () => {
 });
 
 describe('planToList: receipt estimates', () => {
-  it('carries the date of the receipt on an estimated item', () => {
+  it('carries the date and the basis of a receipt estimate', () => {
     const [item] = planToList(planOf([tuna({ estimate: { basis: 'receipt', date: '2026-10-28' } })])).items;
-    expect(item!.estimate).toEqual({ date: '2026-10-28' });
+    expect(item!.estimate).toEqual({ basis: 'receipt', date: '2026-10-28' });
+  });
+
+  it('carries the basis of a regular site price, so the list says it is the regular price', () => {
+    const [item] = planToList(planOf([tuna({ estimate: { basis: 'site', date: '2026-11-03' } })])).items;
+    expect(item!.estimate).toEqual({ basis: 'site', date: '2026-11-03' });
   });
 
   it('formats the date for the list note', () => {

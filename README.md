@@ -120,6 +120,20 @@ Flyer prices come from Flipp, the flyer site. Flipp's public web app uses an uno
 
 Status and a manual run are available at `GET /provisions/api/flyers/status` and `POST /provisions/api/flyers/refresh`.
 
+## Regular prices (Loblaw-family sites)
+
+Flyers show sale prices. For the rest of the time a store's regular shelf price is read from the store's own site, so a list item can show what the item usually costs at a store. This is best effort and unofficial, and it is only read for the Loblaw-family stores in Household: Loblaws, No Frills, Real Canadian Superstore, Zehrs, Your Independent Grocer, T&T, Fortinos and Valu-mart. Sobeys and Voilà may come later. Metro and Food Basics, Walmart and Costco are behind bot protection and are not read.
+
+- Each Loblaw-family store takes one location, picked in its expanded row by street, city or postal code. Locations come from the banner's pickup-location list, cached for a week (`site_locations`).
+- The lookups call the banner's product search (`POST https://api.pcexpress.ca/pcx-bff/api/v1/products/search`) with the static public web key the site sends. No PC id is used, so a 401 or 403 means the site needs a PC id sign-in: the run reports that, and the Regular prices row says so. Nothing is retried.
+- A batch looks up the ingredients on this week's and next week's lists, the always-buy and pinned items, the pantry, then common staples. It sends at most 40 searches, and stops a banner on a sign-in need or a block (429). Results are matched to ingredients by name and priced per base unit from the pack size, or from the site's unit price when there is no size.
+- A pair looked up in the last six days is not looked up again, matched or not (`site_lookups`). Manual refreshes are limited to one per ten minutes per household.
+- The hourly Sunday job runs one batch for the household that has waited longest, after the flyer run, with what that run left of the 50-request limit (at most 46 requests between the two).
+- Matched prices are stored in `price_history` with source `site`, per store location, and the regular price is kept when the site showed a sale. In a list, an offer uses the regular price: a sale is covered by the flyer. Priority per ingredient and store: a flyer price, then a site price read in the last 14 days, then a receipt price from the last 90 days. Site rows are not used for deal scoring.
+- Diagnostics: the Regular prices row shows the last run's counts and any errors. `GET /provisions/api/site-prices/status?debug=1` returns the last run with a sample of raw results or the error body that was not expected. The run is kept in `site_price_runs`.
+- Migration `0012_site_prices.sql` adds the tables above and a location column to `price_history`, which joins its key, so two locations of one store name keep their own rows.
+- The endpoint, the header set and the key are not documented by the site and may change. If the lookups stop matching, the sample shows the shape that came back.
+
 ## Local development
 
 ```sh

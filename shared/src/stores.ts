@@ -77,3 +77,48 @@ export interface StorePreference {
 
 export const MAX_MIN_SAVING = 50;
 export const DEFAULT_STORE_PREFERENCE: StorePreference = { mode: 'prefer', minSaving: 3 };
+
+// Loblaw-family banners whose regular shelf prices the app reads, per store location (the unofficial site lookup in
+// worker/src/pcexpress.ts). Keyed by the store preset id; a store with no entry gets no location picker.
+export const SITE_BANNER_IDS = [
+  'loblaws',
+  'nofrills',
+  'superstore',
+  'zehrs',
+  'independent',
+  'tandt',
+  'fortinos',
+  'valumart',
+] as const;
+export type SiteBanner = (typeof SITE_BANNER_IDS)[number];
+
+export const SITE_BANNER_NAMES: Record<SiteBanner, string> = {
+  loblaws: 'Loblaws',
+  nofrills: 'No Frills',
+  superstore: 'Real Canadian Superstore',
+  zehrs: 'Zehrs',
+  independent: 'Your Independent Grocer',
+  tandt: 'T&T Supermarket',
+  fortinos: 'Fortinos',
+  valumart: 'Valu-mart',
+};
+
+const SITE_BANNER_BY_STORE: Record<string, SiteBanner> = {
+  loblaws: 'loblaws',
+  'no-frills': 'nofrills',
+  'real-canadian-superstore': 'superstore',
+  zehrs: 'zehrs',
+  'your-independent-grocer': 'independent',
+  'tt-supermarket': 'tandt',
+  fortinos: 'fortinos',
+  'valu-mart': 'valumart',
+};
+
+/** The site banner a store preset is on, or undefined when its regular prices are not read. */
+export function siteBannerOf(storeId: string): SiteBanner | undefined {
+  return SITE_BANNER_BY_STORE[storeId];
+}
+
+export function isSiteBanner(value: string): value is SiteBanner {
+  return (SITE_BANNER_IDS as readonly string[]).includes(value);
+}

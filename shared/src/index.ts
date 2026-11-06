@@ -4,6 +4,7 @@ import { DAYS, SLOTS, type Day, type Slot } from './calendar';
 import {
   DEFAULT_STORE_PREFERENCE,
   MAX_MIN_SAVING,
+  SITE_BANNER_IDS,
   STORE_GROUPS,
   STORE_PREFERENCE_MODES,
   STORE_PRESETS,
@@ -121,6 +122,14 @@ export const StoreSchema = z.object({
   group: z.enum(STORE_GROUPS).optional(),
   // Extra merchant names Flipp uses for this store (e.g. "RCSS" for Real Canadian Superstore).
   flippNames: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+  // The store location whose regular shelf prices are read (Loblaw-family stores only). Optional: stored stores without it still parse.
+  siteStore: z
+    .object({
+      banner: z.enum(SITE_BANNER_IDS),
+      storeId: z.string().trim().min(1).max(10),
+      label: z.string().trim().min(1).max(160),
+    })
+    .optional(),
 });
 export type Store = z.infer<typeof StoreSchema>;
 

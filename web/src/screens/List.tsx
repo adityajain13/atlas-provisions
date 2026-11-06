@@ -201,10 +201,11 @@ function ListRow({
               <span className="block text-[13px] text-muted">price unknown</span>
             ) : (
               <span className={`block text-[14px] ${done ? 'text-faint' : 'text-paper'}`}>
-                {item.estimate ? '~' : ''}${item.price.toFixed(2)}
+                {item.estimate?.basis === 'receipt' ? '~' : ''}${item.price.toFixed(2)}
               </span>
             )}
-            {item.estimate && <span className="block text-[12px] text-muted">last paid {monthDay(item.estimate.date)}</span>}
+            {item.estimate?.basis === 'site' && <span className="block text-[12px] text-muted">regular price at {item.store}</span>}
+            {item.estimate?.basis === 'receipt' && <span className="block text-[12px] text-muted">last paid {monthDay(item.estimate.date)}</span>}
           </span>
         )}
       </label>

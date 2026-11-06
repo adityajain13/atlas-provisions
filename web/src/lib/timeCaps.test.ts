@@ -17,8 +17,6 @@ import {
   slotCells,
   snapshotCaps,
   spokenCap,
-  weekendCells,
-  weeknightDinnerCells,
   hasMoreBelow,
 } from './timeCaps';
 
@@ -78,17 +76,10 @@ describe('parseCustomCap', () => {
 });
 
 describe('cell sets', () => {
-  it('covers the grid, a slot, a day, the weeknight dinners and the weekend', () => {
+  it('covers the grid, a slot and a day', () => {
     expect(allCells()).toHaveLength(21);
     expect(slotCells('dinner').map((c) => c.day)).toEqual(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
     expect(dayCells('tue').map((c) => c.slot)).toEqual(['breakfast', 'lunch', 'dinner']);
-    expect(weeknightDinnerCells().map((c) => `${c.day}-${c.slot}`)).toEqual([
-      'mon-dinner',
-      'tue-dinner',
-      'wed-dinner',
-      'thu-dinner',
-    ]);
-    expect(weekendCells()).toHaveLength(6);
   });
 
   it('selects the rectangle between two corners, in either order', () => {

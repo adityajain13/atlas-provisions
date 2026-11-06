@@ -40,6 +40,8 @@ import {
   type Rating,
   type UsageKind,
   estimateOffers,
+  isSiteBanner,
+  siteOffers,
   type Offer,
 } from '@provisions/shared';
 import type { ZodError } from 'zod';
@@ -69,6 +71,7 @@ import {
   saveHouseholdDocument,
   savePlan,
   setCheck,
+  sitePriceRows,
   undoPlan,
   updatePantryItem,
   upsertRating,
@@ -86,6 +89,7 @@ import { householdRoutes } from './householdRoutes';
 import { accessRoutes } from './accessRoutes';
 import { capMessage, recordUsage } from './usage';
 import { householdHasAdmin } from './access';
+import { SITE_BUDGET, SITE_PRICE_DAYS, SCHEDULED_SUBREQUEST_LIMIT, cachedLocations, matchLocations, runScheduledSite, runSitePrices, siteStatus, siteTargets, siteWaitMinutes } from './sitePrices';
 
 type Env = AuthEnv & {
   ASSETS: Fetcher;
@@ -154,7 +158,7 @@ async function loadDeals(
   deals: Deal[];
   neverBuy: string[];
   priceSource: PriceSource;
-  estimates: Offer[]; // receipt prices from the last 90 days, where no flyer prices a store
+  estimates: Offer[]; // site prices from the last 14 days, then receipt prices from the last 90 days, where no flyer prices a store
 }> {
   const household = await loadHousehold(env.DB, householdId);
   const { items: flyerItems, source: priceSource } = await flyerItemsFor(
@@ -180,7 +184,16 @@ async function loadDeals(
   // What the household last paid at each store, from its receipts. Estimates only where no flyer prices that store.
   const today = torontoDate();
   const estimateFrom = addDaysIso(today, -RECEIPT_ESTIMATE_DAYS);
-  const estimates = estimateOffers(await householdReceiptPrices(env.DB, householdId, estimateFrom, today), estimateFrom, today);
+  // A store's regular site price (its location picked in Household) comes before a receipt price for the same store.
+  const sitePrices = await sitePriceRows(
+    env.DB,
+    siteTargets(household).map((t) => ({ store: t.store.name, storeId: t.storeId })),
+    addDaysIso(today, -SITE_PRICE_DAYS),
+  );
+  const estimates = [
+    ...siteOffers(sitePrices, addDaysIso(today, -SITE_PRICE_DAYS), today),
+    ...estimateOffers(await householdReceiptPrices(env.DB, householdId, estimateFrom, today), estimateFrom, today),
+  ];
 
   // Item rules name foods in free text. A never-buy name blocks every ingredient it covers, less the ones the
   // household un-ticked. An always-buy name keeps its single best match.
@@ -528,6 +541,48 @@ app.get(`${API}/flyers/status`, async (c) => {
   return c.json({ lastRun, currentItems });
 });
 
+// ---- Regular prices from the Loblaw-family sites (migration 0012) ----
+
+const SITE_ERROR_STATUS = { auth: 409, blocked: 503, 'not-found': 502, network: 502, shape: 502 } as const;
+const SITE_AUTH_MESSAGE = "Loblaw's site needs a PC id sign-in for store search, so store locations aren't available yet.";
+
+// The store locations of a Loblaw-family banner that match the search text. Cached for a week.
+app.get(`${API}/site-stores/:banner/locations`, async (c) => {
+  const banner = c.req.param('banner');
+  if (!isSiteBanner(banner)) return c.text('Unknown store chain', 400);
+  const got = await cachedLocations(c.env.DB, banner, fetch, new Date());
+  if (!got.ok) {
+    const message = got.error.kind === 'auth' ? SITE_AUTH_MESSAGE : `Could not load store locations: ${got.error.message}`;
+    return c.text(message, SITE_ERROR_STATUS[got.error.kind]);
+  }
+  return c.json({ locations: matchLocations(got.value, banner, c.req.query('q') ?? '') });
+});
+
+// Reads the regular prices of the household's stores now. Limited to once per 10 minutes per household.
+app.post(`${API}/site-prices/refresh`, async (c) => {
+  const householdId = c.get('householdId');
+  const household = await loadHousehold(c.env.DB, householdId);
+  if (siteTargets(household).length === 0) {
+    return c.json({ ok: false, lookups: 0, matched: 0, errors: ['Pick a store location for regular prices first.'], authNeeded: false });
+  }
+  const wait = await siteWaitMinutes(c.env.DB, householdId, new Date());
+  if (wait > 0) {
+    return c.text(`Regular prices were refreshed a few minutes ago. Try again in ${wait} minute${wait === 1 ? '' : 's'}.`, 429);
+  }
+  try {
+    return c.json(await runSitePrices(c.env, householdId, fetch, SITE_BUDGET, new Date()));
+  } catch (e) {
+    return c.text(e instanceof Error ? e.message : 'Regular price refresh failed', 500);
+  }
+});
+
+// The latest run and the prices read in the last two weeks. ?debug=1 adds the run's sample of raw results.
+app.get(`${API}/site-prices/status`, async (c) => {
+  const householdId = c.get('householdId');
+  const household = await loadHousehold(c.env.DB, householdId);
+  return c.json(await siteStatus(c.env.DB, householdId, household, new Date(), c.req.query('debug') === '1'));
+});
+
 // ---- Pantry (milestone 3A) ----
 
 app.get(`${API}/pantry`, async (c) => {
@@ -756,7 +811,10 @@ app.all('*', async (c) => {
  * stale this week, and deletes plans and ticks past the retention window in the last run of the day.
  */
 export async function runSunday(env: Env, now: Date = new Date()) {
-  return runScheduledIngest(env, now);
+  const flyers = await runScheduledIngest(env, now);
+  // The flyer run and the regular-price batch share one invocation, so the batch gets what the flyers left.
+  const site = await runScheduledSite(env, now, fetch, Math.min(SITE_BUDGET, SCHEDULED_SUBREQUEST_LIMIT - (flyers.summary?.requests ?? 0)));
+  return { ...flyers, site };
 }
 
 // The scheduled job refreshes the flyers. Fetch serves the Hono app as before.

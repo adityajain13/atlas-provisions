@@ -209,6 +209,7 @@ export async function runIngest(
     storeCounts: imported.storeCounts,
     unmatchedSample: [...new Set(unmatched)].slice(0, UNMATCHED_SAMPLE),
     errors,
+    requests: client.budget.used,
   };
 }
 

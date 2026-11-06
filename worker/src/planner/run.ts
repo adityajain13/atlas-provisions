@@ -75,7 +75,7 @@ export interface RunInput {
   neverBuy: string[]; // ingredient ids from never-buy item rules
   pantry?: PantryItem[]; // all pantry items; expired ones are ignored
   ratings?: RatingSignals; // favourites, avoid and never from meal ratings
-  estimates?: Offer[]; // receipt prices the household paid, used where no flyer prices a store
+  estimates?: Offer[]; // site and receipt prices, used where no flyer prices a store
   today?: string; // YYYY-MM-DD on the Toronto calendar; defaults to today
   maxAttempts?: number;
   onProgress?: (p: PlanProgress) => void;

@@ -157,7 +157,7 @@ describe('runScheduledIngest (the hourly Sunday job)', () => {
       waitUntil,
     } as unknown as ExecutionContext);
     const promise = waitUntil.mock.calls[0]![0] as Promise<unknown>;
-    await expect(promise).resolves.toEqual({ postal: null, summary: null, pruned: { plans: 1, checks: 0 } });
+    await expect(promise).resolves.toEqual({ postal: null, summary: null, pruned: { plans: 1, checks: 0 }, site: null });
     expect(count(raw, 'meal_plans')).toBe(0);
   });
 

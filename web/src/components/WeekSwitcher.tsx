@@ -20,7 +20,8 @@ export default function WeekSwitcher({ weekOf, current, first, last, onChange }:
   const n = weekOffset(weekOf, current);
 
   return (
-    <div className="flex items-center gap-2">
+    // Centred on phones, where "This week" wraps onto a line of its own; left-aligned from sm up as before.
+    <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
       <button type="button" aria-label="Previous week" disabled={before < first} onClick={() => onChange(before)} className={NAV}>
         &lsaquo;
       </button>
@@ -35,7 +36,7 @@ export default function WeekSwitcher({ weekOf, current, first, last, onChange }:
         <button
           type="button"
           onClick={() => onChange(current)}
-          className="ml-1 flex min-h-11 items-center rounded-md px-2 text-[13px] text-herb outline-none hover:text-herbLight focus-visible:ring-2 focus-visible:ring-herb"
+          className="flex min-h-11 sm:ml-1 items-center rounded-md px-2 text-[13px] text-herb outline-none hover:text-herbLight focus-visible:ring-2 focus-visible:ring-herb"
         >
           This week
         </button>
