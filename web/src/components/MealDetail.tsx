@@ -5,7 +5,10 @@ import {
   formatCookAmount,
   type Day,
   type FeedbackKind,
+  type GuestsInput,
   type IngredientFeedbackInput,
+  type MealStatus,
+  type MealStatusInput,
   type PlannedMeal,
   type RatingKind,
   type WeekFeedback,
@@ -16,6 +19,7 @@ import type { MealRef, ViewMeal, ViewTag } from '../lib/planView';
 import { SLOT_LABEL } from '../lib/labels';
 import { ReturnIcon } from './Icons';
 import { searchIngredients } from './IngredientPicker';
+import DidntGoToPlan, { StatusBanner } from './DidntGoToPlan';
 import { fieldCls } from './ui';
 
 export const RATING_OPTIONS: { value: RatingKind; label: string }[] = [
@@ -49,6 +53,14 @@ type Props = {
   presentation?: 'panel' | 'sheet';
   // A fixed meal's ingredients as typed on Household. Read-only: a fixed meal has no plan to change.
   fixedIngredients?: { name: string; qty: number; unit: string }[];
+  // "Didn't go to plan?" for a planned meal in a saved week. Absent for fixed meals and sample data.
+  status?: MealStatus; // the mark this meal has now
+  statusBusy?: boolean;
+  statusError?: string | null;
+  onMark?: (patch: MealStatusInput) => void;
+  onClearStatus?: () => void;
+  canSwapForGuests?: boolean; // the meal is still to come, so a swap for a meal that works is offered
+  onSwapForGuests?: (guests: GuestsInput, note: string) => void;
 };
 
 /** Desktop side panel with the whole meal: ingredients, steps, tags and the rating buttons. */
@@ -65,6 +77,13 @@ export default function MealDetail({
   weekOf,
   presentation = 'panel',
   fixedIngredients,
+  status,
+  statusBusy = false,
+  statusError = null,
+  onMark,
+  onClearStatus,
+  canSwapForGuests = false,
+  onSwapForGuests,
 }: Props) {
   const sheet = presentation === 'sheet';
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -123,7 +142,8 @@ export default function MealDetail({
   useEffect(() => {
     closeRef.current?.focus();
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onCloseRef.current();
+      // A dialog open over the panel (the leftovers, pantry or swap dialog) takes the Escape key itself.
+      if (e.key === 'Escape' && !document.querySelector('dialog[open]')) onCloseRef.current();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -197,6 +217,8 @@ export default function MealDetail({
           </p>
         )}
 
+        {status && onClearStatus && <StatusBanner status={status} busy={statusBusy} onClear={onClearStatus} />}
+
         {meal.tags.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2">
             {meal.tags.map((t) => (
@@ -230,7 +252,7 @@ export default function MealDetail({
         {ratingError && <p className="mt-3 text-[13px] text-[#D98C7A]">Could not save rating: {ratingError}</p>}
 
         {onSwap && (
-          <button type="button" onClick={onSwap} className="mt-4 flex h-11 items-center justify-center rounded-lg border border-edge text-[14px] text-paper outline-none hover:border-muted focus-visible:ring-2 focus-visible:ring-herb">
+          <button type="button" onClick={onSwap} className="mt-4 flex h-11 shrink-0 items-center justify-center rounded-lg border border-edge text-[14px] text-paper outline-none hover:border-muted focus-visible:ring-2 focus-visible:ring-herb">
             Swap this meal
           </button>
         )}
@@ -286,6 +308,16 @@ export default function MealDetail({
             </ul>
             {changeError && <p className="mt-3 text-[13px] text-[#D98C7A]">{changeError}</p>}
           </section>
+        )}
+
+        {planned && onMark && (
+          <DidntGoToPlan
+            canSwap={canSwapForGuests}
+            busy={statusBusy}
+            error={statusError}
+            onMark={onMark}
+            onSwapForGuests={(guests, note) => onSwapForGuests?.(guests, note)}
+          />
         )}
 
         {!planned && fixedIngredients && fixedIngredients.length > 0 && (

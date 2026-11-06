@@ -110,7 +110,7 @@ describe('runScheduledIngest (the hourly Sunday job)', () => {
     const out = await runScheduledIngest({ DB }, SUNDAY_11PM_UTC, emptyFlipp() as unknown as typeof fetch, NO_WAIT);
 
     expect(out.postal).toBe('M5V2T6');
-    expect(out.pruned).toEqual({ plans: 1, checks: 1 });
+    expect(out.pruned).toEqual({ plans: 1, checks: 1, statuses: 0 });
     expect(raw.prepare('SELECT week_of FROM meal_plans ORDER BY week_of').all()).toEqual([{ week_of: '2026-10-25' }]);
     expect(count(raw, 'checks')).toBe(0);
   });
@@ -129,7 +129,7 @@ describe('runScheduledIngest (the hourly Sunday job)', () => {
 
     const out = await runScheduledIngest({ DB }, WEDNESDAY_UTC, fetchMock as unknown as typeof fetch, NO_WAIT);
 
-    expect(out).toEqual({ postal: null, summary: null, pruned: { plans: 1, checks: 0 } });
+    expect(out).toEqual({ postal: null, summary: null, pruned: { plans: 1, checks: 0, statuses: 0 } });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(count(raw, 'meal_plans')).toBe(0);
   });
@@ -157,7 +157,7 @@ describe('runScheduledIngest (the hourly Sunday job)', () => {
       waitUntil,
     } as unknown as ExecutionContext);
     const promise = waitUntil.mock.calls[0]![0] as Promise<unknown>;
-    await expect(promise).resolves.toEqual({ postal: null, summary: null, pruned: { plans: 1, checks: 0 }, site: null });
+    await expect(promise).resolves.toEqual({ postal: null, summary: null, pruned: { plans: 1, checks: 0, statuses: 0 }, site: null });
     expect(count(raw, 'meal_plans')).toBe(0);
   });
 

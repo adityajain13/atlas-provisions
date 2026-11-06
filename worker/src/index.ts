@@ -4,8 +4,12 @@ import {
   CheckPutSchema,
   HouseholdSchema,
   INGREDIENT_BY_ID,
+  MealStatusInputSchema,
   PantryCreateSchema,
+  PantryFromPlanSchema,
   PantryPatchSchema,
+  normalizeAllergies,
+  nextGuestIds,
   PlanRequestSchema,
   type PlanRequest,
   RatingInputSchema,
@@ -60,6 +64,11 @@ import {
   insertFlyerItems,
   insertPantryItem,
   insertPriceHistory,
+  clearWeekStatuses,
+  deleteMealStatus,
+  loadStatusesBetween,
+  loadWeekStatuses,
+  upsertMealStatus,
   latestIngestRun,
   loadChecks,
   loadHousehold,
@@ -289,6 +298,7 @@ async function planWeek(env: Env, apiKey: string, householdId: string, request: 
   const { household, matched, deals, neverBuy, priceSource, estimates } = await loadDeals(env, householdId, request.weekOf);
   // Plans starting up to 21 days before the week can hold dinners in the 14-day window.
   const earlier = await plansBetween(env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf);
+  const earlierStatuses = await loadStatusesBetween(env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf);
   const today = torontoDate();
   const pantry = await loadPantry(env.DB, householdId);
   const ratings = ratingSignals(await loadRatings(env.DB, householdId), household.people, today);
@@ -300,7 +310,7 @@ async function planWeek(env: Env, apiKey: string, householdId: string, request: 
     deals,
     matched,
     neverBuy,
-    recentDinnerNames: recentDinnerNames(earlier, request.weekOf),
+    recentDinnerNames: recentDinnerNames(earlier, request.weekOf, 14, earlierStatuses),
     pantry,
     ratings,
     feedback,
@@ -321,6 +331,8 @@ async function planWeek(env: Env, apiKey: string, householdId: string, request: 
   // A new plan that replaces one keeps the old one, so the change can be undone.
   emit({ stage: 'saving' });
   await savePlan(env.DB, householdId, plan, await loadPlanData(env.DB, householdId, request.weekOf));
+  // The meals are new, so what was marked on the old ones (skipped, made instead, guests) no longer applies.
+  await clearWeekStatuses(env.DB, householdId, request.weekOf);
   await recordUsage(env.DB, householdId, 'plan', usageMonth(today));
   return plan;
 }
@@ -468,21 +480,28 @@ app.post(`${API}/plan/:weekOf/swap`, async (c) => {
   const unknown = parsed.data.mealIds.find((id) => !known.has(id));
   if (unknown !== undefined) return c.text(`Unknown meal: ${unknown}`, 400);
 
+  // Guests joining the swapped slots get the next free guest ids. Their allergies come with them.
+  const guests = parsed.data.guests
+    ? { ids: nextGuestIds(saved, parsed.data.guests.count), allergies: normalizeAllergies(parsed.data.guests.allergies) }
+    : undefined;
+
   const swapWeek = async (emit: Emit) => {
     const household = await loadHousehold(c.env.DB, householdId);
     const { matched, deals, neverBuy, estimates } = await loadDeals(c.env, householdId, weekOf);
     const earlier = await plansBetween(c.env.DB, householdId, addDaysIso(weekOf, -21), weekOf);
+    const earlierStatuses = await loadStatusesBetween(c.env.DB, householdId, addDaysIso(weekOf, -21), weekOf);
     const today = torontoDate();
     const result = await runSwap({
       household,
       plan: saved,
       mealIds: parsed.data.mealIds,
       note: parsed.data.note,
+      guests,
       deals,
       matched,
       neverBuy,
       estimates,
-      recentDinnerNames: recentDinnerNames(earlier, weekOf),
+      recentDinnerNames: recentDinnerNames(earlier, weekOf, 14, earlierStatuses),
       pantry: await loadPantry(c.env.DB, householdId),
       ratings: ratingSignals(await loadRatings(c.env.DB, householdId), household.people, today),
       feedback: await planFeedback(c.env.DB, householdId, today),
@@ -492,6 +511,8 @@ app.post(`${API}/plan/:weekOf/swap`, async (c) => {
     });
     emit({ stage: 'saving' });
     await savePlan(c.env.DB, householdId, result.plan, stored);
+    // Swapped meals are new: their marks go. Their ids may be reused by the new meals, so they must not carry over.
+    await clearWeekStatuses(c.env.DB, householdId, weekOf, result.swapped);
     await recordUsage(c.env.DB, householdId, 'swap', usageMonth(today));
     return result;
   };
@@ -737,12 +758,92 @@ app.post(`${API}/ratings`, async (c) => {
   return c.json(rating, 201);
 });
 
+// The saved plan, and the statuses marked on its meals ("Didn't go to plan?"), by meal id.
 app.get(`${API}/plan/:weekOf`, async (c) => {
   const weekOf = c.req.param('weekOf');
   if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
-  const plan = await loadPlan(c.env.DB, c.get('householdId'), weekOf);
+  const householdId = c.get('householdId');
+  const plan = await loadPlan(c.env.DB, householdId, weekOf);
   if (!plan) return c.text('No plan for this week', 404);
-  return c.json(plan);
+  return c.json({ ...plan, statuses: await loadWeekStatuses(c.env.DB, householdId, weekOf) });
+});
+
+// Marks a planned meal as skipped, or as made something else, or notes guests joining it. Replaces the meal's row.
+// Any week with a saved plan, past weeks too: the record is what happened.
+app.put(`${API}/plan/:weekOf/meals/:mealId/status`, async (c) => {
+  const weekOf = c.req.param('weekOf');
+  if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const parsed = MealStatusInputSchema.safeParse(body);
+  if (!parsed.success) return c.text(formatZod(parsed.error), 400);
+
+  const householdId = c.get('householdId');
+  const mealId = c.req.param('mealId');
+  const plan = await loadPlan(c.env.DB, householdId, weekOf);
+  if (!plan) return c.text('No plan for this week', 404);
+  if (!plan.meals.some((m) => m.id === mealId)) return c.text('No such meal in this week', 404);
+
+  const status = parsed.data;
+  await upsertMealStatus(c.env.DB, householdId, weekOf, mealId, status, new Date().toISOString());
+  return c.json(status);
+});
+
+// Clears a meal's mark: it went to plan after all.
+app.delete(`${API}/plan/:weekOf/meals/:mealId/status`, async (c) => {
+  const weekOf = c.req.param('weekOf');
+  if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
+  const householdId = c.get('householdId');
+  const plan = await loadPlan(c.env.DB, householdId, weekOf);
+  if (!plan) return c.text('No plan for this week', 404);
+  await deleteMealStatus(c.env.DB, householdId, weekOf, c.req.param('mealId'));
+  return c.json({ ok: true });
+});
+
+// Puts the unused amounts of a planned meal's ingredients into the pantry, from the catalogue's shelf life.
+// Each item must be an ingredient of that meal. Added as plan leftovers.
+app.post(`${API}/plan/:weekOf/meals/:mealId/to-pantry`, async (c) => {
+  const weekOf = c.req.param('weekOf');
+  if (!isSundayIso(weekOf)) return c.text('weekOf must be a Sunday (YYYY-MM-DD)', 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text('Body must be JSON', 400);
+  }
+  const parsed = PantryFromPlanSchema.safeParse(body);
+  if (!parsed.success) return c.text(formatZod(parsed.error), 400);
+
+  const householdId = c.get('householdId');
+  const plan = await loadPlan(c.env.DB, householdId, weekOf);
+  if (!plan) return c.text('No plan for this week', 404);
+  const meal = plan.meals.find((m) => m.id === c.req.param('mealId'));
+  if (!meal) return c.text('No such meal in this week', 404);
+
+  const addedOn = torontoDate();
+  const added: PantryItem[] = [];
+  for (const { ingredientId, qty } of parsed.data.items) {
+    const catalog = INGREDIENT_BY_ID[ingredientId];
+    if (!catalog) return c.text(`Unknown ingredient: ${ingredientId}`, 400);
+    if (!meal.ingredients.some((i) => i.ingredientId === ingredientId)) {
+      return c.text(`${catalog.name} is not an ingredient of that meal`, 400);
+    }
+    added.push({
+      id: newId(),
+      ingredientId,
+      qty,
+      unit: catalog.baseUnit,
+      addedOn,
+      expiresOn: defaultExpiry(ingredientId, addedOn),
+      source: 'plan-leftover',
+    });
+  }
+  for (const item of added) await insertPantryItem(c.env.DB, householdId, item);
+  return c.json({ added }, 201);
 });
 
 // ---- Shopping and prep ticks, shared across the household ----

@@ -3,16 +3,37 @@ import { Link } from 'react-router-dom';
 import {
   DAY_LONG,
   SLOTS,
+  isMealUpcoming,
+  leftoverDependents,
   torontoDate,
   type Day,
   type FixedMeal,
+  type GuestsInput,
   type MealPlan,
+  type MealStatus,
+  type MealStatusInput,
   type PlannedMeal,
   type Rating,
   type RatingKind,
   type Slot,
+  type SkipReason,
 } from '@provisions/shared';
-import { errorMessage, getHousehold, getPlan, getRatings, regeneratePrep, saveRating, swapMeals, undoSwap } from '../api';
+import {
+  addPlanLeftovers,
+  clearMealStatus,
+  errorMessage,
+  getHousehold,
+  getRatings,
+  getWeekPlan,
+  regeneratePrep,
+  saveRating,
+  setMealStatus,
+  swapMeals,
+  undoSwap,
+} from '../api';
+import { LeftoversDialog, PantryDialog } from '../components/StatusDialogs';
+import NoticeToast from '../components/NoticeToast';
+import { guestsLine, leftoversQuestion, markLabel, mergeStatus, mealLabel, nextDinnerAfter, pantryAddedMessage, pantryChoices, useUpNote, guestSwapNote, type PantryChoice } from '../lib/mealStatus';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
 import { PrepBoard, PrepToday } from '../components/PrepArticle';
@@ -115,20 +136,36 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   const [undoBusy, setUndoBusy] = useState(false);
   // The progress modal for a swap or a prep rewrite: its title, the meals replaced, and the error once it fails.
   const [progressModal, setProgressModal] = useState<{ title: string; meals: string[]; error: string | null } | null>(null);
+  // "Didn't go to plan?": the marks on the week's meals, by meal id; a failed write; and the write in progress.
+  const [statuses, setStatuses] = useState<Record<string, MealStatus>>({});
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+  // The follow-up dialogs after a meal is skipped or made instead: the meals its leftovers were for, the ingredient
+  // checklist for the meal itself, a swap to open once those are done, and the line shown after the pantry is filled.
+  const [leftovers, setLeftovers] = useState<{ sourceId: string; deps: string[]; reason?: SkipReason } | null>(null);
+  const [pantryFor, setPantryFor] = useState<{
+    sourceId: string;
+    choices: PantryChoice[];
+    then: { ids: string[]; note: string } | null;
+    busy: boolean;
+    error: string | null;
+  } | null>(null);
+  const [pantryToast, setPantryToast] = useState<{ key: number; count: number; names: string[]; next?: string } | null>(null);
   useSaveScope('sync', source.status === 'plan');
   // One set of ticks for both prep checklists (phone and desktop), so they never disagree.
   const { checks, toggle } = useChecks(source.status === 'plan' ? source.plan.weekOf : null);
 
   useEffect(() => {
     let alive = true;
-    Promise.all([getPlan(weekOf), getHousehold().catch(() => null), getRatings().catch(() => [] as Rating[])])
-      .then(([plan, household, saved]) => {
+    Promise.all([getWeekPlan(weekOf), getHousehold().catch(() => null), getRatings().catch(() => [] as Rating[])])
+      .then(([found, household, saved]) => {
         if (!alive) return;
         setNames(new Map((household?.people ?? []).map((p) => [p.id, p.name])));
         setPrepDay(household?.prepDay ?? null);
         setFixedMeals(household?.fixedMeals ?? []);
         setRatings(saved);
-        setSource(plan ? { status: 'plan', plan } : { status: 'none' });
+        setStatuses(found?.statuses ?? {});
+        setSource(found ? { status: 'plan', plan: found.plan } : { status: 'none' });
       })
       .catch((e: unknown) => {
         if (alive) setSource({ status: 'error', error: errorMessage(e) });
@@ -175,7 +212,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   }
 
   const plan: MealPlan = source.plan;
-  const week = planToWeek(plan, names);
+  const week = planToWeek(plan, names, statuses);
   // Leftover links point at other planned meals. Opening one swaps the open meal (panel or sheet) to it.
   const findMeal = (id: string): { day: Day; meal: ViewMeal } | null => {
     for (const d of week.days) {
@@ -195,28 +232,40 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   // The ingredients of the household's fixed meal behind a fixed meal on the week, as typed on Household.
   const fixedIngredientsFor = (day: Day, meal: ViewMeal) =>
     fixedMeals.find((f) => f.active && f.name === meal.name && f.slot === meal.slot && f.days.includes(day))?.ingredients;
-  // What the meal panel (desktop) or the sheet (phone) shows for one open meal.
+  // What the meal panel (desktop) or the sheet (phone) shows for one open meal. The meal is read from the week as it
+  // is now, so a mark set in the panel shows there at once.
   const detailFor = (
-    open: { day: Day; meal: ViewMeal },
+    opened: { day: Day; meal: ViewMeal },
     onClose: () => void,
     onOpen: (id: string) => void,
     presentation: 'panel' | 'sheet',
-  ) => ({
-    weekOf: plan.weekOf,
-    day: open.day,
-    meal: open.meal,
-    planned: plannedFor(plan, open.day, open.meal),
-    fixedIngredients: fixedIngredientsFor(open.day, open.meal),
-    onOpenMeal: onOpen,
-    rating: open.meal.rateable ? ratingFor(ratings, open.meal.rateable) : null,
-    ratingError,
-    onRate: (value: RatingKind) => {
-      if (open.meal.rateable) void rate(open.meal.rateable, value);
-    },
-    onClose,
-    onSwap: !past && open.meal.id && !open.meal.fixed ? () => openSwap([open.meal.id!]) : undefined,
-    presentation,
-  });
+  ) => {
+    const open = (opened.meal.id && findMeal(opened.meal.id)) || opened;
+    const planned = !open.meal.fixed && open.meal.id !== undefined;
+    return {
+      weekOf: plan.weekOf,
+      day: open.day,
+      meal: open.meal,
+      planned: plannedFor(plan, open.day, open.meal),
+      fixedIngredients: fixedIngredientsFor(open.day, open.meal),
+      onOpenMeal: onOpen,
+      rating: open.meal.rateable ? ratingFor(ratings, open.meal.rateable) : null,
+      ratingError,
+      onRate: (value: RatingKind) => {
+        if (open.meal.rateable) void rate(open.meal.rateable, value);
+      },
+      onClose,
+      onSwap: !past && open.meal.id && !open.meal.fixed ? () => openSwap([open.meal.id!]) : undefined,
+      presentation,
+      status: open.meal.status,
+      statusBusy,
+      statusError,
+      onMark: planned ? (patch: MealStatusInput) => void markMeal(open.meal, patch) : undefined,
+      onClearStatus: planned && open.meal.status ? () => void clearMark(open.meal.id!) : undefined,
+      canSwapForGuests: planned && !past && isMealUpcoming(plan.weekOf, open.day, open.meal.slot, new Date()),
+      onSwapForGuests: planned ? (guests: GuestsInput, note: string) => void swapForGuests(open.meal.id!, guests, note) : undefined,
+    };
+  };
   const todayIso = torontoDate();
   const selectedDay = picked ?? defaultDay(week.weekOf, todayIso);
   const day = week.days.find((d) => d.key === selectedDay) ?? week.days[0]!;
@@ -250,8 +299,8 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
     setChoosing(false);
     setSelected([]);
   };
-  const openSwap = (ids: string[]) => {
-    setSwapNote('');
+  const openSwap = (ids: string[], note = '') => {
+    setSwapNote(note);
     setSwapError(null);
     setDialog(ids);
   };
@@ -293,7 +342,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   }
 
   // Swaps the meals of the confirm dialog. The planner fills the freed slots; the week is then reloaded.
-  async function runSwap(ids: string[], note: string) {
+  async function runSwap(ids: string[], note: string, guests?: GuestsInput) {
     const replaced = swapPreview(plan, ids).closure;
     const replacedNames = plan.meals.filter((m) => m.id !== undefined && replaced.includes(m.id)).map((m) => m.name);
     setDialog(null);
@@ -304,11 +353,10 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
     setSwapping(replaced);
     setProgressModal({ title: swappingTitle(replaced.length), meals: replacedNames, error: null });
     try {
-      const run = () => swapMeals(plan.weekOf, ids, note, (e) => setSwapProgress(progressText(e)));
+      const run = () => swapMeals(plan.weekOf, ids, note, (e) => setSwapProgress(progressText(e)), guests);
       const result = await track(run(), undefined, { busy: 'Planning…' });
-      // The reload makes the List and prep screens show the new plan as well.
-      const fresh = await getPlan(plan.weekOf).catch(() => null);
-      setSource({ status: 'plan', plan: fresh ?? result });
+      // The reload makes the List and prep screens show the new plan as well, and the marks the swap left.
+      await reloadWeek(result);
       exitChoosing();
       setProgressModal(null);
       setHighlight(result.added);
@@ -322,13 +370,164 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
     }
   }
 
+  // The week and its marks from the server. The plan given is kept when the reload fails.
+  async function reloadWeek(fallback: MealPlan) {
+    const found = await getWeekPlan(plan.weekOf).catch(() => null);
+    if (found) {
+      setSource({ status: 'plan', plan: found.plan });
+      setStatuses(found.statuses);
+    } else {
+      setSource({ status: 'plan', plan: fallback });
+    }
+  }
+
+  // Records a mark on a planned meal. A skip or a made-instead then asks about the meals its leftovers were for, and
+  // about the ingredients it did not use.
+  async function markMeal(meal: ViewMeal, patch: MealStatusInput) {
+    if (!meal.id) return;
+    const id = meal.id;
+    setStatusBusy(true);
+    setStatusError(null);
+    try {
+      const saved = await track(setMealStatus(plan.weekOf, id, mergeStatus(statuses[id], patch)));
+      setStatuses((prev) => ({ ...prev, [id]: saved }));
+      if (patch.status === 'skipped' || patch.madeName !== undefined) {
+        afterMiss(id, patch.status === 'skipped' ? patch.reason : undefined);
+      }
+    } catch (e) {
+      setStatusError(errorMessage(e));
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
+  // Clears a meal's mark: it went to plan after all.
+  async function clearMark(mealId: string) {
+    setStatusBusy(true);
+    setStatusError(null);
+    try {
+      await track(clearMealStatus(plan.weekOf, mealId));
+      setStatuses((prev) => {
+        const next = { ...prev };
+        delete next[mealId];
+        return next;
+      });
+    } catch (e) {
+      setStatusError(errorMessage(e));
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
+  // Marks several meals at once with a patch each. A failure is shown; what was saved stays.
+  async function markAll(ids: string[], patchFor: (id: string) => MealStatusInput) {
+    if (ids.length === 0) return;
+    setStatusBusy(true);
+    setStatusError(null);
+    try {
+      const saved = await track(
+        Promise.all(ids.map(async (id) => [id, await setMealStatus(plan.weekOf, id, mergeStatus(statuses[id], patchFor(id)))] as const)),
+      );
+      setStatuses((prev) => ({ ...prev, ...Object.fromEntries(saved) }));
+    } catch (e) {
+      setStatusError(errorMessage(e));
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
+  // A skip or a made-instead: the meals its leftovers were for are asked about first, then the ingredients.
+  function afterMiss(sourceId: string, reason?: SkipReason) {
+    const deps = leftoverDependents(plan.meals, sourceId);
+    if (deps.length > 0) setLeftovers({ sourceId, deps, ...(reason ? { reason } : {}) });
+    else openPantry(sourceId, null);
+  }
+
+  // The leftovers prompt: skip the meals it was to feed, keep them as planned, or swap them. Then the ingredients.
+  async function answerLeftovers(choice: 'skip' | 'keep' | 'swap') {
+    const current = leftovers;
+    if (!current) return;
+    setLeftovers(null);
+    if (choice === 'swap') {
+      openPantry(current.sourceId, { ids: current.deps, note: '' });
+      return;
+    }
+    if (choice === 'skip') {
+      await markAll(current.deps, () => ({ status: 'skipped', ...(current.reason ? { reason: current.reason } : {}) }));
+    } else {
+      // Kept as planned: a meal already marked keeps its mark. The mark only says the question was answered.
+      await markAll(current.deps.filter((id) => !statuses[id]), () => ({ status: 'replaced' }));
+    }
+    openPantry(current.sourceId, null);
+  }
+
+  // Closing the leftovers prompt without an answer changes nothing, and goes on to the ingredients.
+  function dismissLeftovers() {
+    const current = leftovers;
+    setLeftovers(null);
+    if (current) openPantry(current.sourceId, null);
+  }
+
+  // The ingredient checklist for a meal that did not use them. A meal with none goes straight on.
+  function openPantry(sourceId: string, then: { ids: string[]; note: string } | null) {
+    const meal = plan.meals.find((m) => m.id === sourceId);
+    if (!meal || meal.ingredients.length === 0) {
+      finishDialogs(then);
+      return;
+    }
+    setPantryFor({ sourceId, choices: pantryChoices(meal), then, busy: false, error: null });
+  }
+
+  // What comes after the dialogs: a swap the leftovers prompt asked for.
+  function finishDialogs(then: { ids: string[]; note: string } | null) {
+    if (then) openSwap(then.ids, then.note);
+  }
+
+  // Puts the ticked ingredients in the pantry. A line then says so, and offers a swap for a dinner later in the week.
+  async function addToPantry() {
+    const current = pantryFor;
+    if (!current) return;
+    const ticked = current.choices.filter((c) => c.ticked);
+    setPantryFor({ ...current, busy: true, error: null });
+    try {
+      const added = await track(addPlanLeftovers(plan.weekOf, current.sourceId, ticked.map((c) => ({ ingredientId: c.ingredientId, qty: c.qty }))));
+      const source = plan.meals.find((m) => m.id === current.sourceId);
+      const next = !past && source ? nextDinnerAfter(plan, source, statuses, new Date()) : undefined;
+      setPantryFor(null);
+      setPantryToast({ key: Date.now(), count: added.length, names: ticked.map((c) => c.name), ...(next ? { next: next.id } : {}) });
+      finishDialogs(current.then);
+    } catch (e) {
+      setPantryFor((p) => (p ? { ...p, busy: false, error: errorMessage(e) } : p));
+    }
+  }
+
+  // Closing the checklist without adding goes on to what follows it.
+  function closePantry() {
+    const current = pantryFor;
+    setPantryFor(null);
+    finishDialogs(current?.then ?? null);
+  }
+
+  // The line after the pantry is filled: a swap for the next dinner, to use up what went in.
+  function useUpLater() {
+    const toast = pantryToast;
+    if (!toast?.next) return;
+    setPantryToast(null);
+    openSwap([toast.next], useUpNote(toast.names));
+  }
+
+  // A swap for a meal that works: the meal (and the meals its leftovers link to) is replaced, with the guests in its slots.
+  async function swapForGuests(mealId: string, guests: GuestsInput, note: string) {
+    await runSwap([mealId], guestSwapNote(guests, note), guests);
+  }
+
   // Puts back the plan the last swap replaced.
   async function runUndo() {
     setUndoBusy(true);
     setSwapError(null);
     try {
       const restored = await track(undoSwap(plan.weekOf));
-      setSource({ status: 'plan', plan: restored });
+      await reloadWeek(restored);
       setUndo(null);
       setHighlight([]);
     } catch (e) {
@@ -477,16 +676,18 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
                     <LeftoverLine meal={m} />
                   </span>
                 )}
+                <MarkLine meal={m} />
                 <span
                   role="heading"
                   aria-level={3}
-                  className={`mt-2 block font-display font-medium ${m.leftover ? 'text-paper/80' : 'text-paper'} ${
+                  className={`mt-2 block font-display font-medium ${nameTone(m)} ${
                     m.slot === 'dinner' ? 'text-[24px] leading-[1.2]' : 'text-[20px] leading-[1.25]'
                   }`}
                 >
                   {m.name}
                 </span>
                 <span className="mt-1 block text-[13px] text-muted">{m.detail}</span>
+                <GuestLine meal={m} className="mt-1 block text-[12px] text-muted" />
                 {m.makes && <MakesLine meal={m} className="mt-1 block text-[12px] text-muted" />}
                 {m.tags.length > 0 && (
                   <span className="mt-3 flex flex-wrap gap-2">
@@ -744,6 +945,48 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
         />
       )}
 
+      {leftovers && (
+        <LeftoversDialog
+          question={leftoversQuestion(
+            leftovers.deps
+              .map((id) => plan.meals.find((m) => m.id === id))
+              .filter((m): m is PlannedMeal => m !== undefined)
+              .map(mealLabel),
+          )}
+          canSwap={!past}
+          busy={statusBusy}
+          onSkip={() => void answerLeftovers('skip')}
+          onSwap={() => void answerLeftovers('swap')}
+          onKeep={() => void answerLeftovers('keep')}
+          onCancel={dismissLeftovers}
+        />
+      )}
+
+      {pantryFor && (
+        <PantryDialog
+          choices={pantryFor.choices}
+          busy={pantryFor.busy}
+          error={pantryFor.error}
+          onToggle={(id) =>
+            setPantryFor((p) => (p ? { ...p, choices: p.choices.map((c) => (c.ingredientId === id ? { ...c, ticked: !c.ticked } : c)) } : p))
+          }
+          onAdd={() => void addToPantry()}
+          onCancel={() => {
+            if (!pantryFor.busy) closePantry();
+          }}
+        />
+      )}
+
+      {pantryToast && !undo && (
+        <NoticeToast
+          key={pantryToast.key}
+          message={pantryAddedMessage(pantryToast.count)}
+          actionLabel={pantryToast.next ? 'Use them in a later meal' : undefined}
+          onAction={useUpLater}
+          onDismiss={() => setPantryToast(null)}
+        />
+      )}
+
       {undo && (
         <UndoToast
           key={undo.key}
@@ -792,15 +1035,42 @@ function shortPill(text: string): string {
   return text.length > 24 ? `${text.slice(0, 23).trimEnd()}…` : text;
 }
 
-/** "From Mon dinner" for a leftover meal, with a return arrow. Plain "Leftovers" when its source is not in the plan. */
+/**
+ * "From Mon dinner" for a leftover meal, with a return arrow. Plain "Leftovers" when its source is not in the plan. A
+ * source that was skipped reads "(skipped)" in a quiet red, until this meal has been dealt with.
+ */
 function LeftoverLine({ meal }: { meal: ViewMeal }) {
   if (!meal.leftover) return null;
+  const from = meal.leftover.from;
   return (
-    <span className="flex items-center gap-1.5 text-[12px] text-herbLight">
+    <span className={`flex items-center gap-1.5 text-[12px] ${from?.skipped ? 'text-[#D98C7A]' : 'text-herbLight'}`}>
       <ReturnIcon />
-      {meal.leftover.from ? `From ${meal.leftover.from.label}` : 'Leftovers'}
+      {from ? `From ${from.label}${from.skipped ? ' (skipped)' : ''}` : 'Leftovers'}
     </span>
   );
+}
+
+/** The name's tone: struck through for a skipped meal, muted for one made instead, and as before otherwise. */
+function nameTone(meal: ViewMeal): string {
+  if (meal.status?.status === 'skipped') return 'text-muted line-through';
+  if (meal.status?.madeName) return 'text-muted';
+  if (meal.fixed) return 'text-muted';
+  return meal.leftover ? 'text-paper/80' : 'text-paper';
+}
+
+/** "Skipped · Ate out", or "Made: Pasta instead", above a meal's name. Nothing for a meal with no such mark. */
+function MarkLine({ meal, className = '' }: { meal: ViewMeal; className?: string }) {
+  const label = markLabel(meal.status);
+  if (!label) return null;
+  const tone = meal.status?.status === 'skipped' ? 'text-muted' : 'text-herbLight';
+  return <span className={`block text-[12px] ${tone} ${className}`}>{label}</span>;
+}
+
+/** "+1 guest · tree nut", for a meal someone joins. */
+function GuestLine({ meal, className = '' }: { meal: ViewMeal; className?: string }) {
+  const line = guestsLine(meal.status);
+  if (!line) return null;
+  return <span className={`${className}`}>{line}</span>;
 }
 
 /** "Makes Tue lunch, Wed lunch" for a meal whose leftovers are eaten later. */
@@ -822,11 +1092,13 @@ function MealCell({ meal, onOpen, state }: { meal: ViewMeal; onOpen: () => void;
         : meal.fixed
           ? 'border-line2 bg-ink'
           : 'border-line2 bg-field'
-    : meal.fixed
-      ? 'border-line2 bg-ink'
-      : meal.leftover
-        ? 'border-edge bg-transparent'
-        : 'border-line2 bg-field';
+    : meal.status?.status === 'skipped'
+      ? 'border-line2 bg-transparent opacity-70'
+      : meal.fixed
+        ? 'border-line2 bg-ink'
+        : meal.leftover
+          ? 'border-edge bg-transparent'
+          : 'border-line2 bg-field';
   return (
     <button
       type="button"
@@ -848,13 +1120,15 @@ function MealCell({ meal, onOpen, state }: { meal: ViewMeal; onOpen: () => void;
         </>
       )}
       {meal.leftover && <LeftoverLine meal={meal} />}
+      <MarkLine meal={meal} className="mt-1.5" />
       <span
-        className={`line-clamp-3 break-normal text-[15px] font-medium leading-[1.25] [overflow-wrap:normal] hyphens-none ${
-          meal.fixed ? 'text-muted' : meal.leftover ? 'text-paper/80' : 'text-paper'
-        } ${meal.leftover ? 'mt-1.5' : ''}`}
+        className={`line-clamp-3 break-normal text-[15px] font-medium leading-[1.25] [overflow-wrap:normal] hyphens-none ${nameTone(meal)} ${
+          meal.leftover && !meal.status ? 'mt-1.5' : ''
+        }`}
       >
         {meal.name}
       </span>
+      <GuestLine meal={meal} className="mt-1 block text-[12px] text-muted" />
       {(meta || linkedLabel) && (
         <span className="mt-auto pt-2 text-[12px] text-muted">
           {linkedLabel && <span className="text-herbLight">{linkedLabel}</span>}

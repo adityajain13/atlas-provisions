@@ -7,6 +7,7 @@ import {
   type EstimateBasis,
   type ListItem,
   type MealPlan,
+  type MealStatus,
   type PlannedMeal,
   type Slot,
   SLOTS,
@@ -28,8 +29,9 @@ export type Rateable = {
   personIds: string[]; // real household members eating it
 };
 
-// A planned meal another meal links to, shown as "Mon dinner".
-export type MealRef = { id: string; label: string };
+// A planned meal another meal links to, shown as "Mon dinner". skipped: that meal was marked skipped, and this one
+// (the leftovers it was to feed) has not been dealt with since.
+export type MealRef = { id: string; label: string; skipped?: boolean };
 
 export type ViewMeal = {
   id?: string; // planned meals only
@@ -45,6 +47,8 @@ export type ViewMeal = {
   leftover?: { from: MealRef | null };
   // The meals that eat this meal's leftovers, in week order.
   makes?: MealRef[];
+  // What happened to a planned meal ("Didn't go to plan?"). Absent for a meal with no mark, and for fixed meals.
+  status?: MealStatus;
 };
 
 export type ViewDay = {
@@ -195,11 +199,18 @@ function detailOf(meal: PlannedMeal): string {
 
 const refOf = (m: PlannedMeal): MealRef => ({ id: m.id, label: `${DAY_SHORT[m.day]} ${m.slot}` });
 
-/** The leftover links of a planned meal: what it reuses, and which meals eat its leftovers. */
-function leftoverLinks(plan: MealPlan, meal: PlannedMeal): Pick<ViewMeal, 'leftover' | 'makes'> {
+/**
+ * The leftover links of a planned meal: what it reuses, and which meals eat its leftovers. A link to a skipped meal is
+ * marked skipped, unless this meal has been dealt with since (it has a mark of its own, such as kept or made instead).
+ */
+function leftoverLinks(plan: MealPlan, meal: PlannedMeal, statuses: Record<string, MealStatus>): Pick<ViewMeal, 'leftover' | 'makes'> {
   const byId = new Map(plan.meals.map((m) => [m.id, m]));
   const isLeftover = Boolean(meal.usesLeftoversFrom) || meal.tags.some((t) => LEFTOVER_WORD.test(t.trim()));
   const from = meal.usesLeftoversFrom ? byId.get(meal.usesLeftoversFrom) : undefined;
+  const fromRef = (m: PlannedMeal): MealRef => {
+    const skipped = statuses[m.id]?.status === 'skipped' && statuses[meal.id] === undefined;
+    return skipped ? { ...refOf(m), skipped: true } : refOf(m);
+  };
 
   const eaters = new Set<string>();
   if (meal.makesLeftoversFor && byId.has(meal.makesLeftoversFor)) eaters.add(meal.makesLeftoversFor);
@@ -207,12 +218,13 @@ function leftoverLinks(plan: MealPlan, meal: PlannedMeal): Pick<ViewMeal, 'lefto
   const makes = plan.meals.filter((m) => eaters.has(m.id)).map(refOf);
 
   return {
-    ...(isLeftover ? { leftover: { from: from ? refOf(from) : null } } : {}),
+    ...(isLeftover ? { leftover: { from: from ? fromRef(from) : null } } : {}),
     ...(makes.length > 0 ? { makes } : {}),
   };
 }
 
-export function planToWeek(plan: MealPlan, people: Map<string, string>): ViewWeek {
+/** The week's cards. `statuses` holds the marks on the saved plan's meals, by meal id. */
+export function planToWeek(plan: MealPlan, people: Map<string, string>, statuses: Record<string, MealStatus> = {}): ViewWeek {
   const prices = unitPrices(plan.list);
   const days: ViewDay[] = DAYS.map((key, i) => {
     const planned: { slot: Slot; meal: ViewMeal }[] = plan.meals
@@ -228,7 +240,8 @@ export function planToWeek(plan: MealPlan, people: Map<string, string>): ViewWee
           cost: mealCost(m, prices),
           tags: tagsOf(m, plan.request.cravings),
           ...rateableOf(m, people),
-          ...leftoverLinks(plan, m),
+          ...leftoverLinks(plan, m, statuses),
+          ...(statuses[m.id] ? { status: statuses[m.id] } : {}),
         },
       }));
     const fixed: { slot: Slot; meal: ViewMeal }[] = plan.fixedMeals

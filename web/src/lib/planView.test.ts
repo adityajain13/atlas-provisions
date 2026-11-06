@@ -154,3 +154,37 @@ describe('planToWeek: tags and headline', () => {
     expect(week.days[0]!.headline).toBe('pepperoni potato frittata.');
   });
 });
+
+describe('planToWeek: meal statuses', () => {
+  const source = { ...meal('Chili', 'dinner', []), id: 'mon-dinner', day: 'mon', makesLeftoversFor: 'tue-lunch' } as PlannedMeal;
+  const leftover = { ...meal('Chili lunch', 'lunch', []), id: 'tue-lunch', day: 'tue', usesLeftoversFrom: 'mon-dinner' } as PlannedMeal;
+
+  function weekFor(statuses: Parameters<typeof planToWeek>[2]) {
+    const p = { weekOf: '2026-11-01', request: { weekOf: '2026-11-01', budget: 150, cravings: [] }, stores: [], list: [], meals: [source, leftover], fixedMeals: [], totalCost: 0 } as unknown as MealPlan;
+    return planToWeek(p, new Map(), statuses);
+  }
+
+  it('attaches a meal’s mark to its card', () => {
+    const mon = weekFor({ 'mon-dinner': { status: 'skipped', reason: 'ate-out' } }).days[1]!.meals[0]!;
+    expect(mon.status).toEqual({ status: 'skipped', reason: 'ate-out' });
+  });
+
+  it('leaves the card without a mark when nothing is marked', () => {
+    expect(weekFor({}).days[1]!.meals[0]!.status).toBeUndefined();
+  });
+
+  it('marks the leftover link as skipped when its source was skipped and the leftover has not been dealt with', () => {
+    const tue = weekFor({ 'mon-dinner': { status: 'skipped' } }).days[2]!.meals[0]!;
+    expect(tue.leftover?.from).toEqual({ id: 'mon-dinner', label: 'Mon dinner', skipped: true });
+  });
+
+  it('leaves the link plain once the leftover meal has its own mark (kept, or made instead)', () => {
+    const tue = weekFor({ 'mon-dinner': { status: 'skipped' }, 'tue-lunch': { status: 'replaced' } }).days[2]!.meals[0]!;
+    expect(tue.leftover?.from).toEqual({ id: 'mon-dinner', label: 'Mon dinner' });
+  });
+
+  it('leaves the link plain when the source was not skipped', () => {
+    const tue = weekFor({ 'mon-dinner': { status: 'replaced', madeName: 'Soup' } }).days[2]!.meals[0]!;
+    expect(tue.leftover?.from).toEqual({ id: 'mon-dinner', label: 'Mon dinner' });
+  });
+});

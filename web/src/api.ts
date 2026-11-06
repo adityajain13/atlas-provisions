@@ -1,6 +1,9 @@
 import {
   ChecksSchema,
   HouseholdSchema,
+  type GuestsInput,
+  type MealStatus,
+  type MealStatusInput,
   type FeedbackSummary,
   type IngredientFeedbackInput,
   type WeekFeedback,
@@ -170,19 +173,24 @@ export type SwapOutcome = MealPlan & { swapped: string[]; added: string[] };
 /**
  * Swaps the chosen meals of a week, and the meals linked to them by leftovers. The server adds the linked meals and
  * keeps the rest of the week. Takes up to a minute. Progress is streamed and passed to onProgress. Errors carry the
- * server's message as-is (a 429 names the cap).
+ * server's message as-is (a 429 names the cap). Guests join the freed slots, with their allergies, when given.
  */
 export async function swapMeals(
   weekOf: string,
   mealIds: string[],
   note?: string,
   onProgress?: (e: PlanProgressEvent) => void,
+  guests?: GuestsInput,
 ): Promise<SwapOutcome> {
   const res = await ensureOk(
     await authFetch(`${BASE}/plan/${weekOf}/swap`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
-      body: JSON.stringify({ mealIds, ...(note && note.trim() ? { note: note.trim() } : {}) }),
+      body: JSON.stringify({
+        mealIds,
+        ...(note && note.trim() ? { note: note.trim() } : {}),
+        ...(guests ? { guests } : {}),
+      }),
     }),
   );
   const streamed = await readPlanStream(res, onProgress);
@@ -203,6 +211,47 @@ export async function getPlan(weekOf: string): Promise<MealPlan | null> {
   const res = await authFetch(`${BASE}/plan/${weekOf}`);
   if (res.status === 404) return null;
   return readStoredPlan((await (await ensureOk(res)).json()) as MealPlan) as MealPlan;
+}
+
+/** The saved plan for a week with the statuses marked on its meals ("Didn't go to plan?"), or null when there is none. */
+export async function getWeekPlan(weekOf: string): Promise<{ plan: MealPlan; statuses: Record<string, MealStatus> } | null> {
+  const res = await authFetch(`${BASE}/plan/${weekOf}`);
+  if (res.status === 404) return null;
+  const { statuses, ...rest } = (await (await ensureOk(res)).json()) as MealPlan & { statuses?: Record<string, MealStatus> };
+  return { plan: readStoredPlan(rest) as MealPlan, statuses: statuses ?? {} };
+}
+
+/** Marks a planned meal: skipped, made something else, or with guests. Replaces the meal's mark. Returns what was saved. */
+export async function setMealStatus(weekOf: string, mealId: string, input: MealStatusInput): Promise<MealStatus> {
+  return json(
+    await authFetch(`${BASE}/plan/${weekOf}/meals/${encodeURIComponent(mealId)}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+    (raw) => raw as MealStatus,
+  );
+}
+
+/** Clears a meal's mark: it went to plan after all. */
+export async function clearMealStatus(weekOf: string, mealId: string): Promise<void> {
+  await ensureOk(await authFetch(`${BASE}/plan/${weekOf}/meals/${encodeURIComponent(mealId)}/status`, { method: 'DELETE' }));
+}
+
+/** Puts a planned meal's unused ingredient amounts (base units) into the pantry as plan leftovers. Returns the new items. */
+export async function addPlanLeftovers(
+  weekOf: string,
+  mealId: string,
+  items: { ingredientId: string; qty: number }[],
+): Promise<PantryItem[]> {
+  return json(
+    await authFetch(`${BASE}/plan/${weekOf}/meals/${encodeURIComponent(mealId)}/to-pantry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    }),
+    (raw) => (raw as { added: PantryItem[] }).added,
+  );
 }
 
 // ---- Pantry (milestone 3A) ----

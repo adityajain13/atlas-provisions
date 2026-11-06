@@ -225,6 +225,7 @@ export interface PayloadInput {
   replacing?: string[];
   swapNote?: string;
   feedback?: FeedbackSignals; // skipped and replaced ingredients, from past meals
+  guests?: Record<string, { allergies: string[] }>; // guests who joined swapped meals: their ids are eaters, and their allergies go in `allergies`
 }
 
 export interface PlannerPayload {
@@ -280,7 +281,10 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
       ...(p.proteinTargetG !== undefined ? { proteinTargetG: p.proteinTargetG } : {}),
       dietTags: p.dietTags,
     })),
-    allergies: Object.fromEntries(household.people.map((p) => [p.id, p.allergies])),
+    allergies: {
+      ...Object.fromEntries(household.people.map((p) => [p.id, p.allergies])),
+      ...Object.fromEntries(Object.entries(input.guests ?? {}).map(([id, g]) => [id, g.allergies])),
+    },
     remainingBudget: Math.max(0, Math.round((request.budget - input.fixedCost.cost - (input.keptCost ?? 0)) * 100) / 100),
     cravings: request.cravings,
     neverBuy: input.neverBuy,
