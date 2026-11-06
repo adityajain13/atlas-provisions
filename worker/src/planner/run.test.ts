@@ -16,7 +16,7 @@ import {
 } from '@provisions/shared';
 import flyer from '../../fixtures/flyer-sample.json';
 import type { PlannerClient } from './claude';
-import { runPlanner, type PlanProgress } from './run';
+import { runPlanner, validationContext, weekFrame, type PlanProgress } from './run';
 
 const matched: MatchedItem[] = (flyer as FlyerItem[])
   .map(matchFlyerItem)
@@ -530,5 +530,53 @@ describe('runPlanner: targeted repair', () => {
 
     expect(submitPlan).not.toHaveBeenCalled();
     expect(plan.timings).toEqual({ totalMs: 0, attempts: [] });
+  });
+});
+
+describe('weekFrame: food forms and dishes', () => {
+  const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false };
+  const dealOf = (ingredientId: string): Deal => ({
+    ingredientId,
+    store: 'No Frills',
+    pricePerUnit: 3,
+    packQty: 1,
+    packPrice: 3,
+    discountPct: 0.2,
+    baseline: 4,
+    validTo: '2026-11-18',
+    score: 0.5,
+  });
+
+  it('takes the forms the household does not keep out of the deals and what the planner may use', () => {
+    const h = household({ forms: { fish: ['fresh', 'frozen'] }, avoidDishes: ['slaw'] });
+    const frame = weekFrame({
+      household: h,
+      request,
+      deals: [dealOf('canned-tuna'), dealOf('salmon-fillet')],
+      matched: [],
+      neverBuy: [],
+      recentDinnerNames: [],
+      today: '2026-11-15',
+    });
+    expect(frame.formBlocked.has('canned-tuna')).toBe(true);
+    expect(frame.deals.map((d) => d.ingredientId)).toEqual(['salmon-fillet']);
+    expect(frame.available.map((a) => a.id)).toEqual(['salmon-fillet']);
+    const ctx = validationContext(frame);
+    expect(ctx.formBlocked?.has('canned-tuna')).toBe(true);
+    expect(ctx.avoidDishes).toEqual(['slaw']);
+  });
+
+  it('keeps every form when the household has not chosen any', () => {
+    const frame = weekFrame({
+      household: household(),
+      request,
+      deals: [dealOf('canned-tuna')],
+      matched: [],
+      neverBuy: [],
+      recentDinnerNames: [],
+      today: '2026-11-15',
+    });
+    expect(frame.formBlocked.size).toBe(0);
+    expect(frame.available.map((a) => a.id)).toEqual(['canned-tuna']);
   });
 });

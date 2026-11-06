@@ -21,6 +21,8 @@ const REASON: Record<string, string> = {
   variety: 'variety rules',
   'slot-coverage': 'missing meals',
   'unknown-ingredient': 'an ingredient not on offer',
+  form: 'a form the household does not keep',
+  'avoid-dish': 'a dish the household does not want',
 };
 
 export function progressText(e: PlanProgressEvent): string {

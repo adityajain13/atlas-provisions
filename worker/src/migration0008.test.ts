@@ -168,10 +168,11 @@ describe('migration 0008 on an empty database', () => {
     ).toThrow(/UNIQUE|constraint/i);
   });
 
-  it('is followed by the access and swap migrations, which are now the last on disk', () => {
+  it('is followed by the access, swap and price migrations, which are now the last on disk', () => {
     const names = migrationFiles().map((f) => f.name);
     expect(names[names.indexOf(MIGRATION) + 1]).toBe('0009_access.sql');
     expect(names[names.indexOf(MIGRATION) + 2]).toBe('0010_swap.sql');
-    expect(migrationFiles().at(-1)?.name).toBe('0010_swap.sql');
+    expect(names[names.indexOf(MIGRATION) + 3]).toBe('0011_price_household.sql');
+    expect(migrationFiles().at(-1)?.name).toBe('0011_price_household.sql');
   });
 });

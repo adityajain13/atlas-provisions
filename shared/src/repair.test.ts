@@ -91,6 +91,19 @@ describe('repairFor', () => {
     });
   });
 
+  it('replaces the meal that uses a form the household does not keep, and only that one', () => {
+    const plan = planOf(weekOf({ 'mon-dinner': { ingredients: [{ ingredientId: 'canned-tuna', qty: 1, unit: 'each' }] } }));
+    const rep = repairFor(plan, ctxFor(household(), ['ann', 'ben'], { formBlocked: new Set(['canned-tuna']) }), [err('form')]);
+    expect(rep?.replaceIds).toEqual(['mon-dinner']);
+    expect(rep?.refill).toEqual([{ day: 'mon', slot: 'dinner', eaters: ['ann', 'ben'] }]);
+  });
+
+  it('replaces a meal named after an avoided dish', () => {
+    const plan = planOf(weekOf({ 'tue-lunch': { name: 'Coleslaw wrap' } }));
+    const rep = repairFor(plan, ctxFor(household(), ['ann', 'ben'], { avoidDishes: ['slaw'] }), [err('avoid-dish')]);
+    expect(rep?.replaceIds).toEqual(['tue-lunch']);
+  });
+
   it('replaces a meal named after a never-buy word', () => {
     const plan = planOf(weekOf({ 'mon-dinner': { name: 'Beef stir-fry' } }));
     const rep = repairFor(plan, ctxFor(household(), ['ann', 'ben'], { neverWords: ['beef'] }), [err('never-buy')]);

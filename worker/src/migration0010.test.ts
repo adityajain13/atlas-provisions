@@ -39,8 +39,9 @@ describe('migration 0010 on a fresh database', () => {
     ).toThrow(/UNIQUE|constraint/i);
   });
 
-  it('is the last migration on disk', () => {
-    expect(migrationFiles().at(-1)?.name).toBe(MIGRATION);
+  it('is followed by the price migration, which is now the last on disk', () => {
+    expect(migrationFiles().at(-2)?.name).toBe(MIGRATION);
+    expect(migrationFiles().at(-1)?.name).toBe('0011_price_household.sql');
   });
 });
 

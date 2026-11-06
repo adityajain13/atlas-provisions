@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { addWeeks, planWeekOf } from '@provisions/shared';
 import { Brand } from './Header';
+import { AppearanceControl } from './Appearance';
 import { TABS } from './TabBar';
 import { useSession } from '../session';
 
@@ -44,8 +45,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
           Plan next week
         </Link>
 
+        <AppearanceControl className="mt-auto px-3 pt-4" />
+
         {email && (
-          <div className="mt-auto px-3 pt-4 text-[12px] text-muted">
+          <div className="mt-6 px-3 pt-4 text-[12px] text-muted">
             <p className="truncate">Signed in as {email}</p>
             <button
               type="button"

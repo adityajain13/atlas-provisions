@@ -1,6 +1,15 @@
 // Pure rules for the Household Stores section: adding presets and custom stores, Flipp names and the
 // per-trip limit. No React here, so the screen only wires these to state.
-import { STORE_GROUPS, STORE_PRESETS, slugifyName, type Store, type StoreGroup, type StorePreset } from '@provisions/shared';
+import {
+  MAX_MIN_SAVING,
+  STORE_GROUPS,
+  STORE_PRESETS,
+  slugifyName,
+  type ItemRule,
+  type Store,
+  type StoreGroup,
+  type StorePreset,
+} from '@provisions/shared';
 
 export const MAX_STORES_PER_TRIP = 5;
 export const MAX_FLIPP_NAMES = 10;
@@ -131,4 +140,63 @@ export function maxStoresLimit(stores: Store[]): number {
 /** A per-trip count kept within 1 and maxStoresLimit. */
 export function clampMaxStores(value: number, stores: Store[]): number {
   return Math.min(maxStoresLimit(stores), Math.max(1, Math.round(value)));
+}
+
+// ---- Ranking: the store list's order is the preference order ----
+
+/** The list with one store moved one place up (step -1) or down (step 1). At either end nothing moves. */
+export function moveStore(stores: Store[], id: string, step: -1 | 1): Store[] {
+  const from = stores.findIndex((s) => s.id === id);
+  const to = from + step;
+  if (from < 0 || to < 0 || to >= stores.length) return stores;
+  const next = [...stores];
+  [next[from], next[to]] = [next[to]!, next[from]!];
+  return next;
+}
+
+/**
+ * The list with one store dropped before the row at position `to`, where `to` counts the rows as they are now
+ * (0 is the top, the list's length is the bottom). Dropping a store where it already is changes nothing.
+ */
+export function moveStoreTo(stores: Store[], id: string, to: number): Store[] {
+  const from = stores.findIndex((s) => s.id === id);
+  if (from < 0) return stores;
+  const target = Math.max(0, Math.min(stores.length, to));
+  const rest = stores.filter((s) => s.id !== id);
+  const at = target > from ? target - 1 : target;
+  return [...rest.slice(0, at), stores[from]!, ...rest.slice(at)];
+}
+
+/**
+ * The drop position for a pointer at height `y`, given the vertical middle of each row in list order: the number of
+ * rows whose middle is above the pointer.
+ */
+export function dropIndex(middles: number[], y: number): number {
+  return middles.filter((m) => m < y).length;
+}
+
+/** The store names a pin can point at: the enabled stores, in list order. */
+export function pinStoreOptions(stores: Store[]): string[] {
+  return stores.filter((s) => s.enabled).map((s) => s.name);
+}
+
+/**
+ * An item rule with its store set, or cleared when `store` is undefined (cheapest). Every other field is kept, and
+ * an unset optional field stays unset, so the saved rule looks as it did.
+ */
+export function withPinnedStore(rule: ItemRule, store: string | undefined): ItemRule {
+  const next: ItemRule = { id: rule.id, name: rule.name, rule: rule.rule };
+  if (rule.except) next.except = rule.except;
+  if (rule.ingredientId) next.ingredientId = rule.ingredientId;
+  if (store) next.store = store;
+  return next;
+}
+
+/** A dollar amount typed for the minimum saving: a number from 0 to MAX_MIN_SAVING, to the cent. Null when it is not one. */
+export function parseMinSaving(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0 || n > MAX_MIN_SAVING) return null;
+  return n;
 }

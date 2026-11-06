@@ -148,3 +148,28 @@ describe('anthropicPrepClient', () => {
     expect(body.max_tokens).toBe(4000);
   });
 });
+
+describe('storage in the prep prompt', () => {
+  const storage = { containers: 'none' as const, freezer: false, zipBags: false };
+
+  it('sends the household storage in the payload, and not when none is given', () => {
+    expect(buildPrepPayload(plan(), 'sun', storage)).toMatchObject({ storage });
+    expect(buildPrepPayload(plan(), 'sun')).not.toHaveProperty('storage');
+  });
+
+  it('passes storage to the model with the prep call', async () => {
+    const { client, submitPrep } = fakeClient(GOOD);
+    await generatePrep(plan(), 'sun', client, storage);
+    const [, payload] = submitPrep.mock.calls[0] as unknown as [string, ReturnType<typeof buildPrepPayload>];
+    expect(payload).toMatchObject({ storage });
+  });
+
+  it('tells the model how to store food with no containers, few containers, no freezer and no zip bags', () => {
+    const system = prepSystemPrompt('sun');
+    expect(system).toContain('containers "none"');
+    expect(system).toContain('original packaging');
+    expect(system).toContain('containers "few"');
+    expect(system).toContain('Use the freezer only when freezer is true');
+    expect(system).toContain('zipBags is true');
+  });
+});

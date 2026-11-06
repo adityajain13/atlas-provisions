@@ -181,3 +181,41 @@ describe('buildPayload', () => {
     expect(SYSTEM_PROMPT).toContain("'(2 portions)'");
   });
 });
+
+describe('food forms, dishes and storage in the planner payload', () => {
+  const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: [], overrides: [], useItUp: false };
+
+  it('lists the dishes to avoid, the forms kept and the storage', () => {
+    const household: Household = {
+      ...defaultHousehold(),
+      people: [{ id: 'ann', name: 'Ann', dietTags: [], allergies: [] }],
+      avoidDishes: ['slaw'],
+      forms: { fish: ['fresh', 'frozen'] },
+      storage: { containers: 'few', freezer: false, zipBags: true },
+    };
+    const payload = buildPayload({ household, request, cells: expandWeek(household, request).cells, fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
+    expect(payload.avoidDishes).toEqual(['slaw']);
+    expect(payload.formsAllowed.fish).toEqual(['fresh', 'frozen']);
+    expect(payload.formsAllowed.beans).toEqual(['canned', 'dry']);
+    expect(payload.storage).toEqual({ containers: 'few', freezer: false, zipBags: true });
+  });
+
+  it('gives a household saved before these fields an empty avoid list, every form and the default storage', () => {
+    const household = defaultHousehold();
+    const payload = buildPayload({ household, request, cells: [], fixed: [], fixedCost: noFixed, available: [], neverBuy: [], recentDinnerNames: [] });
+    expect(payload.avoidDishes).toEqual([]);
+    expect(payload.formsAllowed.fish).toEqual(['fresh', 'frozen', 'canned']);
+    expect(payload.storage).toEqual({ containers: 'some', freezer: true, zipBags: true });
+  });
+
+  it('tells the planner to avoid dishes by variant, and to respect the forms kept', () => {
+    expect(SYSTEM_PROMPT).toContain("Never plan a dish in `avoidDishes` or a close variant of it (e.g. 'slaw' rules out coleslaw");
+    expect(SYSTEM_PROMPT).toContain("Respect formsAllowed (e.g. no canned fish if canned isn't allowed).");
+  });
+
+  it('gives each available item its form, and none when it has no form', () => {
+    const out = buildAvailable([deal('canned-tuna', 0.5), deal('chicken-thigh-boneless', 0.5)], noFixed);
+    expect(out.find((a) => a.id === 'canned-tuna')?.form).toBe('canned');
+    expect(out.find((a) => a.id === 'chicken-thigh-boneless')).not.toHaveProperty('form');
+  });
+});

@@ -26,6 +26,11 @@ export const CATEGORY_ORDER: Category[] = [
 
 export type BaseUnit = 'kg' | 'l' | 'each';
 
+/** How a food is sold, for the households that keep only some forms (fresh, frozen, canned, dry). */
+export type FoodForm = 'fresh' | 'frozen' | 'canned' | 'dry';
+/** The groups of foods that share forms: a household chooses which forms of each group it keeps. */
+export type FormGroupKey = 'fish' | 'beans' | 'vegetables' | 'tomatoes' | 'fruit';
+
 export interface Ingredient {
   id: string; // kebab slug, e.g. 'chicken-thigh-boneless'
   name: string; // 'Boneless chicken thighs'
@@ -49,6 +54,8 @@ export interface Ingredient {
     | 'legume'
     | 'dairy';
   aliases: string[]; // lowercase keywords/phrases that identify it in flyer text
+  form?: FoodForm; // where meaningful: the form this entry is sold in
+  formGroup?: FormGroupKey; // the group of foods this form choice belongs to
 }
 
 type Nut = [kcal: number, protein: number, carbs: number, fat: number, fibre: number];
@@ -58,6 +65,8 @@ interface Extra {
   protein?: Ingredient['protein'];
   eachWeightKg?: number;
   eachLabel?: string;
+  form?: FoodForm;
+  formGroup?: FormGroupKey;
 }
 
 function ing(
@@ -86,6 +95,8 @@ function ing(
   if (extra.eachWeightKg !== undefined) out.eachWeightKg = extra.eachWeightKg;
   if (extra.eachLabel !== undefined) out.eachLabel = extra.eachLabel;
   if (extra.protein !== undefined) out.protein = extra.protein;
+  if (extra.form !== undefined) out.form = extra.form;
+  if (extra.formGroup !== undefined) out.formGroup = extra.formGroup;
   return out;
 }
 
@@ -140,22 +151,22 @@ const meat: Ingredient[] = [
 const seafood: Ingredient[] = [
   ing('salmon-fillet', 'Salmon fillet', 'seafood', 'kg', [208, 20.4, 0, 13.4, 0], 2, false,
     ['salmon', 'salmon fillet', 'salmon fillets', 'atlantic salmon', 'sockeye salmon', 'coho salmon'],
-    { allergens: ['fish'], protein: 'fish' }),
+    { allergens: ['fish'], protein: 'fish', form: 'fresh', formGroup: 'fish' }),
   ing('tilapia-fillet', 'Tilapia fillets', 'seafood', 'kg', [96, 20.1, 0, 1.7, 0], 2, false,
     ['tilapia', 'tilapia fillet', 'tilapia fillets'],
-    { allergens: ['fish'], protein: 'fish' }),
+    { allergens: ['fish'], protein: 'fish', form: 'fresh', formGroup: 'fish' }),
   ing('cod-fillet', 'Cod fillets', 'seafood', 'kg', [82, 17.8, 0, 0.7, 0], 2, false,
     ['cod', 'cod fillet', 'cod fillets', 'atlantic cod'],
-    { allergens: ['fish'], protein: 'fish' }),
+    { allergens: ['fish'], protein: 'fish', form: 'fresh', formGroup: 'fish' }),
   ing('shrimp-raw', 'Shrimp', 'seafood', 'kg', [85, 20.1, 0, 0.5, 0], 2, false,
     ['shrimp', 'raw shrimp', 'large shrimp', 'shrimp tail on', 'peeled shrimp', 'uncooked shrimp'],
-    { allergens: ['shellfish'], protein: 'seafood' }),
+    { allergens: ['shellfish'], protein: 'seafood', form: 'fresh', formGroup: 'fish' }),
   ing('canned-tuna', 'Canned tuna (light, in water)', 'seafood', 'each', [116, 25.5, 0, 0.8, 0], 1095, false,
     ['tuna', 'canned tuna', 'light tuna', 'chunk light tuna', 'tuna in water', 'chunk tuna'],
-    { allergens: ['fish'], protein: 'fish', eachWeightKg: 0.142 }),
+    { allergens: ['fish'], protein: 'fish', eachWeightKg: 0.142, eachLabel: 'one can', form: 'canned', formGroup: 'fish' }),
   ing('canned-salmon', 'Canned salmon', 'seafood', 'each', [142, 19.8, 0, 6.3, 0], 1095, false,
     ['canned salmon', 'pink salmon', 'sockeye salmon can'],
-    { allergens: ['fish'], protein: 'fish', eachWeightKg: 0.213 }),
+    { allergens: ['fish'], protein: 'fish', eachWeightKg: 0.213, form: 'canned', formGroup: 'fish' }),
 ];
 
 const proteinsOther: Ingredient[] = [
@@ -167,39 +178,39 @@ const proteinsOther: Ingredient[] = [
     { allergens: ['soy'], protein: 'tofu' }),
   ing('chickpeas-dry', 'Dry chickpeas', 'pantry', 'kg', [364, 19.3, 61, 6.0, 17.4], 365, true,
     ['dry chickpeas', 'dried chickpeas', 'chickpeas dry', 'chickpeas', 'garbanzo beans'],
-    { protein: 'legume' }),
+    { protein: 'legume', form: 'dry', formGroup: 'beans' }),
   ing('lentils-red-dry', 'Red lentils (dry)', 'pantry', 'kg', [358, 25.8, 60, 1.1, 10.7], 365, true,
     ['red lentils', 'dry red lentils', 'split red lentils', 'lentils', 'red lentil'],
-    { protein: 'legume' }),
+    { protein: 'legume', form: 'dry', formGroup: 'beans' }),
   ing('black-beans-dry', 'Dry black beans', 'pantry', 'kg', [341, 21.6, 62.4, 1.4, 15.5], 365, true,
     ['dry black beans', 'dried black beans', 'black beans dry', 'black turtle beans'],
-    { protein: 'legume' }),
+    { protein: 'legume', form: 'dry', formGroup: 'beans' }),
   ing('chickpeas-canned', 'Canned chickpeas', 'pantry', 'each', [139, 7.1, 22.5, 2.1, 6.1], 730, true,
     ['canned chickpeas', 'chickpeas can', 'chickpeas 540 ml', 'chick peas', 'canned garbanzo beans'],
-    { protein: 'legume', eachWeightKg: 0.425 }),
+    { protein: 'legume', eachWeightKg: 0.425, form: 'canned', formGroup: 'beans' }),
   ing('black-beans-canned', 'Canned black beans', 'pantry', 'each', [132, 8.9, 23.7, 0.5, 8.7], 730, true,
     ['canned black beans', 'black beans can', 'black beans 540 ml', 'black beans'],
-    { protein: 'legume', eachWeightKg: 0.398 }),
+    { protein: 'legume', eachWeightKg: 0.398, form: 'canned', formGroup: 'beans' }),
   ing('lentils-canned', 'Canned lentils', 'pantry', 'each', [116, 9.0, 20.1, 0.4, 7.9], 730, true,
     ['canned lentils', 'lentils can', 'lentils 540 ml'],
-    { protein: 'legume', eachWeightKg: 0.398 }),
+    { protein: 'legume', eachWeightKg: 0.398, form: 'canned', formGroup: 'beans' }),
   ing('kidney-beans-canned', 'Canned kidney beans', 'pantry', 'each', [127, 8.7, 22.8, 0.5, 6.4], 730, true,
     ['canned kidney beans', 'kidney beans', 'red kidney beans'],
-    { protein: 'legume', eachWeightKg: 0.398 }),
+    { protein: 'legume', eachWeightKg: 0.398, form: 'canned', formGroup: 'beans' }),
   ing('pinto-beans-canned', 'Canned pinto beans', 'pantry', 'each', [143, 9.0, 26.2, 0.6, 9.0], 730, true,
     ['canned pinto beans', 'pinto beans'],
-    { protein: 'legume', eachWeightKg: 0.398 }),
+    { protein: 'legume', eachWeightKg: 0.398, form: 'canned', formGroup: 'beans' }),
 ];
 
 const produce: Ingredient[] = [
-  ing('broccoli', 'Broccoli', 'produce', 'kg', [34, 2.8, 6.6, 0.4, 2.6], 7, true, ['broccoli', 'broccoli crowns', 'broccoli florets']),
+  ing('broccoli', 'Broccoli', 'produce', 'kg', [34, 2.8, 6.6, 0.4, 2.6], 7, true, ['broccoli', 'broccoli crowns', 'broccoli florets'], { form: 'fresh', formGroup: 'vegetables' }),
   ing('baby-carrots', 'Baby carrots', 'produce', 'kg', [41, 0.9, 9.6, 0.2, 2.8], 21, true, ['baby carrots', 'baby carrot', 'bnls carrots', 'mini carrots']),
   ing('carrots', 'Carrots', 'produce', 'kg', [41, 0.9, 9.6, 0.2, 2.8], 21, true, ['carrots', 'carrot', 'bulk carrots', 'carrots 2 lb', 'bagged carrots', 'carrots bag']),
   ing('mini-cucumbers', 'Mini cucumbers', 'produce', 'kg', [15, 0.7, 3.6, 0.1, 0.5], 7, true, ['mini cucumbers', 'mini cucumber', 'snacking cucumbers', 'mini cukes']),
   ing('english-cucumber', 'English cucumber', 'produce', 'each', [15, 0.7, 3.6, 0.1, 0.5], 7, true, ['english cucumber', 'seedless cucumber', 'long english cucumber'], { eachWeightKg: 0.35 }),
-  ing('grapes-red', 'Red seedless grapes', 'produce', 'kg', [69, 0.7, 18.1, 0.2, 0.9], 7, true, ['red grapes', 'red seedless grapes', 'grapes red', 'grapes', 'seedless grapes']),
-  ing('grapes-green', 'Green seedless grapes', 'produce', 'kg', [69, 0.7, 18.1, 0.2, 0.9], 7, true, ['green grapes', 'green seedless grapes', 'grapes green']),
-  ing('spinach', 'Spinach', 'produce', 'kg', [23, 2.9, 3.6, 0.4, 2.2], 5, true, ['spinach', 'baby spinach', 'spinach bunch', 'bunch spinach', 'fresh spinach']),
+  ing('grapes-red', 'Red seedless grapes', 'produce', 'kg', [69, 0.7, 18.1, 0.2, 0.9], 7, true, ['red grapes', 'red seedless grapes', 'grapes red', 'grapes', 'seedless grapes'], { form: 'fresh', formGroup: 'fruit' }),
+  ing('grapes-green', 'Green seedless grapes', 'produce', 'kg', [69, 0.7, 18.1, 0.2, 0.9], 7, true, ['green grapes', 'green seedless grapes', 'grapes green'], { form: 'fresh', formGroup: 'fruit' }),
+  ing('spinach', 'Spinach', 'produce', 'kg', [23, 2.9, 3.6, 0.4, 2.2], 5, true, ['spinach', 'baby spinach', 'spinach bunch', 'bunch spinach', 'fresh spinach'], { form: 'fresh', formGroup: 'vegetables' }),
   ing('red-bell-pepper', 'Red bell peppers', 'produce', 'each', [31, 1.0, 6.0, 0.3, 2.1], 10, true, ['red bell pepper', 'red bell peppers', 'red peppers', 'red sweet pepper'], { eachWeightKg: 0.165 }),
   ing('green-bell-pepper', 'Green bell peppers', 'produce', 'each', [20, 0.9, 4.6, 0.2, 1.7], 10, true, ['green bell pepper', 'green bell peppers', 'green peppers', 'green sweet pepper', 'bell peppers', 'bell pepper'], { eachWeightKg: 0.16 }),
   ing('yellow-onion', 'Yellow onions', 'produce', 'kg', [40, 1.1, 9.3, 0.1, 1.7], 30, true, ['yellow onion', 'yellow onions', 'onions', 'onion', 'cooking onions']),
@@ -208,14 +219,14 @@ const produce: Ingredient[] = [
   ing('garlic', 'Garlic', 'produce', 'kg', [149, 6.4, 33.1, 0.5, 2.1], 60, true, ['garlic', 'garlic bulb', 'garlic bulbs', 'head of garlic']),
   ing('potatoes', 'Potatoes', 'produce', 'kg', [77, 2.0, 17.5, 0.1, 2.2], 30, true, ['potatoes', 'potato', 'white potatoes', 'yellow potatoes', 'russet potatoes', 'baking potatoes', 'gold potatoes']),
   ing('sweet-potatoes', 'Sweet potatoes', 'produce', 'kg', [86, 1.6, 20.1, 0.1, 3.0], 30, true, ['sweet potatoes', 'sweet potato', 'yams']),
-  ing('roma-tomatoes', 'Roma tomatoes', 'produce', 'kg', [18, 0.9, 3.9, 0.2, 1.2], 7, true, ['roma tomatoes', 'roma tomato', 'plum tomatoes', 'tomatoes', 'tomato']),
-  ing('cherry-tomatoes', 'Cherry tomatoes', 'produce', 'kg', [18, 0.9, 3.9, 0.2, 1.2], 7, true, ['cherry tomatoes', 'grape tomatoes', 'cherry tomato', 'snack tomatoes']),
-  ing('bananas', 'Bananas', 'produce', 'kg', [89, 1.1, 22.8, 0.3, 2.6], 7, true, ['bananas', 'banana', 'bananas bunch']),
-  ing('gala-apples', 'Gala apples', 'produce', 'kg', [52, 0.3, 13.8, 0.2, 2.4], 30, true, ['gala apples', 'gala apple', 'apples', 'apple', 'royal gala']),
-  ing('navel-oranges', 'Navel oranges', 'produce', 'each', [47, 0.9, 11.8, 0.1, 2.4], 21, true, ['navel oranges', 'oranges', 'orange', 'navel orange', 'valencia oranges'], { eachWeightKg: 0.15 }),
-  ing('strawberries', 'Strawberries', 'produce', 'kg', [32, 0.7, 7.7, 0.3, 2.0], 5, true, ['strawberries', 'strawberry', 'fresh strawberries']),
-  ing('blueberries', 'Blueberries', 'produce', 'kg', [57, 0.7, 14.5, 0.3, 2.4], 7, true, ['blueberries', 'blueberry', 'fresh blueberries']),
-  ing('raspberries', 'Raspberries', 'produce', 'kg', [52, 1.2, 11.9, 0.7, 6.5], 3, true, ['raspberries', 'raspberry', 'fresh raspberries']),
+  ing('roma-tomatoes', 'Roma tomatoes', 'produce', 'kg', [18, 0.9, 3.9, 0.2, 1.2], 7, true, ['roma tomatoes', 'roma tomato', 'plum tomatoes', 'tomatoes', 'tomato'], { form: 'fresh', formGroup: 'tomatoes' }),
+  ing('cherry-tomatoes', 'Cherry tomatoes', 'produce', 'kg', [18, 0.9, 3.9, 0.2, 1.2], 7, true, ['cherry tomatoes', 'grape tomatoes', 'cherry tomato', 'snack tomatoes'], { form: 'fresh', formGroup: 'tomatoes' }),
+  ing('bananas', 'Bananas', 'produce', 'kg', [89, 1.1, 22.8, 0.3, 2.6], 7, true, ['bananas', 'banana', 'bananas bunch'], { form: 'fresh', formGroup: 'fruit' }),
+  ing('gala-apples', 'Gala apples', 'produce', 'kg', [52, 0.3, 13.8, 0.2, 2.4], 30, true, ['gala apples', 'gala apple', 'apples', 'apple', 'royal gala'], { form: 'fresh', formGroup: 'fruit' }),
+  ing('navel-oranges', 'Navel oranges', 'produce', 'each', [47, 0.9, 11.8, 0.1, 2.4], 21, true, ['navel oranges', 'oranges', 'orange', 'navel orange', 'valencia oranges'], { eachWeightKg: 0.15, form: 'fresh', formGroup: 'fruit' }),
+  ing('strawberries', 'Strawberries', 'produce', 'kg', [32, 0.7, 7.7, 0.3, 2.0], 5, true, ['strawberries', 'strawberry', 'fresh strawberries'], { form: 'fresh', formGroup: 'fruit' }),
+  ing('blueberries', 'Blueberries', 'produce', 'kg', [57, 0.7, 14.5, 0.3, 2.4], 7, true, ['blueberries', 'blueberry', 'fresh blueberries'], { form: 'fresh', formGroup: 'fruit' }),
+  ing('raspberries', 'Raspberries', 'produce', 'kg', [52, 1.2, 11.9, 0.7, 6.5], 3, true, ['raspberries', 'raspberry', 'fresh raspberries'], { form: 'fresh', formGroup: 'fruit' }),
   ing('avocado', 'Avocados', 'produce', 'each', [160, 2.0, 8.5, 14.7, 6.7], 7, true, ['avocado', 'avocados', 'hass avocado', 'hass avocados'], { eachWeightKg: 0.2 }),
   ing('lemons', 'Lemons', 'produce', 'each', [29, 1.1, 9.3, 0.3, 2.8], 28, true, ['lemons', 'lemon', 'lemon each'], { eachWeightKg: 0.1 }),
   ing('limes', 'Limes', 'produce', 'each', [30, 0.7, 10.5, 0.2, 2.8], 28, true, ['limes', 'lime', 'limes each'], { eachWeightKg: 0.07 }),
@@ -228,13 +239,13 @@ const produce: Ingredient[] = [
   ing('green-cabbage', 'Green cabbage', 'produce', 'each', [25, 1.3, 5.8, 0.1, 2.5], 21, true, ['cabbage', 'green cabbage', 'cabbage head', 'green cabbages'], { eachWeightKg: 0.9 }),
   ing('romaine-lettuce', 'Romaine lettuce', 'produce', 'each', [17, 1.2, 3.3, 0.3, 2.1], 7, true, ['romaine', 'romaine lettuce', 'romaine hearts', 'romaine heart', 'lettuce'], { eachWeightKg: 0.45 }),
   ing('kale', 'Kale', 'produce', 'kg', [49, 4.3, 8.8, 0.9, 3.6], 7, true, ['kale', 'curly kale', 'lacinato kale', 'kale bunch']),
-  ing('green-beans', 'Green beans', 'produce', 'kg', [31, 1.8, 7.0, 0.2, 2.7], 7, true, ['green beans', 'green bean', 'string beans', 'fresh green beans']),
-  ing('corn-cobs', 'Corn on the cob', 'produce', 'each', [86, 3.3, 18.7, 1.4, 2.7], 5, true, ['corn', 'corn on the cob', 'corn cobs', 'sweet corn', 'corn cob'], { eachWeightKg: 0.2 }),
+  ing('green-beans', 'Green beans', 'produce', 'kg', [31, 1.8, 7.0, 0.2, 2.7], 7, true, ['green beans', 'green bean', 'string beans', 'fresh green beans'], { form: 'fresh', formGroup: 'vegetables' }),
+  ing('corn-cobs', 'Corn on the cob', 'produce', 'each', [86, 3.3, 18.7, 1.4, 2.7], 5, true, ['corn', 'corn on the cob', 'corn cobs', 'sweet corn', 'corn cob'], { eachWeightKg: 0.2, form: 'fresh', formGroup: 'vegetables' }),
   ing('celery', 'Celery', 'produce', 'kg', [16, 0.7, 3.0, 0.2, 1.6], 14, true, ['celery', 'celery stalks', 'celery bunch']),
   ing('asparagus', 'Asparagus', 'produce', 'kg', [20, 2.2, 3.9, 0.1, 2.1], 5, true, ['asparagus', 'asparagus bunch', 'fresh asparagus']),
-  ing('pears', 'Pears', 'produce', 'kg', [57, 0.4, 15.2, 0.1, 3.1], 21, true, ['pears', 'pear', 'bartlett pears', 'bosc pears']),
-  ing('mangoes', 'Mangoes', 'produce', 'each', [60, 0.8, 15.0, 0.4, 1.6], 7, true, ['mango', 'mangoes', 'mangos', 'ataulfo mango'], { eachWeightKg: 0.3 }),
-  ing('pineapple', 'Pineapple', 'produce', 'each', [50, 0.5, 13.1, 0.1, 1.4], 7, true, ['pineapple', 'pineapples', 'whole pineapple'], { eachWeightKg: 1.2 }),
+  ing('pears', 'Pears', 'produce', 'kg', [57, 0.4, 15.2, 0.1, 3.1], 21, true, ['pears', 'pear', 'bartlett pears', 'bosc pears'], { form: 'fresh', formGroup: 'fruit' }),
+  ing('mangoes', 'Mangoes', 'produce', 'each', [60, 0.8, 15.0, 0.4, 1.6], 7, true, ['mango', 'mangoes', 'mangos', 'ataulfo mango'], { eachWeightKg: 0.3, form: 'fresh', formGroup: 'fruit' }),
+  ing('pineapple', 'Pineapple', 'produce', 'each', [50, 0.5, 13.1, 0.1, 1.4], 7, true, ['pineapple', 'pineapples', 'whole pineapple'], { eachWeightKg: 1.2, form: 'fresh', formGroup: 'fruit' }),
   ing('jalapenos', 'Jalapeño peppers', 'produce', 'kg', [29, 0.9, 6.5, 0.4, 2.8], 14, true, ['jalapeno', 'jalapenos', 'jalapeño', 'jalapeños', 'jalapeno peppers']),
   ing('eggplant', 'Eggplant', 'produce', 'each', [25, 1.0, 5.9, 0.2, 3.0], 7, true, ['eggplant', 'eggplants', 'aubergine', 'globe eggplant'], { eachWeightKg: 0.3 }),
   ing('butternut-squash', 'Butternut squash', 'produce', 'kg', [45, 1.0, 11.7, 0.1, 2.0], 60, true, ['butternut squash', 'butternut', 'squash', 'butternut squash whole']),
@@ -272,14 +283,14 @@ const deli: Ingredient[] = [
 ];
 
 const frozen: Ingredient[] = [
-  ing('frozen-peas', 'Frozen peas', 'frozen', 'kg', [81, 5.4, 14.5, 0.4, 5.1], 365, true, ['frozen peas', 'frozen green peas', 'peas', 'green peas']),
-  ing('frozen-mixed-veg', 'Frozen mixed vegetables', 'frozen', 'kg', [65, 3.0, 13.0, 0.3, 4.0], 365, true, ['frozen mixed veg', 'frozen mixed vegetables', 'mixed vegetables', 'mixed veg', 'stir fry veg']),
-  ing('frozen-berries', 'Frozen mixed berries', 'frozen', 'kg', [50, 0.7, 12.0, 0.3, 3.5], 365, true, ['frozen berries', 'frozen mixed berries', 'frozen mixed berry', 'frozen strawberries', 'frozen blueberries']),
+  ing('frozen-peas', 'Frozen peas', 'frozen', 'kg', [81, 5.4, 14.5, 0.4, 5.1], 365, true, ['frozen peas', 'frozen green peas', 'peas', 'green peas'], { form: 'frozen', formGroup: 'vegetables' }),
+  ing('frozen-mixed-veg', 'Frozen mixed vegetables', 'frozen', 'kg', [65, 3.0, 13.0, 0.3, 4.0], 365, true, ['frozen mixed veg', 'frozen mixed vegetables', 'mixed vegetables', 'mixed veg', 'stir fry veg'], { form: 'frozen', formGroup: 'vegetables' }),
+  ing('frozen-berries', 'Frozen mixed berries', 'frozen', 'kg', [50, 0.7, 12.0, 0.3, 3.5], 365, true, ['frozen berries', 'frozen mixed berries', 'frozen mixed berry', 'frozen strawberries', 'frozen blueberries'], { form: 'frozen', formGroup: 'fruit' }),
   ing('edamame-frozen', 'Frozen shelled edamame', 'frozen', 'kg', [121, 11.9, 8.9, 5.2, 5.2], 365, true, ['edamame', 'frozen edamame', 'shelled edamame'], { allergens: ['soy'], protein: 'legume' }),
-  ing('frozen-broccoli', 'Frozen broccoli', 'frozen', 'kg', [35, 2.4, 6.6, 0.4, 3.3], 365, true, ['frozen broccoli', 'broccoli florets frozen', 'frozen broccoli florets']),
-  ing('frozen-corn', 'Frozen corn', 'frozen', 'kg', [86, 3.2, 19.0, 1.2, 2.7], 365, true, ['frozen corn', 'frozen sweet corn', 'corn kernels frozen']),
-  ing('frozen-spinach', 'Frozen spinach', 'frozen', 'kg', [23, 2.9, 3.6, 0.3, 2.2], 365, true, ['frozen spinach', 'chopped frozen spinach']),
-  ing('frozen-shrimp', 'Frozen shrimp', 'frozen', 'kg', [85, 20.1, 0, 0.5, 0], 365, false, ['frozen shrimp', 'frozen raw shrimp', 'frozen large shrimp'], { allergens: ['shellfish'], protein: 'seafood' }),
+  ing('frozen-broccoli', 'Frozen broccoli', 'frozen', 'kg', [35, 2.4, 6.6, 0.4, 3.3], 365, true, ['frozen broccoli', 'broccoli florets frozen', 'frozen broccoli florets'], { form: 'frozen', formGroup: 'vegetables' }),
+  ing('frozen-corn', 'Frozen corn', 'frozen', 'kg', [86, 3.2, 19.0, 1.2, 2.7], 365, true, ['frozen corn', 'frozen sweet corn', 'corn kernels frozen'], { form: 'frozen', formGroup: 'vegetables' }),
+  ing('frozen-spinach', 'Frozen spinach', 'frozen', 'kg', [23, 2.9, 3.6, 0.3, 2.2], 365, true, ['frozen spinach', 'chopped frozen spinach'], { form: 'frozen', formGroup: 'vegetables' }),
+  ing('frozen-shrimp', 'Frozen shrimp', 'frozen', 'kg', [85, 20.1, 0, 0.5, 0], 365, false, ['frozen shrimp', 'frozen raw shrimp', 'frozen large shrimp'], { allergens: ['shellfish'], protein: 'seafood', form: 'frozen', formGroup: 'fish' }),
   ing('ice-cream', 'Ice cream', 'frozen', 'l', [207, 3.5, 24.0, 11.0, 0.7], 60, true, ['ice cream', 'vanilla ice cream', 'chocolate ice cream'], { allergens: ['dairy', 'egg'] }),
 ];
 
@@ -301,8 +312,8 @@ const pantry: Ingredient[] = [
   ing('rolled-oats', 'Rolled oats', 'pantry', 'kg', [379, 13.2, 67.7, 6.5, 10.1], 730, true, ['oats', 'rolled oats', 'large flake oats', 'quick oats', 'old fashioned oats']),
   ing('quinoa', 'Quinoa', 'pantry', 'kg', [368, 14.1, 64.2, 6.1, 7.0], 730, true, ['quinoa', 'white quinoa', 'tri-color quinoa']),
   ing('all-purpose-flour', 'All-purpose flour', 'pantry', 'kg', [364, 10.3, 76.3, 1.0, 2.7], 365, true, ['flour', 'all purpose flour', 'all-purpose flour', 'unbleached flour'], { allergens: ['gluten'] }),
-  ing('canned-diced-tomatoes', 'Canned diced tomatoes', 'pantry', 'each', [24, 1.2, 4.7, 0.2, 1.2], 730, true, ['diced tomatoes', 'canned diced tomatoes', 'diced tomatoes 796 ml', 'stewed tomatoes', 'canned tomatoes'], { eachWeightKg: 0.796 }),
-  ing('tomato-paste', 'Tomato paste', 'pantry', 'each', [82, 4.3, 18.9, 0.5, 4.1], 730, true, ['tomato paste', 'tomato paste can', 'tomato paste 156 ml'], { eachWeightKg: 0.156 }),
+  ing('canned-diced-tomatoes', 'Canned diced tomatoes', 'pantry', 'each', [24, 1.2, 4.7, 0.2, 1.2], 730, true, ['diced tomatoes', 'canned diced tomatoes', 'diced tomatoes 796 ml', 'stewed tomatoes', 'canned tomatoes'], { eachWeightKg: 0.796, eachLabel: 'one can', form: 'canned', formGroup: 'tomatoes' }),
+  ing('tomato-paste', 'Tomato paste', 'pantry', 'each', [82, 4.3, 18.9, 0.5, 4.1], 730, true, ['tomato paste', 'tomato paste can', 'tomato paste 156 ml'], { eachWeightKg: 0.156, form: 'canned', formGroup: 'tomatoes' }),
   ing('coconut-milk', 'Canned coconut milk', 'pantry', 'each', [197, 2.3, 2.8, 21.3, 0], 730, true, ['coconut milk', 'canned coconut milk', 'coconut milk 400 ml', 'coconut milk can'], { eachWeightKg: 0.4 }),
   ing('soy-sauce', 'Soy sauce', 'pantry', 'l', [53, 8.1, 4.9, 0.6, 0.8], 730, true, ['soy sauce', 'soya sauce', 'light soy sauce', 'soy'], { allergens: ['soy', 'gluten'] }),
   ing('peanut-butter', 'Peanut butter', 'pantry', 'kg', [588, 25.1, 20.0, 50.4, 6.0], 365, true, ['peanut butter', 'creamy peanut butter', 'smooth peanut butter', 'crunchy peanut butter'], { allergens: ['peanut'] }),
@@ -327,7 +338,7 @@ const pantry: Ingredient[] = [
   ing('maple-syrup', 'Maple syrup', 'pantry', 'l', [260, 0, 67.0, 0.1, 0], 3650, true, ['maple syrup', 'pure maple syrup', 'maple']),
   ing('chocolate-chips', 'Chocolate chips', 'pantry', 'kg', [479, 4.2, 63.0, 25.0, 6.0], 365, true, ['chocolate chips', 'semi-sweet chocolate chips', 'dark chocolate chips', 'chocolate chip'], { allergens: ['dairy', 'soy'] }),
   ing('tortilla-chips', 'Tortilla chips', 'pantry', 'kg', [489, 7.0, 63.0, 23.0, 5.0], 180, true, ['tortilla chips', 'corn chips', 'nacho chips']),
-  ing('canned-corn', 'Canned corn', 'pantry', 'each', [86, 3.2, 19.0, 1.2, 2.7], 730, true, ['canned corn', 'whole kernel corn', 'corn can', 'kernel corn'], { eachWeightKg: 0.341 }),
+  ing('canned-corn', 'Canned corn', 'pantry', 'each', [86, 3.2, 19.0, 1.2, 2.7], 730, true, ['canned corn', 'whole kernel corn', 'corn can', 'kernel corn'], { eachWeightKg: 0.341, form: 'canned', formGroup: 'vegetables' }),
   ing('hot-sauce', 'Hot sauce', 'pantry', 'l', [11, 0.5, 1.9, 0.4, 0.5], 1095, true, ['hot sauce', 'sriracha', 'franks hot sauce', 'chili sauce']),
 ];
 

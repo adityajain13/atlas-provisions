@@ -12,6 +12,7 @@ import {
 } from '@provisions/shared';
 import { headlineName } from './headline';
 import { DAY_SHORT } from './labels';
+import { neededQuantity, packLineQuantity } from './quantity';
 
 // Turn a saved MealPlan into the shapes the Week and List screens already draw.
 
@@ -84,6 +85,9 @@ export type ViewItem = {
   price: number;
   note?: { kind: 'match' | 'used'; text: string };
   elsewhere?: string; // unpriced items: where the cheapest enabled store sells it
+  estimate?: { date: string }; // the price is the household's last receipt price, from this day
+  pinnedTo?: string; // bought at this store because an item rule pins it there
+  priceUnknown?: boolean; // pinned to a store with no known price: listed there, not priced
 };
 
 const SLOT_ORDER: Record<Slot, number> = { breakfast: 0, lunch: 1, dinner: 2 };
@@ -275,12 +279,6 @@ const LIST_CATEGORY: Record<string, ListCategory> = {
   household: 'household',
 };
 
-function formatSize(qty: number, unit: BaseUnit): string {
-  if (unit === 'kg') return qty < 1 ? `${Math.round(qty * 1000)} g` : `${Number(qty.toFixed(2))} kg`;
-  if (unit === 'l') return qty < 1 ? `${Math.round(qty * 1000)} mL` : `${Number(qty.toFixed(2))} L`;
-  return qty === 1 ? '1 each' : `${Number(qty.toFixed(2))} ct`;
-}
-
 const PRICE_UNIT: Record<BaseUnit, string> = { kg: 'kg', l: 'L', each: 'each' };
 
 function mealLabel(plan: MealPlan, id: string): string | null {
@@ -298,19 +296,28 @@ function usedNote(plan: MealPlan, item: ListItem): string | undefined {
   return labels.length > 3 ? `Used in ${shown}, and ${labels.length - 3} more` : `Used in ${shown}`;
 }
 
+/** "Oct 28", from a YYYY-MM-DD date. */
+export function monthDay(iso: string): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`));
+}
+
 export function planToList(plan: MealPlan): { weekOf: string; stores: string[]; items: ViewItem[] } {
   const items: ViewItem[] = plan.list.map((item) => {
-    const base = INGREDIENT_BY_ID[item.ingredientId]?.baseUnit ?? 'each';
-    const size = formatSize(item.packQty, base);
-    // Unpriced items have no packs, so their quantity is what the plan needs.
+    const catalog = INGREDIENT_BY_ID[item.ingredientId];
+    const base = catalog?.baseUnit ?? 'each';
+    // Unpriced and price-unknown items have no packs, so their quantity is what the plan needs.
     const qty =
-      item.store === 'Unpriced'
+      item.store === 'Unpriced' || item.priceUnknown
         ? item.needed
-          ? formatSize(item.needed, base)
+          ? neededQuantity(item.needed, base, catalog?.eachLabel)
           : ''
-        : item.packs > 1
-          ? `${item.packs} × ${size}`
-          : size;
+        : packLineQuantity({
+            unit: base,
+            packs: item.packs,
+            packQty: item.packQty,
+            packPrice: item.packPrice,
+            eachLabel: catalog?.eachLabel,
+          });
     const note = item.priceMatch
       ? {
           kind: 'match' as const,
@@ -332,6 +339,9 @@ export function planToList(plan: MealPlan): { weekOf: string; stores: string[]; 
       price: item.total,
       ...(note ? { note } : {}),
       ...(elsewhere ? { elsewhere } : {}),
+      ...(item.estimate ? { estimate: { date: item.estimate.date } } : {}),
+      ...(item.pinned ? { pinnedTo: item.store } : {}),
+      ...(item.priceUnknown ? { priceUnknown: true } : {}),
     };
   });
 

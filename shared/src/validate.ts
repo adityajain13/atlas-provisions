@@ -1,13 +1,16 @@
 import { CATEGORY_ORDER, INGREDIENT_BY_ID, type Category } from './catalog';
 import { DAY_LONG, DAYS, isWeeknight, type Day, type Slot } from './calendar';
 import type { FixedCost } from './fixed';
-import type { Household } from './index';
+import type { Household, ItemRule } from './index';
 import type { ListItem, MealPlan, PlannedMeal, RawMeal, SlotCell, ValidationIssue } from './plan';
 import type { MatchedItem } from './match';
 import { cheapest, collectOffers, packsFor, type Offer } from './offers';
 import { formatUseBy, subtractPantry, type PantryItem } from './pantry';
 import type { Deal } from './scoring';
-import { nameHasWord } from './itemRules';
+import { alwaysBuyId, nameHasWord } from './itemRules';
+import type { StorePreference } from './stores';
+import { avoidedDish } from './dishes';
+import { allowedForms, FORM_GROUP_LABEL, FORM_LABEL, formGroupOf } from './forms';
 import { nutrientTotals, round2, unitLabel } from './units';
 
 const MACRO_DAYS = 7;
@@ -88,13 +91,82 @@ function subsetsUpTo<T>(items: T[], maxSize: number): T[][] {
   return out;
 }
 
+/** An item rule that buys one ingredient at one store whenever it is on the list. It does not put the item on the list. */
+export interface Pin {
+  ingredientId: string;
+  store: string;
+}
+
+/**
+ * The pins in the household's item rules: an always-buy rule with a store, or a 'pin' rule. The first rule for an
+ * ingredient wins. A rule with no catalogue ingredient to name is left out.
+ */
+export function pinsOf(rules: ItemRule[]): Pin[] {
+  const out: Pin[] = [];
+  const seen = new Set<string>();
+  for (const r of rules) {
+    if (!r.store || (r.rule !== 'always' && r.rule !== 'pin')) continue;
+    const ingredientId = r.ingredientId ?? alwaysBuyId(r.name);
+    if (!ingredientId || seen.has(ingredientId)) continue;
+    seen.add(ingredientId);
+    out.push({ ingredientId, store: r.store });
+  }
+  return out;
+}
+
+/** The store-choice settings and extra prices buildList takes. Each one is optional, so a call without them is the old behaviour. */
+export interface BuildListOptions {
+  preference?: StorePreference; // default: cheapest
+  pins?: Pin[];
+  estimates?: Offer[]; // receipt prices for store and ingredient pairs no flyer covers
+}
+
+const CHEAPEST: StorePreference = { mode: 'cheapest', minSaving: 0 };
+const CENTS = 1e-9;
+
+/** What an offer costs for a quantity: the packs needed, at the pack price. */
+const costOf = (offer: Offer, qty: number) => packsFor(qty, offer.packQty) * offer.packPrice;
+
+/**
+ * The offer one item takes from the stores in a subset.
+ * - cheapest: the lowest unit price (the old rule).
+ * - prefer: the store ranked highest (earliest in `stores`) takes the item, unless the cheapest offer for this item
+ *   saves at least minSaving dollars against it. The saving is measured on the item's packs, not per unit.
+ */
+function pickOffer(options: Offer[], qty: number, stores: string[], pref: StorePreference): Offer | undefined {
+  if (options.length === 0) return undefined;
+  if (pref.mode === 'cheapest') return cheapest(options);
+  const rank = (o: Offer) => stores.indexOf(o.store);
+  const top = options.reduce((best, o) => (rank(o) < rank(best) ? o : best));
+  const low = options.reduce((best, o) => {
+    const c = costOf(o, qty);
+    const b = costOf(best, qty);
+    return c < b - CENTS || (Math.abs(c - b) <= CENTS && rank(o) < rank(best)) ? o : best;
+  });
+  if (low.store !== top.store && costOf(low, qty) <= costOf(top, qty) - pref.minSaving + CENTS) return low;
+  return top;
+}
+
+interface StoreCandidate {
+  uncovered: number;
+  total: number;
+  size: number;
+  rankSum: number;
+  picks: Map<string, Offer>;
+}
+
 /**
  * Pick one store per ingredient, minimising stores used and cost.
  *
- * Every subset of the enabled stores up to maxStores is tried. Each ingredient takes the cheapest
- * store in the subset that sells it. An ingredient no store in the subset sells is left out
- * (uncovered), never bought from a store outside the subset, so the list never uses more than
- * maxStores stores. Ranking: fewest uncovered ingredients, then lowest total, then fewest stores.
+ * Every subset of the enabled stores up to maxStores is tried, and every subset must include the `required` stores
+ * (the stores pins name). Each ingredient takes its offer from the subset by pickOffer. An ingredient no store in
+ * the subset sells is left out (uncovered), never bought from a store outside the subset, so the list never uses
+ * more than maxStores stores. Required stores over the limit become the only subset.
+ *
+ * cheapest: fewest uncovered, then lowest total, then fewest stores.
+ * prefer: fewest uncovered, then the subsets whose total is within minSaving of the cheapest (the cheapest itself
+ * always counts). Among those, the lowest rank sum wins, where a store's rank is its place in `stores`. Then lowest
+ * total, then fewest stores. A lower-ranked set of stores therefore wins only when it saves at least minSaving.
  */
 function assignStores(
   ids: string[],
@@ -102,33 +174,56 @@ function assignStores(
   offers: Map<string, Offer[]>,
   stores: string[],
   maxStores: number,
+  pref: StorePreference,
+  required: string[],
 ): Map<string, Offer> {
-  let best: { uncovered: number; total: number; size: number; picks: Map<string, Offer> } | null = null;
-  for (const subset of subsetsUpTo(stores, Math.max(1, maxStores))) {
+  const cap = Math.max(1, maxStores);
+  const subsets =
+    required.length > cap
+      ? [required]
+      : subsetsUpTo(stores, cap).filter((sub) => required.every((r) => sub.includes(r)));
+
+  const cands: StoreCandidate[] = subsets.map((subset) => {
     const picks = new Map<string, Offer>();
     let uncovered = 0;
     let total = 0;
     for (const id of ids) {
-      const all = offers.get(id) ?? [];
-      const pick = cheapest(all.filter((o) => subset.includes(o.store)));
+      const q = qty.get(id) ?? 0;
+      const pick = pickOffer((offers.get(id) ?? []).filter((o) => subset.includes(o.store)), q, stores, pref);
       if (!pick) {
         uncovered++;
         continue;
       }
       picks.set(id, pick);
-      total += packsFor(qty.get(id) ?? 0, pick.packQty) * pick.packPrice;
+      total += costOf(pick, q);
     }
-    const cand = { uncovered, total, size: subset.length, picks };
-    if (
-      best === null ||
-      cand.uncovered < best.uncovered ||
-      (cand.uncovered === best.uncovered &&
-        (cand.total < best.total - 1e-9 || (Math.abs(cand.total - best.total) <= 1e-9 && cand.size < best.size)))
-    ) {
-      best = cand;
-    }
+    return {
+      uncovered,
+      total,
+      size: subset.length,
+      rankSum: subset.reduce((n, s) => n + stores.indexOf(s), 0),
+      picks,
+    };
+  });
+  if (cands.length === 0) return new Map();
+
+  const fewest = Math.min(...cands.map((c) => c.uncovered));
+  const pool = cands.filter((c) => c.uncovered === fewest);
+  const byTotalThenSize = (a: StoreCandidate, b: StoreCandidate) =>
+    Math.abs(a.total - b.total) > CENTS ? a.total - b.total : a.size - b.size;
+
+  let best: StoreCandidate;
+  if (pref.mode === 'cheapest') {
+    best = pool.reduce((a, b) => (byTotalThenSize(b, a) < 0 ? b : a));
+  } else {
+    const floor = Math.min(...pool.map((c) => c.total));
+    const acceptable = pool.filter((c) => c.total - floor <= CENTS || c.total - floor < pref.minSaving - CENTS);
+    best = acceptable.reduce((a, b) => {
+      if (b.rankSum !== a.rankSum) return b.rankSum < a.rankSum ? b : a;
+      return byTotalThenSize(b, a) < 0 ? b : a;
+    });
   }
-  return best?.picks ?? new Map();
+  return best.picks;
 }
 
 /**
@@ -145,6 +240,13 @@ function assignStores(
  * Store cap: never more than maxStores stores. An item outside the chosen stores is Unpriced, and
  * carries cheapestElsewhere when an enabled store sells it.
  *
+ * Pins: a pinned ingredient on the list is bought at its store, which counts toward maxStores. With no known price
+ * there, it is listed under that store with priceUnknown. A pin to a store that is turned off is ignored here, and
+ * validate reports it.
+ *
+ * Estimates: receipt prices (options.estimates) take part like flyer prices, but a flyer price for the same store
+ * always wins.
+ *
  * Sort: store (highest subtotal first, Unpriced last), then CATEGORY_ORDER, then name.
  */
 export function buildList(
@@ -156,9 +258,11 @@ export function buildList(
   maxStores: number,
   priceMatchStores: string[] = [],
   pantry: PantryItem[] = [],
+  options: BuildListOptions = {},
 ): ListItem[] {
   const storeSet = new Set(stores);
-  const offers = collectOffers(deals, matched, (s) => storeSet.has(s));
+  const offers = collectOffers(deals, matched, (s) => storeSet.has(s), options.estimates ?? []);
+  const pref = options.preference ?? CHEAPEST;
 
   const qty = new Map<string, number>();
   const usedIn = new Map<string, Set<string>>();
@@ -181,12 +285,46 @@ export function buildList(
   }
 
   const needed = [...qty.keys()].filter((id) => (qty.get(id) ?? 0) > 0);
-  const priced = needed.filter((id) => (offers.get(id)?.length ?? 0) > 0);
-  const picks = assignStores(priced, qty, offers, stores, maxStores);
-  const chosen = new Set([...picks.values()].map((o) => o.store));
+  const pinStore = new Map<string, string>();
+  for (const p of options.pins ?? []) {
+    if (storeSet.has(p.store) && !pinStore.has(p.ingredientId)) pinStore.set(p.ingredientId, p.store);
+  }
+  const pinned = needed.filter((id) => pinStore.has(id));
+  const pinnedStores = [...new Set(pinned.map((id) => pinStore.get(id)!))];
+  const priced = needed.filter((id) => !pinStore.has(id) && (offers.get(id)?.length ?? 0) > 0);
+  const picks = assignStores(priced, qty, offers, stores, maxStores, pref, pinnedStores);
+  const chosen = new Set([...picks.values()].map((o) => o.store).concat(pinnedStores));
 
   const items: ListItem[] = [];
-  const unpriced: string[] = needed.filter((id) => !picks.has(id));
+  for (const id of pinned) {
+    const store = pinStore.get(id)!;
+    const catalog = INGREDIENT_BY_ID[id];
+    const base = {
+      ingredientId: id,
+      name: catalog?.name ?? id,
+      category: (catalog?.category ?? 'pantry') as Category,
+      usedIn: [...(usedIn.get(id) ?? [])],
+      pinned: true,
+    };
+    const q = qty.get(id) ?? 0;
+    const offer = (offers.get(id) ?? []).find((o) => o.store === store);
+    if (!offer) {
+      items.push({ ...base, store, packs: 0, packQty: 0, packPrice: 0, total: 0, needed: Number(q.toFixed(3)), priceUnknown: true });
+      continue;
+    }
+    const packs = packsFor(q, offer.packQty);
+    items.push({
+      ...base,
+      store,
+      packs,
+      packQty: offer.packQty,
+      packPrice: offer.packPrice,
+      total: round2(packs * offer.packPrice),
+      ...(offer.estimate ? { estimate: offer.estimate } : {}),
+    });
+  }
+
+  const unpriced: string[] = needed.filter((id) => !pinStore.has(id) && !picks.has(id));
   for (const id of priced) {
     const pick = picks.get(id);
     if (!pick) continue;
@@ -202,6 +340,7 @@ export function buildList(
       packPrice: pick.packPrice,
       total: round2(packs * pick.packPrice),
       usedIn: [...(usedIn.get(id) ?? [])],
+      ...(pick.estimate ? { estimate: pick.estimate } : {}),
     };
     if (priceMatchStores.includes(pick.store)) {
       const other = cheapest((offers.get(id) ?? []).filter((o) => !chosen.has(o.store)));
@@ -276,6 +415,8 @@ export interface ValidateContext {
   recentDinnerNames: string[];
   useFirst?: { ingredientId: string; expiresOn: string }[]; // pantry stock due soon, when use-it-up is on
   neverMeals?: string[]; // meal names rated 'never'
+  formBlocked?: ReadonlySet<string>; // ingredient ids whose form the household does not keep
+  avoidDishes?: string[]; // dish words the household does not want, as typed
 }
 
 function proteinOf(meal: PlannedMeal): string | undefined {
@@ -290,6 +431,8 @@ function checkIngredients(plan: MealPlan, ctx: ValidateContext): ValidationIssue
   const out: ValidationIssue[] = [];
   for (const meal of plan.meals) {
     for (const ing of meal.ingredients) {
+      // A form the household does not keep is reported by checkForms, not as an unknown ingredient.
+      if (ctx.formBlocked?.has(ing.ingredientId)) continue;
       if (!ctx.available.has(ing.ingredientId)) {
         out.push({
           check: 'unknown-ingredient',
@@ -305,6 +448,47 @@ function checkIngredients(plan: MealPlan, ctx: ValidateContext): ValidationIssue
         });
       }
     }
+  }
+  return out;
+}
+
+/** "fresh", "fresh or frozen", "fresh, frozen or canned". */
+const orList = (words: string[]) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`);
+
+/** A planned ingredient in a form the household does not keep ("canned tuna" when canned fish is off). */
+function checkForms(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  const blocked = ctx.formBlocked;
+  if (!blocked || blocked.size === 0) return [];
+  const out: ValidationIssue[] = [];
+  for (const meal of plan.meals) {
+    for (const ing of meal.ingredients) {
+      if (!blocked.has(ing.ingredientId)) continue;
+      const info = INGREDIENT_BY_ID[ing.ingredientId];
+      const group = formGroupOf(ing.ingredientId);
+      if (!info?.form || !group) continue;
+      const kept = allowedForms(ctx.household.forms, group).map((f) => FORM_LABEL[f].toLowerCase());
+      const hint = kept.length > 0 ? ` Use ${orList(kept)} instead.` : '';
+      out.push({
+        check: 'form',
+        severity: 'error',
+        message: `"${meal.name}" uses ${info.name}, which is ${FORM_LABEL[info.form].toLowerCase()}, and you don't keep that form of ${FORM_GROUP_LABEL[group].toLowerCase()}.${hint}`,
+      });
+    }
+  }
+  return out;
+}
+
+/** A meal whose name is a dish the household does not want ("Coleslaw" when "slaw" is avoided). */
+function checkAvoidDishes(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  const out: ValidationIssue[] = [];
+  for (const meal of plan.meals) {
+    const word = avoidedDish(meal.name, ctx.avoidDishes);
+    if (word === undefined) continue;
+    out.push({
+      check: 'avoid-dish',
+      severity: 'error',
+      message: `Replace ${meal.name}: it's a ${word} dish, which you don't want.`,
+    });
   }
   return out;
 }
@@ -642,11 +826,50 @@ function checkStoreCap(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] 
   ];
 }
 
+/**
+ * Pins the list cannot follow: a pinned store that is turned off, and more pinned stores than the household allows.
+ * A pinned item still on the list is named; the others are not in this week's plan.
+ */
+function checkPins(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  const pins = pinsOf(ctx.household.itemRules);
+  if (pins.length === 0) return [];
+  const enabled = new Set(ctx.household.stores.filter((s) => s.enabled).map((s) => s.name));
+  const listed = new Map(plan.list.map((i) => [i.ingredientId, i]));
+  const out: ValidationIssue[] = [];
+  const pinnedStores = new Set<string>();
+  for (const pin of pins) {
+    const item = listed.get(pin.ingredientId);
+    if (!item) continue;
+    if (!enabled.has(pin.store)) {
+      // "Eggs are pinned to Costco", "Canned tuna is pinned to Costco": the verb follows the name's plural.
+      const verb = /s$/i.test(item.name) ? 'are' : 'is';
+      out.push({
+        check: 'pin',
+        severity: 'warning',
+        message: `${item.name} ${verb} pinned to ${pin.store}, which is turned off. Turn ${pin.store} on, or remove the pin.`,
+      });
+      continue;
+    }
+    pinnedStores.add(pin.store);
+  }
+  const m = ctx.household.maxStores;
+  if (pinnedStores.size > m) {
+    out.push({
+      check: 'pin',
+      severity: 'warning',
+      message: `Pins use ${pinnedStores.size} stores, more than your limit of ${m}. Remove a pin, or raise the limit.`,
+    });
+  }
+  return out;
+}
+
 /** Every check on a plan. Errors make the planner retry. Warnings are shown to the user. */
 export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   return [
     ...checkIngredients(plan, ctx),
     ...checkNeverNames(plan, ctx),
+    ...checkForms(plan, ctx),
+    ...checkAvoidDishes(plan, ctx),
     ...checkAllergens(plan, ctx),
     ...checkCoverage(plan, ctx),
     ...checkBudget(plan),
@@ -657,6 +880,7 @@ export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[
     ...checkVariety(plan, ctx),
     ...checkUnpriced(plan),
     ...checkStoreCap(plan, ctx),
+    ...checkPins(plan, ctx),
     ...checkUseItUp(plan, ctx),
     ...checkNeverAgain(plan, ctx),
   ];

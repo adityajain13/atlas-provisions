@@ -104,6 +104,11 @@ export interface ListItem {
   custom?: boolean;
   label?: string; // the name as typed, for custom items
   qtyText?: string; // the quantity as typed, e.g. "750 g", for custom items
+  // The price is an estimate: the household's last receipt price at this store, not a flyer price this week.
+  estimate?: { basis: 'receipt'; date: string };
+  // Pinned to this store by an item rule ("Eggs at Costco"). Its price is unknown when no store offer is known.
+  pinned?: boolean;
+  priceUnknown?: boolean; // pinned, and no price is known at its store: listed under the store, not priced
 }
 
 export interface ValidationIssue {
@@ -121,7 +126,10 @@ export interface ValidationIssue {
     | 'equipment'
     | 'use-it-up'
     | 'never-again'
+    | 'form'
+    | 'avoid-dish'
     | 'store-cap'
+    | 'pin'
     | 'prep'
     | 'prep-timing'
     | 'prices';
