@@ -1,7 +1,8 @@
 // The Loblaw-family site client, against a fake fetch: the headers, the location list and its fallback, the error
 // kinds, and the price shapes a search result can come back in. No network.
 import { describe, expect, it, vi } from 'vitest';
-import { listLocations, normaliseLocation, normaliseProduct, searchProducts, siteHeaders, PCX_API_KEY } from './pcexpress';
+import { beforeEach } from 'vitest';
+import { listLocations, normaliseLocation, normaliseProduct, PCX_API_KEY, PCX_BANNER_IDS, resetAnsweringIds, searchIdsFor, searchLocations, searchProducts, siteHeaders } from './pcexpress';
 import { comparisonPerBase, matchLocations, parseSiteSize, pickSiteResult, sitePackPrice } from './sitePrices';
 import { INGREDIENT_BY_ID } from '@provisions/shared';
 
@@ -273,5 +274,109 @@ describe('package size to unit price', () => {
     );
     expect(picked?.product.code).toBe('2');
     expect(picked?.pricePerUnit).toBeCloseTo(12);
+  });
+});
+
+describe('banner ids', () => {
+  beforeEach(() => resetAnsweringIds());
+
+  it('sends Loblaws as loblaw, and the other banners under their own ids', () => {
+    expect(PCX_BANNER_IDS.loblaws).toBe('loblaw');
+    expect(searchIdsFor('loblaws')).toEqual(['loblaw', 'loblaws']);
+    expect(searchIdsFor('tandt')).toEqual(['tandt']);
+    expect(searchIdsFor('independent')).toEqual(['independent']);
+  });
+
+  it('lists the locations of Loblaws under loblaw', async () => {
+    const { fn, calls } = fakeFetch(json({ pickupLocations: [{ storeId: '5', name: 'Loblaws Yonge' }] }));
+    await listLocations('loblaws', fn);
+    expect(calls[0]!.url).toBe('https://api.pcexpress.ca/pcx-bff/api/v1/pickup-locations?bannerIds=loblaw');
+    expect((calls[0]!.init.headers as Record<string, string>)['Site-Banner']).toBe('loblaw');
+  });
+
+  it('retries a product search as loblaws after a 400, and keeps the id that answered', async () => {
+    const product = { name: 'Large Eggs', prices: { price: { value: 4.99 } } };
+    const { fn, calls } = fakeFetch(new Response('bad banner', { status: 400 }), json({ results: [product] }), json({ results: [product] }));
+    const first = await searchProducts('loblaws', '1234', 'eggs', fn);
+    expect(first.ok).toBe(true);
+    expect(calls.map((c) => JSON.parse(String(c.init.body)).banner)).toEqual(['loblaw', 'loblaws']);
+    await searchProducts('loblaws', '1234', 'eggs', fn);
+    expect(JSON.parse(String(calls[2]!.init.body)).banner).toBe('loblaws');
+    expect(calls).toHaveLength(3);
+  });
+
+  it('does not retry a product search on other errors', async () => {
+    const { fn, calls } = fakeFetch(new Response('denied', { status: 401 }));
+    expect(await searchProducts('loblaws', '1234', 'eggs', fn)).toMatchObject({ ok: false, error: { kind: 'auth' } });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('location listing fallbacks', () => {
+  beforeEach(() => resetAnsweringIds());
+  const LOC = { storeId: '77', name: 'T&T Mississauga' };
+
+  it('goes on to bannerIds with isShoppable when the first two give nothing', async () => {
+    const { fn, calls } = fakeFetch(new Response('bad', { status: 400 }), json({ pickupLocations: [] }), json({ locations: [LOC] }));
+    const got = await listLocations('tandt', fn);
+    expect(got).toEqual({ ok: true, value: [{ storeId: '77', name: 'T&T Mississauga' }] });
+    expect(calls[2]!.url).toBe('https://api.pcexpress.ca/pcx-bff/api/v1/pickup-locations?bannerIds=tandt&isShoppable=true');
+  });
+
+  it('reads a root array, .pickupLocations, .locations and .results', async () => {
+    for (const body of [[LOC], { pickupLocations: [LOC] }, { locations: [LOC] }, { results: [LOC] }]) {
+      const got = await listLocations('tandt', fakeFetch(json(body)).fn);
+      expect(got).toMatchObject({ ok: true, value: [{ storeId: '77' }] });
+    }
+  });
+
+  it('returns the first failure when every request fails', async () => {
+    const { fn, calls } = fakeFetch(
+      new Response('bad', { status: 400 }),
+      new Response('bad', { status: 400 }),
+      new Response('bad', { status: 400 }),
+    );
+    expect(await listLocations('tandt', fn)).toMatchObject({ ok: false, error: { kind: 'network', status: 400 } });
+    expect(calls).toHaveLength(3);
+  });
+
+  it('stops at once when the site asks for a sign-in', async () => {
+    const { fn, calls } = fakeFetch(new Response('no', { status: 403 }));
+    expect(await listLocations('loblaws', fn)).toMatchObject({ ok: false, error: { kind: 'auth' } });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('searchLocations', () => {
+  const LOCS = [
+    { storeId: '1', name: 'T&T Mississauga', line1: '3600 Hurontario St', city: 'Mississauga', postalCode: 'L5A3V7' },
+    { storeId: '2', name: 'T&T Scarborough', line1: '3850 Finch Ave E', city: 'Scarborough', postalCode: 'M1S5H5' },
+    { storeId: '3', name: 'T&T Markham', line1: '7161 Woodbine Ave', city: 'Markham', postalCode: 'L3R0Y3' },
+  ];
+
+  it('matches a postal code with or without the space, in any case', () => {
+    expect(searchLocations(LOCS, 'tandt', 'M1S 5H5').map((r) => r.storeId)).toEqual(['2']);
+    expect(searchLocations(LOCS, 'tandt', 'm1s5h5').map((r) => r.storeId)).toEqual(['2']);
+    expect(searchLocations(LOCS, 'tandt', 'M1S5H').map((r) => r.storeId)).toEqual(['2']);
+  });
+
+  it('matches every word against the name, street, city or postal code', () => {
+    expect(searchLocations(LOCS, 'tandt', 'finch scarborough').map((r) => r.storeId)).toEqual(['2']);
+    expect(searchLocations(LOCS, 'tandt', 'hurontario').map((r) => r.storeId)).toEqual(['1']);
+    expect(searchLocations(LOCS, 'tandt', 'toronto')).toEqual([]);
+    expect(searchLocations(LOCS, 'tandt', '   ')).toEqual([]);
+  });
+
+  it('puts the postal code matches first when the query looks like a postal code', () => {
+    const more = [{ storeId: '9', name: 'T&T M1S Pilot', postalCode: 'L3R0Y3' }, ...LOCS];
+    expect(searchLocations(more, 'tandt', 'M1S').map((r) => r.storeId)).toEqual(['2', '9']);
+  });
+
+  it('labels each result with the chain, street and city', () => {
+    expect(searchLocations(LOCS, 'tandt', 'markham')[0]).toEqual({
+      storeId: '3',
+      label: 'T&T Supermarket · 7161 Woodbine Ave, Markham',
+      postalCode: 'L3R0Y3',
+    });
   });
 });

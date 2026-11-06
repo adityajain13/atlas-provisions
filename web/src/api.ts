@@ -1,6 +1,9 @@
 import {
   ChecksSchema,
   HouseholdSchema,
+  type FeedbackSummary,
+  type IngredientFeedbackInput,
+  type WeekFeedback,
   type AccessEntry,
   type AccessView,
   type MeView,
@@ -456,4 +459,46 @@ export async function revokeAccess(email: string, deleteHousehold: boolean): Pro
     await authFetch(`${BASE}/access/${encodeURIComponent(email)}${query}`, { method: 'DELETE' }),
     (raw) => raw as { householdDeleted: boolean },
   );
+}
+
+// ---- Ingredient changes: skipped or replaced in a planned meal, and what the planner has learned ----
+
+/** The changes saved for one week, by meal id and ingredient id. */
+export async function getWeekFeedback(weekOf: string): Promise<WeekFeedback> {
+  return json(await authFetch(`${BASE}/plan/${weekOf}/ingredient-feedback`), (raw) => raw as WeekFeedback);
+}
+
+/** Marks one ingredient in one planned meal as skipped or replaced. */
+export async function saveIngredientFeedback(
+  weekOf: string,
+  mealId: string,
+  ingredientId: string,
+  input: IngredientFeedbackInput,
+): Promise<void> {
+  await ensureOk(
+    await authFetch(`${BASE}/plan/${weekOf}/meals/${encodeURIComponent(mealId)}/ingredients/${ingredientId}/feedback`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+/** Clears one ingredient's change in one planned meal: used as planned. */
+export async function clearIngredientFeedback(weekOf: string, mealId: string, ingredientId: string): Promise<void> {
+  await ensureOk(
+    await authFetch(`${BASE}/plan/${weekOf}/meals/${encodeURIComponent(mealId)}/ingredients/${ingredientId}/feedback`, {
+      method: 'DELETE',
+    }),
+  );
+}
+
+/** What the planner has learned from the last 90 days: each ingredient's skips and replacements. */
+export async function getIngredientFeedback(): Promise<FeedbackSummary> {
+  return json(await authFetch(`${BASE}/ingredient-feedback`), (raw) => raw as FeedbackSummary);
+}
+
+/** Forgets an ingredient's changes in every week. */
+export async function forgetIngredientFeedback(ingredientId: string): Promise<void> {
+  await ensureOk(await authFetch(`${BASE}/ingredient-feedback/${ingredientId}`, { method: 'DELETE' }));
 }

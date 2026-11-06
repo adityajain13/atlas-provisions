@@ -20,8 +20,10 @@ import {
   UNITS,
   VARIETY_RULES,
   newId,
+  formatPostalCode,
   normalizePostalCode,
   usageLine,
+  type FeedbackSummary,
   type Day,
   type FixedMeal,
   type FormGroupKey,
@@ -44,8 +46,10 @@ import { AppearanceControl } from '../components/Appearance';
 import {
   cancelInvite,
   errorMessage,
+  forgetIngredientFeedback,
   getAccess,
   getHousehold,
+  getIngredientFeedback,
   getMe,
   getMembers,
   getUsage,
@@ -199,12 +203,14 @@ export default function HouseholdScreen() {
             <FixedMealsSection h={h} update={update} />
             <ItemRulesSection h={h} update={update} />
             <DishesSection h={h} update={update} />
+            <LearnedSection />
           </div>
           <div className="lg:flex lg:flex-col lg:gap-12">
             <AllergiesSection h={h} />
             <EquipmentSection h={h} update={update} />
             <FormsSection h={h} update={update} />
             <VarietySection h={h} update={update} />
+            <BudgetSection h={h} update={update} />
             <StoresSection h={h} update={update} />
           </div>
         </div>
@@ -2038,17 +2044,20 @@ function AddCustomStore({
   );
 }
 
-/** Postal code for finding flyers. Only a complete code is saved; the stored form is uppercase, no space. */
+/** Postal code for finding flyers. Only a complete code is saved, as "M5T 1R5": uppercase, with the space. */
 function PostalCodeField({ h, update }: { h: Household; update: Update }) {
-  const [text, setText] = useState(h.postalCode ?? '');
+  const [text, setText] = useState(formatPostalCode(h.postalCode ?? '') ?? h.postalCode ?? '');
   const invalid = text.trim() !== '' && normalizePostalCode(text) === null;
 
   function onChange(value: string) {
+    const formatted = formatPostalCode(value);
+    if (formatted) {
+      setText(formatted);
+      update((prev) => (prev.postalCode === formatted ? prev : { ...prev, postalCode: formatted }));
+      return;
+    }
     setText(value);
-    const code = normalizePostalCode(value);
-    if (code) {
-      update((prev) => (prev.postalCode === code ? prev : { ...prev, postalCode: code }));
-    } else if (value.trim() === '') {
+    if (value.trim() === '') {
       update((prev) => {
         const next = { ...prev };
         delete next.postalCode;
@@ -2405,7 +2414,7 @@ function StorageSection({ h, update }: { h: Household; update: Update }) {
       <ul className="mt-4">
         <li>
           <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-4 border-b border-line2">
-            <span className="text-[15px] text-paper">Freezer</span>
+            <span className="text-[15px] text-paper">Freezer space</span>
             <input
               type="checkbox"
               role="switch"
@@ -2417,13 +2426,25 @@ function StorageSection({ h, update }: { h: Household; update: Update }) {
         </li>
         <li>
           <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-4 border-b border-line2">
-            <span className="text-[15px] text-paper">Zip bags</span>
+            <span className="text-[15px] text-paper">Ziplock bags</span>
             <input
               type="checkbox"
               role="switch"
               className="h-5 w-5 shrink-0"
               checked={storage.zipBags}
               onChange={(e) => patch({ zipBags: e.target.checked })}
+            />
+          </label>
+        </li>
+        <li>
+          <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-4 border-b border-line2">
+            <span className="text-[15px] text-paper">Freezer ziplock bags</span>
+            <input
+              type="checkbox"
+              role="switch"
+              className="h-5 w-5 shrink-0"
+              checked={storage.freezerBags}
+              onChange={(e) => patch({ freezerBags: e.target.checked })}
             />
           </label>
         </li>
@@ -2482,6 +2503,121 @@ function FormsSection({ h, update }: { h: Household; update: Update }) {
           );
         })}
       </ul>
+    </Section>
+  );
+}
+
+// ---------- Weekly budget ----------
+
+/** The budget a new week starts with. Plans take the same limits as the budget field on Plan (1 to 2000). */
+function BudgetSection({ h, update }: { h: Household; update: Update }) {
+  const [text, setText] = useState(String(h.defaultBudget));
+  const amount = Number(text);
+  const invalid = text.trim() === '' || !Number.isFinite(amount) || amount < 1 || amount > 2000;
+
+  function onChange(value: string) {
+    setText(value);
+    const next = Number(value);
+    if (value.trim() !== '' && Number.isFinite(next) && next >= 1 && next <= 2000) {
+      update((prev) => (prev.defaultBudget === next ? prev : { ...prev, defaultBudget: next }));
+    }
+  }
+
+  return (
+    <Section title="Weekly budget" caption="Each new plan starts with this. You can change it for any one week on Plan.">
+      <label className="block">
+        <span className={eyebrow}>Budget per week</span>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-[15px] text-muted" aria-hidden="true">
+            $
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={2000}
+            step={5}
+            inputMode="decimal"
+            className={fieldCls}
+            value={text}
+            aria-invalid={invalid}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+        {invalid && <span className={`mt-1 block text-[12px] ${ERROR_TEXT}`}>Enter an amount from $1 to $2,000.</span>}
+      </label>
+    </Section>
+  );
+}
+
+// ---------- Learned from your meals ----------
+
+/**
+ * What the planner has learned from ingredients skipped or replaced in meals over the last 90 days. Forgetting an
+ * ingredient drops every change for it.
+ */
+function LearnedSection() {
+  const [summary, setSummary] = useState<FeedbackSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    getIngredientFeedback()
+      .then((d) => {
+        if (alive) setSummary(d);
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(errorMessage(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function forget(ingredientId: string) {
+    setError(null);
+    setSummary((prev) => (prev ? { items: prev.items.filter((i) => i.ingredientId !== ingredientId) } : prev));
+    try {
+      await forgetIngredientFeedback(ingredientId);
+    } catch (e) {
+      setError(errorMessage(e));
+      getIngredientFeedback().then(setSummary).catch(() => {});
+    }
+  }
+
+  return (
+    <Section title="Learned from your meals" caption="What you skipped or swapped in the last 90 days. Plans avoid it and use the swaps.">
+      {error && <p className={`mb-3 text-[13px] ${ERROR_TEXT}`}>{error}</p>}
+      {!summary && !error && <p className="text-[14px] text-muted">Loading&hellip;</p>}
+      {summary && summary.items.length === 0 && (
+        <p className="text-[14px] text-muted">Mark ingredients as skipped or replaced on a meal, and plans will adapt.</p>
+      )}
+      {summary && summary.items.length > 0 && (
+        <ul>
+          {summary.items.map((item) => (
+            <li key={item.ingredientId} className="flex items-start justify-between gap-4 border-b border-line2 py-3">
+              <div className="min-w-0 text-[15px] text-paper">
+                <p>
+                  {item.name}
+                  {item.skipped > 0 && (
+                    <span className="text-muted">
+                      {' '}
+                      &middot; skipped {item.skipped} {item.skipped === 1 ? 'time' : 'times'}
+                    </span>
+                  )}
+                </p>
+                {item.replacements.map((r) => (
+                  <p key={r.text} className="text-[14px] text-muted">
+                    {item.name} &rarr; {r.text} ({r.count} {r.count === 1 ? 'time' : 'times'})
+                  </p>
+                ))}
+              </div>
+              <button type="button" onClick={() => void forget(item.ingredientId)} className={linkBtn} aria-label={`Forget ${item.name}`}>
+                Forget
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </Section>
   );
 }

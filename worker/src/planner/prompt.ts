@@ -6,6 +6,7 @@ import {
   formsAllowedFor,
   type Day,
   type Deal,
+  type FeedbackSignals,
   type FoodForm,
   type PantryItem,
   type FixedCost,
@@ -35,6 +36,9 @@ export const SYSTEM_PROMPT = [
   'Respect `varietyRules` that are true. Avoid `avoid` meals; you may reuse `favourites`.',
   "Never plan a dish in `avoidDishes` or a close variant of it (e.g. 'slaw' rules out coleslaw, cabbage slaw and any raw shredded-cabbage salad).",
   "Respect formsAllowed (e.g. no canned fish if canned isn't allowed). An available item with a `form` is that form.",
+  'Avoid ingredients in `ingredientFeedback.oftenSkipped` unless essential to a dish; then leave them optional in the steps.',
+  'When you would use an ingredient in `ingredientFeedback.preferredSwaps`, use its `to` (or `toId`, when given) instead, if it is available.',
+  'Variety matters more than using every bit of a big pack: use a non-staple ingredient in at most 3 meals a week. Onions, garlic, rice, oil, butter, eggs, milk, flour, stock, soy sauce, spices and bread are exempt. If a pack (like a whole cabbage) would need more, pick a different vegetable or accept some left over.',
   'Quantities are in each ingredient\'s `unit`, as the total for that meal. Do not estimate prices; code computes cost.',
   'For `each` ingredients, qty counts packages or pieces as sold (see eachMeans), never slices or servings: two people having toast all week is 1 loaf, not 7.',
   'If `feedback` is present, the previous plan broke these checks. Fix every error listed there and keep what already worked.',
@@ -220,6 +224,7 @@ export interface PayloadInput {
   keptCost?: number;
   replacing?: string[];
   swapNote?: string;
+  feedback?: FeedbackSignals; // skipped and replaced ingredients, from past meals
 }
 
 export interface PlannerPayload {
@@ -242,6 +247,7 @@ export interface PlannerPayload {
   formsAllowed: Record<string, FoodForm[]>; // per form group, the forms the household keeps
   storage: Storage;
   feedback: ValidationIssue[] | null;
+  ingredientFeedback: FeedbackSignals; // what the household skipped or replaced in past meals
   prepDay: Day | null;
   keptMeals?: KeptMealPayload[];
   replacing?: string[];
@@ -296,6 +302,7 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
     formsAllowed: formsAllowedFor(household.forms),
     storage: household.storage,
     feedback: null,
+    ingredientFeedback: input.feedback ?? { oftenSkipped: [], preferredSwaps: [] },
     ...(input.keptMeals
       ? {
           keptMeals: input.keptMeals,

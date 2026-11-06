@@ -17,13 +17,15 @@ import { Page } from '../components/Page';
 import { PrepBoard, PrepToday } from '../components/PrepArticle';
 import { prepAnchor, stepsOnDay } from '../lib/prepView';
 import MealDetail, { RATING_OPTIONS, TAG_TONE } from '../components/MealDetail';
-import { CheckIcon, RefreshIcon, ReturnIcon } from '../components/Icons';
+import { RefreshIcon, ReturnIcon } from '../components/Icons';
 import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { NoPlan } from '../components/NoPlan';
 import WeekSwitcher from '../components/WeekSwitcher';
 import SwapDialog from '../components/SwapDialog';
 import SwapBar from '../components/SwapBar';
 import UndoToast from '../components/UndoToast';
+import { SelectCircle } from '../components/SelectCircle';
+import { SwapProgressDialog } from '../components/SwapProgressDialog';
 import { planLabel, useViewedWeek, viewWindow, weekOffset } from '../lib/week';
 import { secondaryBtn } from '../components/ui';
 import { DAY_SHORT, SLOT_LABEL } from '../lib/labels';
@@ -64,6 +66,9 @@ function isoPlus(iso: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** "Swapping 3 meals", the title of the progress modal. */
+const swappingTitle = (count: number) => `Swapping ${count} ${count === 1 ? 'meal' : 'meals'}`;
+
 /** The saved plan's meal behind a drawn one, for its ingredients and steps. */
 function plannedFor(plan: MealPlan | null, day: Day, meal: ViewMeal): PlannedMeal | undefined {
   return plan?.meals.find((m) => m.day === day && m.slot === meal.slot && m.name === meal.name);
@@ -102,6 +107,8 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   const [swapError, setSwapError] = useState<string | null>(null);
   const [undo, setUndo] = useState<{ key: number; count: number } | null>(null);
   const [undoBusy, setUndoBusy] = useState(false);
+  // The progress modal for a swap or a prep rewrite: its title, the meals replaced, and the error once it fails.
+  const [progressModal, setProgressModal] = useState<{ title: string; meals: string[]; error: string | null } | null>(null);
   useSaveScope('sync', source.status === 'plan');
   // One set of ticks for both prep checklists (phone and desktop), so they never disagree.
   const { checks, toggle } = useChecks(source.status === 'plan' ? source.plan.weekOf : null);
@@ -216,11 +223,14 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
     if (!plan) return;
     setPrepBusy(true);
     setPrepError(null);
+    setProgressModal({ title: 'Rewriting the prep list', meals: [], error: null });
     const weekOf = plan.weekOf;
     try {
       setSource({ status: 'plan', plan: await track(regeneratePrep(weekOf), () => regeneratePrep(weekOf)) });
+      setProgressModal(null);
     } catch (e) {
       setPrepError(errorMessage(e));
+      setProgressModal({ title: 'Rewriting the prep list', meals: [], error: errorMessage(e) });
     } finally {
       setPrepBusy(false);
     }
@@ -247,9 +257,13 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   // Swaps the meals of the confirm dialog. The planner fills the freed slots; the week is then reloaded.
   async function runSwap(ids: string[], note: string) {
     const replaced = swapPreview(plan, ids).closure;
+    const replacedNames = plan.meals.filter((m) => m.id !== undefined && replaced.includes(m.id)).map((m) => m.name);
     setDialog(null);
+    // The meal panel would cover the progress, so it closes as the swap starts.
+    closeMeal();
     setSwapError(null);
     setSwapping(replaced);
+    setProgressModal({ title: swappingTitle(replaced.length), meals: replacedNames, error: null });
     try {
       const run = () => swapMeals(plan.weekOf, ids, note, (e) => setSwapProgress(progressText(e)));
       const result = await track(run(), undefined, { busy: 'Planning…' });
@@ -257,11 +271,12 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
       const fresh = await getPlan(plan.weekOf).catch(() => null);
       setSource({ status: 'plan', plan: fresh ?? result });
       exitChoosing();
-      closeMeal();
+      setProgressModal(null);
       setHighlight(result.added);
       setUndo((u) => ({ key: (u?.key ?? 0) + 1, count: result.swapped.length }));
     } catch (e) {
       setSwapError(errorMessage(e));
+      setProgressModal((m) => ({ title: m?.title ?? 'Swapping meals', meals: m?.meals ?? [], error: errorMessage(e) }));
     } finally {
       setSwapProgress(null);
       setSwapping([]);
@@ -305,11 +320,6 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
   const hasDeskSide = deskPrep !== null || deskWarning !== null;
 
   const swapErrorLine = swapError && <p className="mt-6 text-[13px] text-[#D98C7A]">Could not swap meals: {swapError}</p>;
-  const swapStatusLine = swapping.length > 0 && (
-    <p aria-live="polite" className="mt-6 text-[13px] text-muted">
-      {swapProgress ?? WAITING_TEXT}
-    </p>
-  );
   const timing = timingLine(plan?.timings);
   const chooseButton = (className: string) =>
     !past && !choosing ? (
@@ -363,7 +373,6 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
             {i.message}
           </p>
         ))}
-        {swapStatusLine}
         {swapErrorLine}
 
         <BudgetBlock week={week} pct={pct} timing={timing} className="mt-8" />
@@ -419,22 +428,23 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
                   <button
                     type="button"
                     aria-pressed={st.chosen}
-                    aria-label={`${st.chosen ? 'Remove' : 'Choose'} ${m.name}`}
                     onClick={() => toggleMeal(m.id!)}
                     className={`${RING} absolute inset-0 z-10 rounded-lg`}
-                  />
+                  >
+                    <span className="absolute right-4 top-4">
+                      <SelectCircle chosen={st.chosen} />
+                    </span>
+                    <span className="sr-only">
+                      {m.name}, {st.chosen ? 'Selected' : 'Select'}
+                    </span>
+                  </button>
                 )}
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] uppercase tracking-[0.14em] text-muted">
                     {SLOT_LABEL[m.slot]} &middot; {m.who}
                   </span>
-                  <span className="flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-muted">
+                  <span className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-muted ${st.selectable ? 'pr-7' : ''}`}>
                     {st.linked && <span className="text-herbLight">Linked</span>}
-                    {st.chosen && (
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-herb text-ink">
-                        <CheckIcon size={12} />
-                      </span>
-                    )}
                     {!st.choosing && (m.fixed ? 'Fixed' : m.cost !== null ? `$${m.cost.toFixed(2)}` : '')}
                   </span>
                 </div>
@@ -548,7 +558,6 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
             {i.message}
           </p>
         ))}
-        {swapStatusLine}
         {swapErrorLine}
 
         <div className="mt-8 min-w-0">
@@ -641,6 +650,7 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
 
         {openMeal && (
           <MealDetail
+            weekOf={plan?.weekOf}
             day={openMeal.day}
             meal={openMeal.meal}
             planned={plannedFor(plan, openMeal.day, openMeal.meal)}
@@ -675,6 +685,16 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
           onNote={setSwapNote}
           onCancel={() => setDialog(null)}
           onConfirm={() => void runSwap(dialog!, swapNote)}
+        />
+      )}
+
+      {progressModal && (
+        <SwapProgressDialog
+          title={progressModal.title}
+          progress={swapProgress ?? WAITING_TEXT}
+          meals={progressModal.meals}
+          error={progressModal.error}
+          onClose={() => setProgressModal(null)}
         />
       )}
 
@@ -769,14 +789,17 @@ function MealCell({ meal, onOpen, state }: { meal: ViewMeal; onOpen: () => void;
       disabled={state.choosing && !!meal.fixed}
       aria-pressed={state.selectable ? state.chosen : undefined}
       aria-busy={state.busy || undefined}
-      className={`${RING} relative flex min-h-[112px] w-full min-w-0 flex-1 flex-col rounded-lg border p-3 text-left hover:border-edge disabled:cursor-not-allowed disabled:opacity-50 ${tone} ${
+      className={`${RING} relative flex min-h-[112px] w-full min-w-0 flex-1 flex-col rounded-lg border p-3 text-left hover:border-edge disabled:cursor-not-allowed disabled:opacity-50 ${state.selectable ? 'pr-9' : ''} ${tone} ${
         state.flash ? 'ring-2 ring-herb/70' : ''
       } ${state.busy ? 'skeleton opacity-60' : ''}`}
     >
-      {state.chosen && (
-        <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-herb text-ink">
-          <CheckIcon size={12} />
-        </span>
+      {state.selectable && (
+        <>
+          <span className="absolute right-3 top-3">
+            <SelectCircle chosen={state.chosen} />
+          </span>
+          <span className="sr-only">{state.chosen ? 'Selected' : 'Select'}</span>
+        </>
       )}
       {meal.leftover && <LeftoverLine meal={meal} />}
       <span

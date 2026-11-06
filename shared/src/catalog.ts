@@ -1,5 +1,7 @@
 // Nutrition values are approximate (Canadian Nutrient File / USDA-style), to be refined.
 // Per-100g values: raw for meats and produce, dry for grains and legumes, as sold.
+// Cooking amounts (`cook`, below) are approximate typical weights and volumes: a cup of rice, an onion, a can. They
+// only change how a meal reads (formatCookAmount in amounts.ts); quantities stay in base units everywhere else.
 
 export type Category =
   | 'produce'
@@ -31,6 +33,29 @@ export type FoodForm = 'fresh' | 'frozen' | 'canned' | 'dry';
 /** The groups of foods that share forms: a household chooses which forms of each group it keeps. */
 export type FormGroupKey = 'fish' | 'beans' | 'vegetables' | 'tomatoes' | 'fruit';
 
+/** The units a cook measures in. g and ml are plain weights and volumes. */
+export type CookUnit =
+  | 'cup'
+  | 'tbsp'
+  | 'tsp'
+  | 'clove'
+  | 'head'
+  | 'bunch'
+  | 'piece'
+  | 'can'
+  | 'slice'
+  | 'fillet'
+  | 'g'
+  | 'ml';
+
+/** How a cook counts an ingredient: one `unit` weighs `gramsPer` grams (or millilitres). Approximate. */
+export interface CookAmount {
+  unit: CookUnit;
+  gramsPer?: number; // grams (or ml) in one unit; 1 for g and ml
+  singular?: string; // the noun for one, when it is not the unit: 'onion' for a piece
+  plural?: string; // the noun for more than one, when it is not singular + 's'
+}
+
 export interface Ingredient {
   id: string; // kebab slug, e.g. 'chicken-thigh-boneless'
   name: string; // 'Boneless chicken thighs'
@@ -56,9 +81,10 @@ export interface Ingredient {
   aliases: string[]; // lowercase keywords/phrases that identify it in flyer text
   form?: FoodForm; // where meaningful: the form this entry is sold in
   formGroup?: FormGroupKey; // the group of foods this form choice belongs to
+  cook?: CookAmount; // how a cook measures it, where that reads better than grams
 }
 
-type Nut = [kcal: number, protein: number, carbs: number, fat: number, fibre: number];
+type Nut =[kcal: number, protein: number, carbs: number, fat: number, fibre: number];
 
 interface Extra {
   allergens?: string[];
@@ -323,6 +349,7 @@ const pantry: Ingredient[] = [
   ing('olive-oil', 'Olive oil', 'pantry', 'l', [884, 0, 0, 100, 0], 730, true, ['olive oil', 'extra virgin olive oil', 'evoo', 'light olive oil']),
   ing('vegetable-oil', 'Vegetable oil', 'pantry', 'l', [884, 0, 0, 100, 0], 730, true, ['vegetable oil', 'canola oil', 'cooking oil', 'sunflower oil']),
   ing('sugar', 'White sugar', 'pantry', 'kg', [387, 0, 100, 0, 0], 1825, true, ['sugar', 'white sugar', 'granulated sugar', 'brown sugar']),
+  ing('garlic-powder', 'Garlic powder', 'pantry', 'kg', [331, 16.6, 72.7, 0.7, 9.0], 1095, true, ['garlic powder', 'ground garlic', 'garlic granules']),
   ing('ground-cumin', 'Ground cumin', 'pantry', 'kg', [375, 17.8, 44.2, 22.3, 10.5], 1095, true, ['cumin', 'ground cumin', 'cumin powder']),
   ing('smoked-paprika', 'Smoked paprika', 'pantry', 'kg', [282, 14.1, 53.9, 12.9, 34.9], 1095, true, ['paprika', 'smoked paprika', 'sweet paprika']),
   ing('cinnamon', 'Ground cinnamon', 'pantry', 'kg', [247, 4.0, 80.6, 1.2, 53.1], 1095, true, ['cinnamon', 'ground cinnamon', 'cinnamon powder']),
@@ -342,7 +369,153 @@ const pantry: Ingredient[] = [
   ing('hot-sauce', 'Hot sauce', 'pantry', 'l', [11, 0.5, 1.9, 0.4, 0.5], 1095, true, ['hot sauce', 'sriracha', 'franks hot sauce', 'chili sauce']),
 ];
 
-export const INGREDIENTS: Ingredient[] = [
+/**
+ * Typical cooking amounts, by ingredient id. Approximate: a medium onion, a large egg, a cup of dry rice as scooped.
+ * Dry grains and pasta are per cup, fresh produce per piece (or head, bunch and cup), liquids per cup or tablespoon,
+ * canned goods per can. Spices and garlic powder per teaspoon, fresh garlic per clove.
+ */
+export const COOK_AMOUNTS: Record<string, CookAmount> = {
+  // Dry grains, pulses and flours: grams in a cup, as scooped.
+  'jasmine-rice': { unit: 'cup', gramsPer: 185 },
+  'basmati-rice': { unit: 'cup', gramsPer: 185 },
+  'brown-rice': { unit: 'cup', gramsPer: 185 },
+  quinoa: { unit: 'cup', gramsPer: 170 },
+  'rolled-oats': { unit: 'cup', gramsPer: 90 },
+  'lentils-red-dry': { unit: 'cup', gramsPer: 190 },
+  'chickpeas-dry': { unit: 'cup', gramsPer: 200 },
+  'black-beans-dry': { unit: 'cup', gramsPer: 175 },
+  penne: { unit: 'cup', gramsPer: 100 },
+  'egg-noodles': { unit: 'cup', gramsPer: 60 },
+  'rice-noodles': { unit: 'cup', gramsPer: 50 },
+  'all-purpose-flour': { unit: 'cup', gramsPer: 125 },
+  sugar: { unit: 'cup', gramsPer: 200 },
+  'chocolate-chips': { unit: 'cup', gramsPer: 170 },
+  'peanut-butter': { unit: 'tbsp', gramsPer: 16 },
+  honey: { unit: 'tbsp', gramsPer: 21 },
+  // Spices and garlic powder: teaspoons.
+  'garlic-powder': { unit: 'tsp', gramsPer: 3 },
+  'ground-cumin': { unit: 'tsp', gramsPer: 2 },
+  'smoked-paprika': { unit: 'tsp', gramsPer: 2.3 },
+  cinnamon: { unit: 'tsp', gramsPer: 2.6 },
+  'curry-powder': { unit: 'tsp', gramsPer: 2.2 },
+  'dijon-mustard': { unit: 'tsp', gramsPer: 5 },
+  'hot-sauce': { unit: 'tsp', gramsPer: 5 },
+  // Garlic, onions and other vegetables: pieces, heads, bunches and cups.
+  garlic: { unit: 'clove', gramsPer: 5, singular: 'clove', plural: 'cloves' },
+  'yellow-onion': { unit: 'piece', gramsPer: 150, singular: 'onion', plural: 'onions' },
+  'red-onion': { unit: 'piece', gramsPer: 170, singular: 'onion', plural: 'onions' },
+  'green-onions': { unit: 'piece', gramsPer: 15, singular: 'green onion', plural: 'green onions' },
+  'green-cabbage': { unit: 'head', gramsPer: 900, singular: 'head', plural: 'heads' },
+  cauliflower: { unit: 'head', gramsPer: 600, singular: 'head', plural: 'heads' },
+  'romaine-lettuce': { unit: 'head', gramsPer: 450, singular: 'head', plural: 'heads' },
+  carrots: { unit: 'piece', gramsPer: 70, singular: 'carrot', plural: 'carrots' },
+  potatoes: { unit: 'piece', gramsPer: 170, singular: 'potato', plural: 'potatoes' },
+  'sweet-potatoes': { unit: 'piece', gramsPer: 250, singular: 'sweet potato', plural: 'sweet potatoes' },
+  'roma-tomatoes': { unit: 'piece', gramsPer: 75, singular: 'tomato', plural: 'tomatoes' },
+  'cherry-tomatoes': { unit: 'cup', gramsPer: 150 },
+  'red-bell-pepper': { unit: 'piece', gramsPer: 160, singular: 'red pepper', plural: 'red peppers' },
+  'green-bell-pepper': { unit: 'piece', gramsPer: 160, singular: 'bell pepper', plural: 'bell peppers' },
+  'english-cucumber': { unit: 'piece', gramsPer: 350, singular: 'cucumber', plural: 'cucumbers' },
+  'mini-cucumbers': { unit: 'piece', gramsPer: 60, singular: 'mini cucumber', plural: 'mini cucumbers' },
+  eggplant: { unit: 'piece', gramsPer: 300, singular: 'eggplant', plural: 'eggplants' },
+  zucchini: { unit: 'piece', gramsPer: 200, singular: 'zucchini', plural: 'zucchini' },
+  'corn-cobs': { unit: 'piece', gramsPer: 200, singular: 'cob', plural: 'cobs' },
+  jalapenos: { unit: 'piece', gramsPer: 15, singular: 'jalapeño', plural: 'jalapeños' },
+  ginger: { unit: 'tbsp', gramsPer: 6 },
+  cilantro: { unit: 'bunch', gramsPer: 50 },
+  parsley: { unit: 'bunch', gramsPer: 50 },
+  celery: { unit: 'bunch', gramsPer: 500 },
+  spinach: { unit: 'cup', gramsPer: 30 },
+  kale: { unit: 'cup', gramsPer: 60 },
+  broccoli: { unit: 'cup', gramsPer: 90 },
+  'white-mushrooms': { unit: 'cup', gramsPer: 70 },
+  'green-beans': { unit: 'cup', gramsPer: 100 },
+  'butternut-squash': { unit: 'cup', gramsPer: 205 },
+  // Fruit.
+  bananas: { unit: 'piece', gramsPer: 120, singular: 'banana', plural: 'bananas' },
+  'gala-apples': { unit: 'piece', gramsPer: 180, singular: 'apple', plural: 'apples' },
+  'navel-oranges': { unit: 'piece', gramsPer: 150, singular: 'orange', plural: 'oranges' },
+  lemons: { unit: 'piece', gramsPer: 100, singular: 'lemon', plural: 'lemons' },
+  limes: { unit: 'piece', gramsPer: 70, singular: 'lime', plural: 'limes' },
+  avocado: { unit: 'piece', gramsPer: 200, singular: 'avocado', plural: 'avocados' },
+  pears: { unit: 'piece', gramsPer: 170, singular: 'pear', plural: 'pears' },
+  mangoes: { unit: 'piece', gramsPer: 300, singular: 'mango', plural: 'mangoes' },
+  pineapple: { unit: 'piece', gramsPer: 1200, singular: 'pineapple', plural: 'pineapples' },
+  'grapes-red': { unit: 'cup', gramsPer: 150 },
+  'grapes-green': { unit: 'cup', gramsPer: 150 },
+  strawberries: { unit: 'cup', gramsPer: 150 },
+  blueberries: { unit: 'cup', gramsPer: 150 },
+  raspberries: { unit: 'cup', gramsPer: 125 },
+  // Frozen vegetables and fruit: cups.
+  'frozen-peas': { unit: 'cup', gramsPer: 135 },
+  'frozen-mixed-veg': { unit: 'cup', gramsPer: 140 },
+  'frozen-broccoli': { unit: 'cup', gramsPer: 90 },
+  'frozen-corn': { unit: 'cup', gramsPer: 165 },
+  'frozen-berries': { unit: 'cup', gramsPer: 140 },
+  'edamame-frozen': { unit: 'cup', gramsPer: 155 },
+  // Eggs, bread and bakery: pieces and slices.
+  'eggs-large': { unit: 'piece', gramsPer: 58, singular: 'egg', plural: 'eggs' },
+  'white-bread': { unit: 'slice', gramsPer: 30, singular: 'slice', plural: 'slices' },
+  'whole-wheat-bread': { unit: 'slice', gramsPer: 30, singular: 'slice', plural: 'slices' },
+  'flour-tortillas': { unit: 'piece', gramsPer: 45, singular: 'tortilla', plural: 'tortillas' },
+  'corn-tortillas': { unit: 'piece', gramsPer: 25, singular: 'tortilla', plural: 'tortillas' },
+  naan: { unit: 'piece', gramsPer: 100, singular: 'naan', plural: 'naan' },
+  pita: { unit: 'piece', gramsPer: 60, singular: 'pita', plural: 'pitas' },
+  bagels: { unit: 'piece', gramsPer: 100, singular: 'bagel', plural: 'bagels' },
+  // Dairy: cups for milk and cheese, tablespoons for butter and cream cheese.
+  'milk-2-percent': { unit: 'cup', gramsPer: 240 },
+  'whipping-cream': { unit: 'cup', gramsPer: 240 },
+  'greek-yogurt': { unit: 'cup', gramsPer: 245 },
+  'yogurt-plain': { unit: 'cup', gramsPer: 245 },
+  'sour-cream': { unit: 'cup', gramsPer: 230 },
+  cheddar: { unit: 'cup', gramsPer: 113 },
+  mozzarella: { unit: 'cup', gramsPer: 113 },
+  paneer: { unit: 'cup', gramsPer: 150 },
+  butter: { unit: 'tbsp', gramsPer: 14 },
+  'cream-cheese': { unit: 'tbsp', gramsPer: 15 },
+  // Stock, oil, sauces and condiments.
+  'chicken-stock': { unit: 'cup', gramsPer: 240 },
+  'vegetable-stock': { unit: 'cup', gramsPer: 240 },
+  'pasta-sauce': { unit: 'cup', gramsPer: 250 },
+  'olive-oil': { unit: 'tbsp', gramsPer: 15 },
+  'vegetable-oil': { unit: 'tbsp', gramsPer: 15 },
+  'soy-sauce': { unit: 'tbsp', gramsPer: 16 },
+  'balsamic-vinegar': { unit: 'tbsp', gramsPer: 15 },
+  'maple-syrup': { unit: 'tbsp', gramsPer: 20 },
+  tahini: { unit: 'tbsp', gramsPer: 15 },
+  pesto: { unit: 'tbsp', gramsPer: 15 },
+  hummus: { unit: 'tbsp', gramsPer: 15 },
+  salsa: { unit: 'tbsp', gramsPer: 16 },
+  ketchup: { unit: 'tbsp', gramsPer: 17 },
+  mayonnaise: { unit: 'tbsp', gramsPer: 14 },
+  // Canned goods: one can each, at the can's typical size.
+  'canned-tuna': { unit: 'can', gramsPer: 142, singular: 'can', plural: 'cans' },
+  'canned-salmon': { unit: 'can', gramsPer: 213, singular: 'can', plural: 'cans' },
+  'chickpeas-canned': { unit: 'can', gramsPer: 425, singular: 'can', plural: 'cans' },
+  'black-beans-canned': { unit: 'can', gramsPer: 398, singular: 'can', plural: 'cans' },
+  'lentils-canned': { unit: 'can', gramsPer: 398, singular: 'can', plural: 'cans' },
+  'kidney-beans-canned': { unit: 'can', gramsPer: 398, singular: 'can', plural: 'cans' },
+  'pinto-beans-canned': { unit: 'can', gramsPer: 398, singular: 'can', plural: 'cans' },
+  'canned-diced-tomatoes': { unit: 'can', gramsPer: 796, singular: 'can', plural: 'cans' },
+  'tomato-paste': { unit: 'can', gramsPer: 156, singular: 'can', plural: 'cans' },
+  'canned-corn': { unit: 'can', gramsPer: 341, singular: 'can', plural: 'cans' },
+  'coconut-milk': { unit: 'can', gramsPer: 400, singular: 'can', plural: 'cans' },
+  // Fish and meat: fillets and pieces.
+  'salmon-fillet': { unit: 'fillet', gramsPer: 150, singular: 'fillet', plural: 'fillets' },
+  'tilapia-fillet': { unit: 'fillet', gramsPer: 130, singular: 'fillet', plural: 'fillets' },
+  'cod-fillet': { unit: 'fillet', gramsPer: 150, singular: 'fillet', plural: 'fillets' },
+  'chicken-breast-boneless': { unit: 'piece', gramsPer: 170, singular: 'breast', plural: 'breasts' },
+  'chicken-thigh-boneless': { unit: 'piece', gramsPer: 110, singular: 'thigh', plural: 'thighs' },
+  'chicken-thigh-bone-in': { unit: 'piece', gramsPer: 120, singular: 'thigh', plural: 'thighs' },
+  'chicken-drumsticks': { unit: 'piece', gramsPer: 110, singular: 'drumstick', plural: 'drumsticks' },
+  'pork-chops': { unit: 'piece', gramsPer: 130, singular: 'chop', plural: 'chops' },
+  'italian-sausage': { unit: 'piece', gramsPer: 140, singular: 'sausage', plural: 'sausages' },
+};
+
+const withCookAmounts = (list: Ingredient[]): Ingredient[] =>
+  list.map((i) => (COOK_AMOUNTS[i.id] ? { ...i, cook: COOK_AMOUNTS[i.id] } : i));
+
+export const INGREDIENTS: Ingredient[] = withCookAmounts([
   ...meat,
   ...seafood,
   ...proteinsOther,
@@ -353,7 +526,7 @@ export const INGREDIENTS: Ingredient[] = [
   ...frozen,
   ...pantry,
   ...household,
-];
+]);
 
 export const INGREDIENT_BY_ID: Record<string, Ingredient> = Object.fromEntries(
   INGREDIENTS.map((i) => [i.id, i]),

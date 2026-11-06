@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { baselineFor, nutrientDensity, scoreDeals, type HistoryPoint, type ScoreOptions } from './scoring';
+import { SCORE_DISCOUNT_WEIGHT, SCORE_NUTRIENT_WEIGHT, SCORE_SHELF_WEIGHT, baselineFor, nutrientDensity, scoreDeals, type HistoryPoint, type ScoreOptions } from './scoring';
 import type { MatchedItem } from './match';
 import { INGREDIENT_BY_ID } from './catalog';
 
@@ -175,5 +175,20 @@ describe('scoreDeals', () => {
     const [deal] = scoreDeals([m('chicken-thigh-boneless', 'A', 5)], opts({ history }));
     expect(deal?.baseline).toBe(10);
     expect(deal?.discountPct).toBeCloseTo(0.5);
+  });
+});
+
+describe('deal score weights', () => {
+  it('leads with the discount, and keeps nutrition and shelf life small', () => {
+    expect(SCORE_DISCOUNT_WEIGHT).toBe(0.6);
+    expect(SCORE_NUTRIENT_WEIGHT).toBe(0.15);
+    expect(SCORE_SHELF_WEIGHT).toBe(0.05);
+  });
+
+  it('gives a cheap, long-keeping item with no discount no more than 0.2, so it cannot outrank a real saving', () => {
+    const cabbageHistory = [0.5, 0.5, 0.5].map((p, i) => h('green-cabbage', 'A', `2026-10-${10 + i * 3}`, p));
+    const [deal] = scoreDeals([m('green-cabbage', 'A', 2, { packQty: 0.9 })], opts({ history: cabbageHistory, perCategory: 8 }));
+    expect(deal?.discountPct).toBe(0);
+    expect(deal!.score).toBeLessThanOrEqual(0.2);
   });
 });

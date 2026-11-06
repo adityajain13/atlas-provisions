@@ -35,6 +35,11 @@ const BASELINE_WINDOW_DAYS = 56;
 const MIN_HISTORY_POINTS = 3;
 const LONE_STORE_MARKUP = 1.15;
 const NUTRIENT_CAP = 15;
+// Deal score weights: the discount leads. Nutrient density and the shelf-life bonus are small, so no single cheap
+// item (a whole green cabbage, 21 days on the shelf) dominates the shortlist.
+export const SCORE_DISCOUNT_WEIGHT = 0.6;
+export const SCORE_NUTRIENT_WEIGHT = 0.15;
+export const SCORE_SHELF_WEIGHT = 0.05;
 
 function addDays(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
@@ -101,7 +106,8 @@ export function nutrientDensity(ing: Ingredient, pricePerUnit: number): number {
  * Steps: keep the cheapest unit price per (ingredient, store), drop never-buy ingredients,
  * allergen clashes and expired items, then drop packs too big to use. The size rule is a rough
  * heuristic: packQty (kg, l or count) must be at most shelfLifeDays / 7 * 1.5 * householdSize.
- * Score = discount * 0.6 + nutrientDensity * 0.3 + 0.1 if shelf life exceeds a week.
+ * Score = discount * 0.6 + nutrientDensity * 0.15 + 0.05 if shelf life exceeds a week. The nutrient and shelf-life
+ * weights are small, so a big cheap pack (a whole cabbage) cannot outscore a real discount on something else.
  * Keep the top `perCategory` per category. Always-buy ingredients are added once each,
  * flagged staple, from their cheapest store, even when not on sale.
  */
@@ -144,9 +150,9 @@ export function scoreDeals(items: MatchedItem[], opts: ScoreOptions): Deal[] {
     const baseline = baselineOf(ing.id);
     const discountPct = baseline > 0 ? Math.max(0, 1 - it.pricePerUnit / baseline) : 0;
     const score =
-      discountPct * 0.6 +
-      nutrientDensity(ing, it.pricePerUnit) * 0.3 +
-      (ing.shelfLifeDays > 7 ? 0.1 : 0);
+      discountPct * SCORE_DISCOUNT_WEIGHT +
+      nutrientDensity(ing, it.pricePerUnit) * SCORE_NUTRIENT_WEIGHT +
+      (ing.shelfLifeDays > 7 ? SCORE_SHELF_WEIGHT : 0);
 
     candidates.push({
       ingredientId: ing.id,

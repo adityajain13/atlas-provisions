@@ -2,7 +2,9 @@
 // checked, and prep falls back to the saved steps when the model returns none. No network.
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DAYS,
   INGREDIENT_BY_ID,
+  SLOTS,
   defaultHousehold,
   matchFlyerItem,
   scoreDeals,
@@ -36,6 +38,14 @@ const deals: Deal[] = scoreDeals(matched, {
 });
 const DEAL_ID = deals[0]!.ingredientId;
 const DEAL_UNIT_QTY = INGREDIENT_BY_ID[DEAL_ID]!.baseUnit === 'each' ? 1 : 0.1;
+// Meals rotate through a few kilogram deals, three cells each, so no one ingredient is in more than three meals (the
+// repeat limit). Every one is kilograms, so the quantity stays DEAL_UNIT_QTY.
+const SPREAD_IDS = [...new Set(deals.map((d) => d.ingredientId))]
+  .filter((id) => INGREDIENT_BY_ID[id]!.baseUnit === 'kg')
+  .slice(0, 8);
+/** The ingredient for the cell at `cellIndex` in the week, in day-then-slot order. */
+const spreadId = (cellIndex: number) => SPREAD_IDS[Math.floor(cellIndex / 3) % SPREAD_IDS.length]!;
+const cellIndexOf = (day: Day, slot: Slot) => DAYS.indexOf(day) * SLOTS.length + SLOTS.indexOf(slot);
 const WEEK = '2026-11-15';
 
 function household(over: Partial<Household> = {}): Household {
@@ -71,7 +81,7 @@ const label = (day: Day, slot: Slot) => `${day[0]!.toUpperCase()}${day.slice(1)}
  */
 function savedWeek(h: Household, req: PlanRequest, over: Partial<MealPlan> = {}): MealPlan {
   const frame = weekFrame({ household: h, request: req, deals, matched, neverBuy: [], recentDinnerNames: [] });
-  const meals: PlannedMeal[] = frame.cells.map((c) => {
+  const meals: PlannedMeal[] = frame.cells.map((c, index) => {
     const id = slotId(c.day, c.slot);
     const link: Partial<PlannedMeal> =
       id === 'mon-dinner' ? { makesLeftoversFor: 'tue-lunch' } : id === 'tue-lunch' ? { usesLeftoversFrom: 'mon-dinner' } : {};
@@ -82,7 +92,7 @@ function savedWeek(h: Household, req: PlanRequest, over: Partial<MealPlan> = {})
       slot: c.slot,
       name: label(c.day, c.slot),
       eaters: [...c.eaters],
-      ingredients: leftover ? [] : [{ ingredientId: DEAL_ID, qty: DEAL_UNIT_QTY, unit: INGREDIENT_BY_ID[DEAL_ID]!.baseUnit }],
+      ingredients: leftover ? [] : [{ ingredientId: spreadId(index), qty: DEAL_UNIT_QTY, unit: 'kg' }],
       activeMinutes: leftover ? 5 : 20,
       steps: ['Cook'],
       tags: leftover ? ['leftovers'] : [],
@@ -96,7 +106,7 @@ const rawMeal = (day: Day, slot: Slot, extra: Partial<RawMeal> = {}): RawMeal =>
   id: slotId(day, slot),
   slotId: slotId(day, slot),
   name: `New ${label(day, slot)}`,
-  ingredients: [{ id: DEAL_ID, qty: DEAL_UNIT_QTY }],
+  ingredients: [{ id: spreadId(cellIndexOf(day, slot)), qty: DEAL_UNIT_QTY }],
   activeMinutes: 20,
   steps: ['Cook'],
   tags: [],

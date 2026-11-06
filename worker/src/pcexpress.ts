@@ -2,6 +2,8 @@
 // and the API key are the sites' own web traffic: unofficial, and they may change. Every field of a response is
 // optional, nothing is thrown, and a failed request comes back as a typed error. Callers pass fetch in; nothing here
 // reaches the network by itself.
+import { isSiteBanner, SITE_BANNER_NAMES } from '@provisions/shared';
+
 export const PCX_BASE_URL = 'https://api.pcexpress.ca/pcx-bff/api/v1';
 /** The static key the public web site sends. It is not a secret and it is not ours to rotate. */
 export const PCX_API_KEY = 'C1xujSegT5j3ap3yexJjqhOfELwGKYvz';
@@ -143,19 +145,45 @@ export function normaliseLocation(raw: unknown): SiteLocation | null {
   };
 }
 
-/** Lists the pickup locations of a banner. Tries bannerIds first, then bannerId when the first is not found. */
-export async function listLocations(banner: string, fetchImpl: typeof fetch = fetch): Promise<SiteResult<SiteLocation[]>> {
-  const init = { method: 'GET', headers: siteHeaders(banner) };
-  let got = await getJson(fetchImpl, `${PCX_BASE_URL}/pickup-locations?bannerIds=${encodeURIComponent(banner)}`, init);
-  if (!got.ok && got.error.kind === 'not-found') {
-    got = await getJson(fetchImpl, `${PCX_BASE_URL}/pickup-locations?bannerId=${encodeURIComponent(banner)}`, init);
-  }
-  if (!got.ok) return got;
+/**
+ * The banner id Loblaw's systems use for each app banner (the app's own ids are in shared/src/stores.ts). Loblaws is
+ * 'loblaw' there, not 'loblaws'. A banner not listed here is sent under its own id.
+ */
+export const PCX_BANNER_IDS: Record<string, string> = {
+  loblaws: 'loblaw',
+  nofrills: 'nofrills',
+  superstore: 'superstore',
+  zehrs: 'zehrs',
+  independent: 'independent',
+  tandt: 'tandt',
+  fortinos: 'fortinos',
+  valumart: 'valumart',
+  independentcitymarket: 'independentcitymarket',
+};
 
-  const records = listIn(got.value, ['pickupLocations', 'locations', 'stores', 'results', 'data']);
-  if (records === null) return err('shape', 'No list of locations in the response', { sample: sampleOf(got.value) });
-  if (records.length === 0) return { ok: true, value: [] };
+/** The ids a product search tries, in order. A refused Loblaws id (400 or 404) is retried once as 'loblaws'. */
+const SEARCH_ID_FALLBACKS: Record<string, string[]> = { loblaws: ['loblaw', 'loblaws'] };
 
+/** The id that answered a product search for each app banner, kept for the rest of the run. */
+const answeringId = new Map<string, string>();
+
+/** Forgets which id answered each banner. For tests, and for a run that should start again. */
+export function resetAnsweringIds(): void {
+  answeringId.clear();
+}
+
+/** The ids to try for a product search on a banner: the one that answered before first, then the rest. */
+export function searchIdsFor(banner: string): string[] {
+  const ids = SEARCH_ID_FALLBACKS[banner] ?? [PCX_BANNER_IDS[banner] ?? banner];
+  const known = answeringId.get(banner);
+  return known ? [known, ...ids.filter((id) => id !== known)] : ids;
+}
+
+const LOCATION_KEYS = ['pickupLocations', 'locations', 'results'];
+const LOCATION_RESULTS = 25;
+
+/** A pickup location per record of the list, without repeats and without records that have no store id. */
+function locationsIn(records: unknown[]): SiteLocation[] {
   const seen = new Set<string>();
   const out: SiteLocation[] = [];
   for (const r of records) {
@@ -164,8 +192,75 @@ export async function listLocations(banner: string, fetchImpl: typeof fetch = fe
     seen.add(loc.storeId);
     out.push(loc);
   }
-  if (out.length === 0) return err('shape', 'No location in the response had a store id', { sample: sampleOf(records[0]) });
-  return { ok: true, value: out };
+  return out;
+}
+
+/**
+ * Lists the pickup locations of a banner. Three requests are tried in order (bannerIds, bannerId, bannerIds with
+ * isShoppable), and the first non-empty list wins. A sign-in or a block stops at once. When none has locations, the
+ * first failure is returned as the error; a listing that was empty and had no failure is an empty list.
+ */
+export async function listLocations(banner: string, fetchImpl: typeof fetch = fetch): Promise<SiteResult<SiteLocation[]>> {
+  const bannerId = searchIdsFor(banner)[0] ?? banner;
+  const id = encodeURIComponent(bannerId);
+  const init = { method: 'GET', headers: siteHeaders(bannerId) };
+  const paths = [`pickup-locations?bannerIds=${id}`, `pickup-locations?bannerId=${id}`, `pickup-locations?bannerIds=${id}&isShoppable=true`];
+
+  let firstError: SiteResult<SiteLocation[]> | null = null;
+  let sawEmpty = false;
+  for (const path of paths) {
+    const got = await getJson(fetchImpl, `${PCX_BASE_URL}/${path}`, init);
+    if (!got.ok) {
+      firstError ??= got;
+      if (got.error.kind === 'auth' || got.error.kind === 'blocked') return got;
+      continue;
+    }
+    const records = listIn(got.value, LOCATION_KEYS);
+    if (records === null) {
+      firstError ??= err('shape', 'No list of locations in the response', { sample: sampleOf(got.value) });
+      continue;
+    }
+    if (records.length === 0) {
+      sawEmpty = true;
+      continue;
+    }
+    const out = locationsIn(records);
+    if (out.length > 0) return { ok: true, value: out };
+    firstError ??= err('shape', 'No location in the response had a store id', { sample: sampleOf(records[0]) });
+  }
+  if (sawEmpty || firstError === null) return { ok: true, value: [] };
+  return firstError;
+}
+
+/** Normalised text for matching: lower case, no spaces, so "M5T 1R5" and "m5t1r5" are the same. */
+const squash = (s: string): string => s.toLowerCase().replace(/\s+/g, '');
+
+/**
+ * The locations a search matches. Every word of the query must appear in the name, street, city or postal code, with
+ * spaces ignored on both sides. A query that starts like a postal code lists the locations whose postal code starts
+ * with it first. Each result is labelled with the chain and the street and city.
+ */
+export function searchLocations(
+  locations: SiteLocation[],
+  banner: string,
+  query: string,
+): { storeId: string; label: string; postalCode: string | null }[] {
+  const words = query.toLowerCase().split(/\s+/).map(squash).filter(Boolean);
+  if (words.length === 0) return [];
+  const postal = words.join('');
+  const postalLike = /^[a-z]\d[a-z]/.test(postal);
+  const bannerName = isSiteBanner(banner) ? SITE_BANNER_NAMES[banner] : banner;
+
+  const hits = locations.flatMap((loc) => {
+    const fields = [loc.name, loc.line1, loc.city, loc.postalCode].filter((v): v is string => typeof v === 'string' && v !== '').map(squash);
+    if (!words.every((w) => fields.some((f) => f.includes(w)))) return [];
+    const rank = postalLike && loc.postalCode && squash(loc.postalCode).startsWith(postal) ? 0 : 1;
+    const address = [loc.line1, loc.city].filter(Boolean).join(', ');
+    return [{ rank, storeId: loc.storeId, label: address ? `${bannerName} · ${address}` : bannerName, postalCode: loc.postalCode ?? null }];
+  });
+  // Array.prototype.sort is stable, so the site's order holds within each rank.
+  hits.sort((a, b) => a.rank - b.rank);
+  return hits.slice(0, LOCATION_RESULTS).map(({ storeId, label, postalCode }) => ({ storeId, label, postalCode }));
 }
 
 /** The unit price the site shows, normalised from its comparison price, or undefined. */
@@ -206,8 +301,26 @@ export function normaliseProduct(raw: unknown): SiteProduct | null {
   };
 }
 
-/** Searches a store location for a term. Results come back in the site's order. */
+/**
+ * Searches a store location for a term. Results come back in the site's order. The banner id is tried as searchIdsFor
+ * gives it; a 400 or 404 moves on to the next id, and the id that answers is remembered.
+ */
 export async function searchProducts(banner: string, storeId: string, term: string, fetchImpl: typeof fetch = fetch): Promise<SiteResult<SiteProduct[]>> {
+  let first: SiteResult<SiteProduct[]> | null = null;
+  for (const id of searchIdsFor(banner)) {
+    const got = await searchOnce(fetchImpl, id, storeId, term);
+    if (got.ok) {
+      answeringId.set(banner, id);
+      return got;
+    }
+    first ??= got;
+    const status = got.error.status;
+    if (status !== 400 && status !== 404) return got;
+  }
+  return first!;
+}
+
+async function searchOnce(fetchImpl: typeof fetch, banner: string, storeId: string, term: string): Promise<SiteResult<SiteProduct[]>> {
   const body = JSON.stringify({ lang: 'en', term, storeId, banner, pagination: { from: 0, size: 24 } });
   const got = await getJson(fetchImpl, `${PCX_BASE_URL}/products/search`, { method: 'POST', headers: siteHeaders(banner), body });
   if (!got.ok) return got;

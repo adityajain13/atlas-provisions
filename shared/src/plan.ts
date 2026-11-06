@@ -133,7 +133,8 @@ export interface ValidationIssue {
     | 'pin'
     | 'prep'
     | 'prep-timing'
-    | 'prices';
+    | 'prices'
+    | 'repetition';
   severity: 'error' | 'warning';
   message: string; // written as an instruction to the planner
 }

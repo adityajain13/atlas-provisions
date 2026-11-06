@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { INGREDIENTS } from './catalog';
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
 import { buildList, toPlannedMeals, validate, type ValidateContext } from './validate';
+import { repairFor } from './repair';
 import { defaultHousehold, type Household } from './index';
 import { expandWeek } from './grid';
 import type { PantryItem } from './pantry';
@@ -43,9 +44,17 @@ function meal(day: Day, slot: Slot, extra: Partial<PlannedMeal> = {}): PlannedMe
   };
 }
 
-/** A plan that passes every check: each cell has one plain broccoli meal. */
+// Seven vegetables, each in exactly three meals of the 21: the repeat limit holds.
+const VEG_ROTATION = ['broccoli', 'carrots', 'kale', 'green-beans', 'zucchini', 'white-mushrooms', 'celery'];
+
+/** A plan that passes every check: each cell has one plain vegetable meal, rotated so no one is in more than three. */
 function cleanMeals(cells = allCells()): PlannedMeal[] {
-  return cells.map((c) => meal(c.day, c.slot, { eaters: [...c.eaters] }));
+  return cells.map((c, i) =>
+    meal(c.day, c.slot, {
+      eaters: [...c.eaters],
+      ingredients: [{ ingredientId: VEG_ROTATION[Math.floor(i / 3) % VEG_ROTATION.length]!, qty: 0.2, unit: 'kg' }],
+    }),
+  );
 }
 
 function planOf(meals: PlannedMeal[], over: Partial<MealPlan> = {}, requestOver: Partial<MealPlan['request']> = {}): MealPlan {
@@ -114,7 +123,7 @@ describe('validate: unknown-ingredient and never-buy', () => {
   });
 
   it('accepts ids that are available', () => {
-    expect(checksOf(validate(planOf(cleanMeals()), ctxOf({ available: new Set(['broccoli']) })))).toEqual([]);
+    expect(checksOf(validate(planOf(cleanMeals()), ctxOf({ available: new Set(VEG_ROTATION) })))).toEqual([]);
   });
 
   it('flags an ingredient on the never-buy list', () => {
@@ -388,7 +397,9 @@ describe('validate: variety rules', () => {
   });
 
   it('minVeg5 errors with fewer than five vegetables and suggests unused ones', () => {
-    const issues = validate(planOf(cleanMeals()), ctxOf({ household: rules({ minVeg5: true }) }));
+    // Every meal uses broccoli, so there is one vegetable in the week.
+    const oneVeg = cleanMeals().map((m) => ({ ...m, ingredients: [{ ingredientId: 'broccoli', qty: 0.2, unit: 'kg' as const }] }));
+    const issues = validate(planOf(oneVeg), ctxOf({ household: rules({ minVeg5: true }) }));
     const hit = issues.find((i) => i.check === 'variety');
     expect(hit!.message).toContain('Only 1 vegetables this week');
     expect(hit!.message).toMatch(/Add .+ to a meal\./);
@@ -755,5 +766,37 @@ describe('validate: form and avoid-dish', () => {
 
   it('does not flag an avoided word that is not in a meal name', () => {
     expect(checksOf(validate(planOf(cleanMeals()), ctxOf({ avoidDishes: ['slaw'] })))).not.toContain('avoid-dish');
+  });
+});
+
+describe('validate: repetition', () => {
+  // The first four cells of the week, each with the same non-staple: the fourth is one too many.
+  const cabbageMeals = () =>
+    cleanMeals()
+      .slice(0, 4)
+      .map((m) => ({ ...m, ingredients: [{ ingredientId: 'green-cabbage', qty: 0.3, unit: 'each' as const }] }));
+
+  it('flags only the meal past the third use of a non-staple, as an error', () => {
+    const meals = cabbageMeals();
+    const issues = validate(planOf(meals), ctxOf()).filter((i) => i.check === 'repetition');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.severity).toBe('error');
+    expect(issues[0]!.message).toContain(meals[3]!.name);
+    expect(issues[0]!.message).toContain('Green cabbage');
+  });
+
+  it('does not flag a staple in every meal', () => {
+    const meals = cleanMeals()
+      .slice(0, 6)
+      .map((m) => ({ ...m, ingredients: [{ ingredientId: 'yellow-onion', qty: 0.1, unit: 'kg' as const }] }));
+    expect(checksOf(validate(planOf(meals), ctxOf()))).not.toContain('repetition');
+  });
+
+  it('repairs by rewriting the meal past the third, and keeps the first three', () => {
+    const plan = planOf(cabbageMeals());
+    const ctx = ctxOf();
+    const issues = validate(plan, ctx).filter((i) => i.check === 'repetition');
+    const repair = repairFor(plan, ctx, issues);
+    expect(repair?.replaceIds).toEqual([plan.meals[3]!.id]);
   });
 });

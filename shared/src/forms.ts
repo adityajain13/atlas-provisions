@@ -3,7 +3,8 @@
 import { z } from 'zod';
 import { INGREDIENTS, INGREDIENT_BY_ID, type FoodForm, type FormGroupKey } from './catalog';
 
-export const FOOD_FORMS = ['fresh', 'frozen', 'canned', 'dry'] as const satisfies readonly FoodForm[];
+// The order the form chips show: canned is always last. Each group shows the forms it has, in this order.
+export const FOOD_FORMS = ['fresh', 'frozen', 'dry', 'canned'] as const satisfies readonly FoodForm[];
 export const FoodFormSchema = z.enum(FOOD_FORMS);
 
 export const FORM_LABEL: Record<FoodForm, string> = {

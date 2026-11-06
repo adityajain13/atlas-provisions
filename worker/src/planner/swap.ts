@@ -7,6 +7,7 @@ import {
   swapClosure,
   type Day,
   type Deal,
+  type FeedbackSignals,
   type Household,
   type MatchedItem,
   type MealPlan,
@@ -32,6 +33,7 @@ export interface SwapInput {
   recentDinnerNames: string[];
   pantry?: PantryItem[];
   ratings?: RatingSignals;
+  feedback?: FeedbackSignals;
   estimates?: Offer[];
   today?: string;
   client: PlannerClient;
@@ -87,6 +89,7 @@ export async function runSwap(input: SwapInput): Promise<SwapOutcome> {
     recentDinnerNames: input.recentDinnerNames,
     pantry: input.pantry,
     ratings: input.ratings,
+    feedback: input.feedback,
     estimates: input.estimates,
     today: input.today,
   });

@@ -12,6 +12,7 @@ import {
 } from './stores';
 import { DEFAULT_STORAGE, StorageSchema } from './storage';
 import { FoodFormSchema } from './forms';
+import { formatPostalCode, normalizePostalCode } from './flipp';
 export {
   DAYS,
   SLOTS,
@@ -161,10 +162,11 @@ export const HouseholdSchema = z.object({
   timeCaps: z.record(z.record(z.number().int().min(5).max(180))).default({}),
   // Day to batch-prep for (Sunday to Saturday), or null for none. Stored households without it get Sunday.
   prepDay: z.enum(DAYS).nullable().default('sun'),
-  // Canadian postal code, stored uppercase with no space. Flipp flyers are searched near it.
+  // Canadian postal code, stored as "M5V 2T6". Flipp flyers are searched near it. Stored codes without the space parse too.
   postalCode: z
     .string()
-    .regex(/^[A-Z]\d[A-Z]\d[A-Z]\d$/, 'Postal code looks like M5V2T6')
+    .refine((s) => normalizePostalCode(s) !== null, 'Postal code looks like M5V 2T6')
+    .transform((s) => formatPostalCode(s) ?? s)
     .optional(),
   // How close store totals are settled: the cheapest, or the store list's order when they nearly tie.
   // Stored households without it get the default.
@@ -232,10 +234,13 @@ export function newId(): string {
 // this file already exports the zod Ingredient schema type above.
 export {
   CATEGORY_ORDER,
+  COOK_AMOUNTS,
   INGREDIENTS,
   INGREDIENT_BY_ID,
   type Category,
   type BaseUnit,
+  type CookAmount,
+  type CookUnit,
   type FoodForm,
   type FormGroupKey,
   type Ingredient as CatalogIngredient,
@@ -262,3 +267,6 @@ export * from './repair';
 export * from './storage';
 export * from './forms';
 export * from './dishes';
+export * from './amounts';
+export * from './repeats';
+export * from './feedback';

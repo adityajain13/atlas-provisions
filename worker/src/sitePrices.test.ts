@@ -227,7 +227,8 @@ describe('the location cache', () => {
     const fetchImpl = vi.fn(async () => json({ pickupLocations: [] })) as unknown as typeof fetch;
     await cachedLocations(DB, 'zehrs', fetchImpl, NOW);
     await cachedLocations(DB, 'zehrs', fetchImpl, NOW);
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    // An empty listing tries all three location endpoints each time, and none is cached.
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
   });
 
   it('keeps a failed listing out of the cache', async () => {

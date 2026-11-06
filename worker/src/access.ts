@@ -183,6 +183,7 @@ export function householdDeleteStatements(db: D1Database, householdId: string): 
   return [
     db.prepare('DELETE FROM pantry_items WHERE household_id = ?').bind(householdId),
     db.prepare('DELETE FROM meal_ratings WHERE household_id = ?').bind(householdId),
+    db.prepare('DELETE FROM ingredient_feedback WHERE household_id = ?').bind(householdId),
     db.prepare('DELETE FROM meal_plans WHERE household_id = ?').bind(householdId),
     db.prepare('DELETE FROM checks WHERE household_id = ?').bind(householdId),
     db.prepare('DELETE FROM usage WHERE household_id = ?').bind(householdId),

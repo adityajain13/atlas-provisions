@@ -19,6 +19,7 @@ import {
   type BuildListOptions,
   type Day,
   type Deal,
+  type FeedbackSignals,
   type Offer,
   type FixedCost,
   type FixedPlacement,
@@ -75,6 +76,7 @@ export interface RunInput {
   neverBuy: string[]; // ingredient ids from never-buy item rules
   pantry?: PantryItem[]; // all pantry items; expired ones are ignored
   ratings?: RatingSignals; // favourites, avoid and never from meal ratings
+  feedback?: FeedbackSignals; // ingredients skipped often, and swaps the household makes
   estimates?: Offer[]; // site and receipt prices, used where no flyer prices a store
   today?: string; // YYYY-MM-DD on the Toronto calendar; defaults to today
   maxAttempts?: number;
@@ -96,6 +98,7 @@ export interface WeekFrame {
   pantry: PantryItem[]; // usable stock only
   dueSoon: PantryItem[];
   ratings: RatingSignals;
+  feedback: FeedbackSignals;
   cells: SlotCell[]; // every cell of the week
   placements: FixedPlacement[];
   fixedCost: FixedCost;
@@ -145,6 +148,7 @@ export function weekFrame(input: FrameInput): WeekFrame {
     pantry,
     dueSoon: request.useItUp ? expiringSoon(pantry, today) : [],
     ratings,
+    feedback: input.feedback ?? { oftenSkipped: [], preferredSwaps: [] },
     cells,
     placements,
     fixedCost,
@@ -340,6 +344,7 @@ function payloadFor(frame: WeekFrame, step: Step): PlannerPayload {
     pantryUseFirst: frame.dueSoon.map((i) => i.ingredientId),
     favourites: frame.ratings.favourites,
     avoid: [...frame.ratings.avoid, ...frame.ratings.never],
+    feedback: frame.feedback,
     ...(swapStyle(step)
       ? {
           keptMeals: step.kept.map(keptPayload),

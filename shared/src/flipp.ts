@@ -59,10 +59,16 @@ export function fallbackSearchTerms(limit: number = FALLBACK_SEARCH_TERMS): stri
   return buildSearchTerms(sorted, limit);
 }
 
-/** Canadian postal code in the stored form: uppercase, no space. Null when it is not one. */
+/** Canadian postal code without a space: uppercase, the form flyer rows and Flipp searches use. Null when it is not one. */
 export function normalizePostalCode(input: string): string | null {
   const s = input.replace(/[\s-]/g, '').toUpperCase();
   return /^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(s) ? s : null;
+}
+
+/** The display and stored form of a postal code: "M5T 1R5". Null when the input is not a Canadian postal code. */
+export function formatPostalCode(input: string): string | null {
+  const s = normalizePostalCode(input);
+  return s === null ? null : `${s.slice(0, 3)} ${s.slice(3)}`;
 }
 
 /** Lowercase letters and digits only, for comparing store names. */

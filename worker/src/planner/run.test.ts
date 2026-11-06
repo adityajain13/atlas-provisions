@@ -34,6 +34,13 @@ const deals: Deal[] = scoreDeals(matched, {
 // The top-ranked deal, so every fake plan uses an id that really is on offer.
 const DEAL_ID = deals[0]!.ingredientId;
 const DEAL_UNIT_QTY = INGREDIENT_BY_ID[DEAL_ID]!.baseUnit === 'each' ? 1 : 0.1;
+// The fake meals rotate through a few kilogram deals, three cells each, so no one ingredient is in more than three meals
+// (the repeat limit). Every one is kilograms, so the quantity stays DEAL_UNIT_QTY.
+const SPREAD_IDS = [...new Set(deals.map((d) => d.ingredientId))]
+  .filter((id) => INGREDIENT_BY_ID[id]!.baseUnit === 'kg')
+  .slice(0, 8);
+/** The ingredient for the cell at `cellIndex` when a fake meal uses DEAL_ID. */
+const spreadId = (cellIndex: number) => SPREAD_IDS[Math.floor(cellIndex / 3) % SPREAD_IDS.length]!;
 
 function household(over: Partial<Household> = {}): Household {
   const h = defaultHousehold();
@@ -65,7 +72,7 @@ function planFor(cells: SlotCell[], ingredientId: string, qty: number): RawPlan 
       id: `m${i}`,
       slotId: `${c.day}-${c.slot}`,
       name: `Meal ${c.day} ${c.slot}`,
-      ingredients: [{ id: ingredientId, qty }],
+      ingredients: [{ id: ingredientId === DEAL_ID ? spreadId(i) : ingredientId, qty }],
       activeMinutes: 20,
       steps: ['Cook'],
       tags: [],
@@ -111,7 +118,7 @@ function mealsForSlots(all: SlotCell[], slots: { id: string }[], ingredientId: s
         id: `m${i}`,
         slotId: slot.id,
         name: `Meal ${slot.id}`,
-        ingredients: [{ id: ingredientId, qty: qty(slot.id) }],
+        ingredients: [{ id: ingredientId === DEAL_ID ? spreadId(i) : ingredientId, qty: qty(slot.id) }],
         activeMinutes: 20,
         steps: ['Cook'],
         tags: [],
@@ -157,7 +164,9 @@ describe('runPlanner', () => {
     expect(plan.attempts).toBe(3);
     const errors = plan.issues.filter((i) => i.severity === 'error');
     expect(errors.length).toBeGreaterThan(0);
-    expect(errors.every((i) => i.check === 'unknown-ingredient')).toBe(true);
+    // One made-up ingredient in every meal is also over the repeat limit, so repetition errors are expected too.
+    expect(errors.every((i) => i.check === 'unknown-ingredient' || i.check === 'repetition')).toBe(true);
+    expect(errors.some((i) => i.check === 'unknown-ingredient')).toBe(true);
   });
 
   it('keeps the attempt with the fewest errors, not the last one', async () => {
@@ -578,5 +587,20 @@ describe('weekFrame: food forms and dishes', () => {
     });
     expect(frame.formBlocked.size).toBe(0);
     expect(frame.available.map((a) => a.id)).toEqual(['canned-tuna']);
+  });
+});
+
+describe('ingredient changes reach the planner', () => {
+  it('sends the household feedback signals with every planner call', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const feedback = { oftenSkipped: ['cilantro'], preferredSwaps: [{ from: 'sour-cream', to: 'Greek yogurt', toId: 'greek-yogurt' }] };
+    const { client, seen } = fakeClient([planFor(cells, DEAL_ID, DEAL_UNIT_QTY)]);
+
+    await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [], feedback });
+
+    const payload = seen[0]!.payload as unknown as { ingredientFeedback: unknown };
+    expect(payload.ingredientFeedback).toEqual(feedback);
   });
 });

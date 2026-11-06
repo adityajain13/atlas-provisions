@@ -15,6 +15,9 @@ import {
 } from '@provisions/shared';
 import { readStoredPlan } from '@provisions/shared';
 import type {
+  FeedbackKind,
+  FeedbackRecord,
+  WeekFeedback,
   FlyerItem,
   HistoryPoint,
   MatchedItem,
@@ -710,4 +713,84 @@ export async function pruneWeeksBefore(db: D1Database, cutoff: string): Promise<
   const plans = await db.prepare('DELETE FROM meal_plans WHERE week_of < ?').bind(cutoff).run();
   const checks = await db.prepare('DELETE FROM checks WHERE week_of < ?').bind(cutoff).run();
   return { plans: plans.meta.changes ?? 0, checks: checks.meta.changes ?? 0 };
+}
+
+// ---- Ingredient changes (what the household skipped or replaced in a meal) ----
+
+interface FeedbackRow {
+  meal_id: string;
+  ingredient_id: string;
+  kind: FeedbackKind;
+  replacement: string | null;
+  created_at: string;
+}
+
+const toFeedbackRecord = (r: FeedbackRow): FeedbackRecord => ({
+  ingredientId: r.ingredient_id,
+  kind: r.kind,
+  ...(r.replacement !== null ? { replacement: r.replacement } : {}),
+  createdAt: r.created_at,
+});
+
+/** The household's changes created on or after `since` (an ISO time or a YYYY-MM-DD date). */
+export async function loadFeedbackRecords(db: D1Database, householdId: string, since: string): Promise<FeedbackRecord[]> {
+  const { results } = await db
+    .prepare('SELECT meal_id, ingredient_id, kind, replacement, created_at FROM ingredient_feedback WHERE household_id = ? AND created_at >= ?')
+    .bind(householdId, since)
+    .all<FeedbackRow>();
+  return results.map(toFeedbackRecord);
+}
+
+/** The changes saved for one week, by meal id and then ingredient id. */
+export async function loadWeekFeedback(
+  db: D1Database,
+  householdId: string,
+  weekOf: string,
+): Promise<WeekFeedback> {
+  const { results } = await db
+    .prepare('SELECT meal_id, ingredient_id, kind, replacement, created_at FROM ingredient_feedback WHERE household_id = ? AND week_of = ?')
+    .bind(householdId, weekOf)
+    .all<FeedbackRow>();
+  const out: WeekFeedback = {};
+  for (const r of results) {
+    (out[r.meal_id] ??= {})[r.ingredient_id] = {
+      kind: r.kind,
+      ...(r.replacement !== null ? { replacement: r.replacement } : {}),
+    };
+  }
+  return out;
+}
+
+/** Records a change for one meal's ingredient. The latest one replaces the old, so each meal and ingredient has one row. */
+export async function upsertFeedback(
+  db: D1Database,
+  householdId: string,
+  row: { id: string; weekOf: string; mealId: string; mealName: string; ingredientId: string; kind: FeedbackKind; replacement?: string; createdAt: string },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO ingredient_feedback (id, household_id, week_of, meal_id, meal_name, ingredient_id, kind, replacement, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(household_id, week_of, meal_id, ingredient_id) DO UPDATE SET
+         meal_name = excluded.meal_name, kind = excluded.kind, replacement = excluded.replacement, created_at = excluded.created_at`,
+    )
+    .bind(row.id, householdId, row.weekOf, row.mealId, row.mealName, row.ingredientId, row.kind, row.replacement ?? null, row.createdAt)
+    .run();
+}
+
+/** Clears one meal's ingredient: the meal is used as planned again. */
+export async function deleteFeedback(db: D1Database, householdId: string, weekOf: string, mealId: string, ingredientId: string): Promise<void> {
+  await db
+    .prepare('DELETE FROM ingredient_feedback WHERE household_id = ? AND week_of = ? AND meal_id = ? AND ingredient_id = ?')
+    .bind(householdId, weekOf, mealId, ingredientId)
+    .run();
+}
+
+/** Forgets an ingredient for the household: every change recorded for it, in every week. */
+export async function forgetIngredientFeedback(db: D1Database, householdId: string, ingredientId: string): Promise<number> {
+  const res = await db
+    .prepare('DELETE FROM ingredient_feedback WHERE household_id = ? AND ingredient_id = ?')
+    .bind(householdId, ingredientId)
+    .run();
+  return res.meta.changes ?? 0;
 }
