@@ -569,7 +569,7 @@ describe('weekFrame: food forms and dishes', () => {
     });
     expect(frame.formBlocked.has('canned-tuna')).toBe(true);
     expect(frame.deals.map((d) => d.ingredientId)).toEqual(['salmon-fillet']);
-    expect(frame.available.map((a) => a.id)).toEqual(['salmon-fillet']);
+    expect(frame.available.filter((a) => a.source === 'deal').map((a) => a.id)).toEqual(['salmon-fillet']);
     const ctx = validationContext(frame);
     expect(ctx.formBlocked?.has('canned-tuna')).toBe(true);
     expect(ctx.avoidDishes).toEqual(['slaw']);
@@ -586,7 +586,7 @@ describe('weekFrame: food forms and dishes', () => {
       today: '2026-11-15',
     });
     expect(frame.formBlocked.size).toBe(0);
-    expect(frame.available.map((a) => a.id)).toEqual(['canned-tuna']);
+    expect(frame.available.filter((a) => a.source === 'deal').map((a) => a.id)).toEqual(['canned-tuna']);
   });
 });
 

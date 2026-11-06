@@ -11,6 +11,7 @@ import {
   type PlannedMeal,
   type Slot,
   SLOTS,
+  cuisineByKey,
 } from '@provisions/shared';
 import { headlineName } from './headline';
 import { DAY_SHORT } from './labels';
@@ -20,7 +21,7 @@ import { neededQuantity, packLineQuantity } from './quantity';
 
 // ---- View shapes the Week and List screens draw ----
 
-export type ViewTag = { kind: 'craving' | 'deal' | 'leftover'; text: string };
+export type ViewTag = { kind: 'craving' | 'cuisine' | 'deal' | 'leftover'; text: string };
 
 // A planned meal the household can rate. Only meals from a saved plan have one.
 export type Rateable = {
@@ -90,7 +91,7 @@ export type ViewItem = {
   price: number;
   note?: { kind: 'match' | 'used'; text: string };
   elsewhere?: string; // unpriced items: where the cheapest enabled store sells it
-  estimate?: { basis: EstimateBasis; date: string }; // not a flyer price: the last receipt price, or the store's regular site price, from this day
+  estimate?: { basis: EstimateBasis; date?: string }; // not a flyer price: the store's regular site price or last receipt price (from this day), or a typical price
   pinnedTo?: string; // bought at this store because an item rule pins it there
   priceUnknown?: boolean; // pinned to a store with no known price: listed there, not priced
 };
@@ -169,6 +170,8 @@ function tagsOf(meal: PlannedMeal, cravings: string[]): ViewTag[] {
     const c = craving(meal, cravings);
     tags.push({ kind: 'craving', text: c ? `Craving: ${c.toLowerCase()}` : 'Craving' });
   }
+  // The cuisine comes second, so a card's first two pills show a craving and the cuisine.
+  if (meal.cuisine) tags.push({ kind: 'cuisine', text: cuisineByKey(meal.cuisine)?.label ?? meal.cuisine });
   for (const raw of meal.tags) {
     const t = raw.trim();
     const lower = t.toLowerCase();
@@ -311,6 +314,23 @@ function usedNote(plan: MealPlan, item: ListItem): string | undefined {
 }
 
 /** "Oct 28", from a YYYY-MM-DD date. */
+/**
+ * The line under an estimated price: where a site price is the regular price, when a receipt price was last paid, or
+ * that a typical price is an approximate shelf price. Undefined for a flyer price.
+ */
+export function estimateCaption(estimate: { basis: EstimateBasis; date?: string } | undefined, store: string): string | undefined {
+  if (!estimate) return undefined;
+  if (estimate.basis === 'site') return `regular price at ${store}`;
+  if (estimate.basis === 'receipt') return estimate.date ? `last paid ${monthDay(estimate.date)}` : 'last paid';
+  return 'typical price';
+}
+
+/** The price as shown: estimates from a receipt or a typical price carry a "~". */
+export function priceLabel(price: number, estimate: { basis: EstimateBasis } | undefined): string {
+  const approx = estimate?.basis === 'receipt' || estimate?.basis === 'typical' ? '~' : '';
+  return `${approx}$${price.toFixed(2)}`;
+}
+
 export function monthDay(iso: string): string {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`));
 }

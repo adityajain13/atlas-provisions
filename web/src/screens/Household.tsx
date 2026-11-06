@@ -3,6 +3,13 @@ import {
   ALLERGEN_PRESETS,
   CONTAINER_LABEL,
   CONTAINER_LEVELS,
+  CUISINES,
+  CUISINE_GROUPS,
+  CUISINE_LEVELS,
+  CUISINE_LEVEL_LABEL,
+  INGREDIENT_BY_ID,
+  cuisineLevel,
+  type CuisineLevel,
   FORM_GROUPS,
   FORM_LABEL,
   allowedForms,
@@ -214,12 +221,14 @@ export default function HouseholdScreen() {
             <FixedMealsSection h={h} update={update} />
             <ItemRulesSection h={h} update={update} />
             <DishesSection h={h} update={update} />
+            <CuisinesSection h={h} update={update} />
             <LearnedSection />
           </div>
           <div className="lg:flex lg:flex-col lg:gap-12">
             <AllergiesSection h={h} />
             <EquipmentSection h={h} update={update} />
             <FormsSection h={h} update={update} />
+            <SpiceRackSection h={h} update={update} />
             <VarietySection h={h} update={update} />
             <BudgetSection h={h} update={update} />
             <StoresSection h={h} update={update} />
@@ -2915,3 +2924,185 @@ function DishesSection({ h, update }: { h: Household; update: Update }) {
     </Section>
   );
 }
+
+// ---------- Cuisines ----------
+
+/** How often the household eats each cuisine. Plans lean on 'often' cuisines and mix in the rest. */
+function CuisinesSection({ h, update }: { h: Household; update: Update }) {
+  function set(key: string, level: CuisineLevel) {
+    update((prev) => ({ ...prev, cuisines: { ...prev.cuisines, [key]: level } }));
+  }
+  // Regions with an 'often' cuisine start open; the rest start closed.
+  const [openGroups, setOpenGroups] = useState<Set<string>>(
+    () => new Set(CUISINE_GROUPS.filter((g) => CUISINES.some((c) => c.group === g && cuisineLevel(h.cuisines, c.key) === 'often'))),
+  );
+
+  function toggleOpen(group: string) {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }
+
+  return (
+    <Section title="Cuisines" caption="Plans lean on 'Often' cuisines and mix in the rest.">
+      <ul>
+        {CUISINE_GROUPS.map((group) => {
+          const members = CUISINES.filter((c) => c.group === group);
+          const levels = members.map((c) => cuisineLevel(h.cuisines, c.key));
+          const often = members.filter((_, i) => levels[i] === 'often').map((c) => c.label);
+          const sometimes = levels.filter((l) => l === 'sometimes').length;
+          const rarely = levels.filter((l) => l === 'rarely').length;
+          const summary = [
+            often.length > 0 ? `${often.join(', ')} often` : '',
+            sometimes > 0 ? `${sometimes} sometimes` : '',
+            rarely > 0 ? `${rarely} rarely` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ') || 'All never';
+          return (
+            <li key={group}>
+              <Disclosure
+                open={openGroups.has(group)}
+                onToggle={() => toggleOpen(group)}
+                title={group}
+                summary={summary}
+                noFooter
+              >
+                <ul>
+                  {members.map((c) => {
+                    const level = cuisineLevel(h.cuisines, c.key);
+                    return (
+                      <li
+                        key={c.key}
+                        className="grid grid-cols-1 items-center gap-2 border-b border-line2 py-2 sm:min-h-[44px] sm:grid-cols-[minmax(0,1fr)_304px] sm:gap-x-4 sm:py-1"
+                      >
+                        <span className="min-w-0 text-[15px] text-paper">{c.label}</span>
+                        <div
+                          role="group"
+                          aria-label={`${c.label}: how often`}
+                          className="grid h-9 grid-cols-4 gap-0.5 rounded-lg border border-edge p-0.5"
+                        >
+                          {CUISINE_LEVELS.map((l) => {
+                            const on = level === l;
+                            return (
+                              <button
+                                key={l}
+                                type="button"
+                                aria-pressed={on}
+                                onClick={() => set(c.key, l)}
+                                className={`h-full rounded-md px-0.5 text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb ${
+                                  on ? 'bg-herb font-medium text-ink' : 'text-muted'
+                                }`}
+                              >
+                                {CUISINE_LEVEL_LABEL[l]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Disclosure>
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
+  );
+}
+
+// ---------- Spice rack & staples I keep ----------
+
+/** The staples the household keeps stocked, grouped by cuisine, and any other catalogue item it adds. Free in plans. */
+function SpiceRackSection({ h, update }: { h: Household; update: Update }) {
+  const kept = new Set(h.onHand);
+  const pantryIds = new Set(CUISINES.flatMap((c) => c.pantry));
+  const others = h.onHand.filter((id) => !pantryIds.has(id) && INGREDIENT_BY_ID[id]);
+  // Cuisines the household eats often open first; the rest start closed.
+  const order = [...CUISINES].sort((a, b) => LEVEL_RANK[cuisineLevel(h.cuisines, a.key)] - LEVEL_RANK[cuisineLevel(h.cuisines, b.key)]);
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set(CUISINES.filter((c) => cuisineLevel(h.cuisines, c.key) === 'often').map((c) => c.key)));
+
+  function toggleOpen(key: string) {
+    setOpenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function setKept(id: string, on: boolean) {
+    update((prev) => {
+      if (on === prev.onHand.includes(id)) return prev;
+      return { ...prev, onHand: on ? [...prev.onHand, id] : prev.onHand.filter((x) => x !== id) };
+    });
+  }
+
+  return (
+    <Section title="Spice rack & staples I keep" caption="Things you keep stocked. Plans can use them freely and they never go on the shopping list.">
+      <ul>
+        {order.map((c) => {
+          const keptHere = c.pantry.filter((id) => kept.has(id)).length;
+          const open = openKeys.has(c.key);
+          return (
+            <li key={c.key}>
+              <Disclosure
+                open={open}
+                onToggle={() => toggleOpen(c.key)}
+                title={c.label}
+                summary={`${keptHere} of ${c.pantry.length} kept`}
+              >
+                <ul className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+                  {c.pantry.map((id) => (
+                    <li key={id}>
+                      <label className="flex min-h-[44px] cursor-pointer items-center gap-3">
+                        <input
+                          type="checkbox"
+                          className="h-5 w-5 shrink-0"
+                          checked={kept.has(id)}
+                          onChange={(e) => setKept(id, e.target.checked)}
+                        />
+                        <span className="text-[15px] text-paper">{INGREDIENT_BY_ID[id]?.name ?? id}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </Disclosure>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="mt-6">
+        <p className={eyebrow}>Add anything else</p>
+        <div className="mt-2">
+          <IngredientPicker onPick={(i) => setKept(i.id, true)} />
+        </div>
+        {others.length > 0 && (
+          <ul className="mt-4 flex flex-wrap gap-2">
+            {others.map((id) => (
+              <li key={id} className={`${chipBase} gap-1 border-edge pl-4 pr-1 text-paper`}>
+                {INGREDIENT_BY_ID[id]?.name ?? id}
+                <button
+                  type="button"
+                  aria-label={`Remove ${INGREDIENT_BY_ID[id]?.name ?? id}`}
+                  onClick={() => setKept(id, false)}
+                  className={removeIconBtn}
+                >
+                  &times;
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+const LEVEL_RANK: Record<CuisineLevel, number> = { often: 0, sometimes: 1, rarely: 2, never: 3 };
+

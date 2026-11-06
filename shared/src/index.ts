@@ -12,6 +12,7 @@ import {
 } from './stores';
 import { DEFAULT_STORAGE, StorageSchema } from './storage';
 import { FoodFormSchema } from './forms';
+import { CUISINE_LEVELS, DEFAULT_ON_HAND, defaultCuisines } from './cuisines';
 import { formatPostalCode, normalizePostalCode } from './flipp';
 export {
   DAYS,
@@ -186,6 +187,10 @@ export const HouseholdSchema = z.object({
   forms: z.record(z.string(), z.array(FoodFormSchema)).default({}),
   // What storage the household has. Stored households without it get the defaults.
   storage: StorageSchema.default(DEFAULT_STORAGE),
+  // How often the household eats each cuisine (see cuisines.ts). A missing cuisine reads as its default.
+  cuisines: z.record(z.string(), z.enum(CUISINE_LEVELS)).default(defaultCuisines),
+  // Catalogue ids of the spices and staples the household keeps: plans use them freely and they never go on the list.
+  onHand: z.array(z.string().min(1).max(80)).max(300).default(() => [...DEFAULT_ON_HAND]),
 });
 export type Household = z.infer<typeof HouseholdSchema>;
 
@@ -226,6 +231,8 @@ export function defaultHousehold(): Household {
     forms: {},
     storage: { ...DEFAULT_STORAGE },
     storePreference: { ...DEFAULT_STORE_PREFERENCE },
+    cuisines: defaultCuisines(),
+    onHand: [...DEFAULT_ON_HAND],
   };
 }
 
@@ -277,3 +284,4 @@ export * from './repeats';
 export * from './feedback';
 export * from './tntSyncScript';
 export * from './tntBookmarklet';
+export * from './cuisines';

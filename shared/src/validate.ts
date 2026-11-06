@@ -1,4 +1,5 @@
 import { CATEGORY_ORDER, INGREDIENT_BY_ID, type Category } from './catalog';
+import { CUISINES, cuisineKey, cuisineLevel } from './cuisines';
 import { DAY_LONG, DAYS, isWeeknight, type Day, type Slot } from './calendar';
 import type { FixedCost } from './fixed';
 import type { Household, ItemRule } from './index';
@@ -69,6 +70,7 @@ export function toPlannedMeals(
       ...(r.makesLeftoversFor ? { makesLeftoversFor: r.makesLeftoversFor } : {}),
       steps: r.steps.slice(0, 6),
       tags: [...r.tags],
+      ...(cuisineKey(r.cuisine) ? { cuisine: cuisineKey(r.cuisine) } : {}),
     });
   }
   return { meals, issues };
@@ -119,7 +121,8 @@ export function pinsOf(rules: ItemRule[]): Pin[] {
 export interface BuildListOptions {
   preference?: StorePreference; // default: cheapest
   pins?: Pin[];
-  estimates?: Offer[]; // receipt prices for store and ingredient pairs no flyer covers
+  estimates?: Offer[]; // site, receipt or typical prices for store and ingredient pairs no flyer covers
+  onHand?: string[]; // ingredient ids the household keeps: free, and never on the list
 }
 
 const CHEAPEST: StorePreference = { mode: 'cheapest', minSaving: 0 };
@@ -275,6 +278,8 @@ export function buildList(
   };
   for (const m of meals) for (const ing of m.ingredients) add(ing.ingredientId, ing.qty, [m.id]);
   for (const n of fixed.needs) add(n.ingredientId, n.qty, n.usedIn);
+  // Kept staples are free and never bought: they come off the quantities before any pack is counted.
+  for (const id of options.onHand ?? []) qty.delete(id);
 
   if (pantry.length > 0) {
     const { remaining } = subtractPantry(
@@ -893,6 +898,37 @@ function checkRepetition(plan: MealPlan): ValidationIssue[] {
   return out;
 }
 
+/** Most dinners one cuisine may take in a week. More is a warning: the plan is still shown. */
+export const MAX_DINNERS_PER_CUISINE = 3;
+
+/**
+ * A dinner from a cuisine the household never eats, or one cuisine more than MAX_DINNERS_PER_CUISINE dinners in the week.
+ * Warnings, never retried: the planner is told the rule in its prompt.
+ */
+function checkCuisine(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
+  const out: ValidationIssue[] = [];
+  const label = (key: string) => CUISINES.find((c) => c.key === key)?.label ?? key;
+  for (const m of plan.meals) {
+    if (!m.cuisine || cuisineLevel(ctx.household.cuisines, m.cuisine) !== 'never') continue;
+    out.push({
+      check: 'cuisine',
+      severity: 'warning',
+      message: `"${m.name}" is ${label(m.cuisine)}, a cuisine the household never eats. Plan a dinner from a cuisine it eats.`,
+    });
+  }
+  const dinners = new Map<string, number>();
+  for (const m of plan.meals) if (m.slot === 'dinner' && m.cuisine) dinners.set(m.cuisine, (dinners.get(m.cuisine) ?? 0) + 1);
+  for (const [key, n] of dinners) {
+    if (n <= MAX_DINNERS_PER_CUISINE) continue;
+    out.push({
+      check: 'cuisine',
+      severity: 'warning',
+      message: `${n} dinners are ${label(key)} this week, more than ${MAX_DINNERS_PER_CUISINE}. Mix in another cuisine.`,
+    });
+  }
+  return out;
+}
+
 /** Every check on a plan. Errors make the planner retry. Warnings are shown to the user. */
 export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   return [
@@ -914,5 +950,6 @@ export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[
     ...checkUseItUp(plan, ctx),
     ...checkNeverAgain(plan, ctx),
     ...checkRepetition(plan),
+    ...checkCuisine(plan, ctx),
   ];
 }

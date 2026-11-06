@@ -1,11 +1,16 @@
+import { INGREDIENTS, type Ingredient } from './catalog';
 import type { Deal } from './scoring';
 import type { MatchedItem } from './match';
 
 /**
- * What an estimate is based on: a price the household paid at the store (a receipt), or the regular shelf price the
- * store's own site shows for the location the household picked.
+ * What an estimate is based on: a regular shelf price the store's own site shows for the location the household picked
+ * (site), a price the household paid at the store (receipt), or the catalogue's approximate typical price (typical),
+ * which has no store of its own and is taken at the household's top-ranked store.
  */
-export type EstimateBasis = 'receipt' | 'site';
+export type EstimateBasis = 'receipt' | 'site' | 'typical';
+
+/** The order estimates are used in when a store has no flyer price: site, then receipt, then typical. */
+export const ESTIMATE_PRIORITY: readonly EstimateBasis[] = ['site', 'receipt', 'typical'];
 
 /** The cheapest price one store offers for one ingredient. */
 export interface Offer {
@@ -14,8 +19,8 @@ export interface Offer {
   pricePerUnit: number;
   packQty: number; // base units
   packPrice: number;
-  // Set on an estimate: not a flyer price, but a receipt price or a site price (see EstimateBasis).
-  estimate?: { basis: EstimateBasis; date: string };
+  // Set on an estimate: not a flyer price, but a site, receipt or typical price (see EstimateBasis). Typical prices have no date.
+  estimate?: { basis: EstimateBasis; date?: string };
 }
 
 /** A price the household paid at a store for an ingredient, from a confirmed receipt. */
@@ -139,6 +144,43 @@ export function collectOffers(
     list.sort((a, b) => a.pricePerUnit - b.pricePerUnit || a.store.localeCompare(b.store));
   }
   return out;
+}
+
+/** The typical price of one catalogue ingredient as an offer at `store`, or undefined when it has no typical price. */
+export function typicalOffer(ing: Ingredient, store: string): Offer | undefined {
+  const t = ing.typicalPrice;
+  if (!t) return undefined;
+  // Per kilogram or litre, a 0.1 step; per item, one item; per pack, the pack the price is for.
+  const packQty = t.per === 'pack' ? (t.packQty ?? 1) : t.per === 'each' ? 1 : 0.1;
+  const packPrice = t.per === 'pack' ? t.price : t.price * packQty;
+  return {
+    ingredientId: ing.id,
+    store,
+    pricePerUnit: packPrice / packQty,
+    packQty,
+    packPrice,
+    estimate: { basis: 'typical' },
+  };
+}
+
+/** A typical-price offer for every catalogue ingredient that has one, all at `store`. None when there is no store. */
+export function typicalOffers(store: string | undefined): Offer[] {
+  if (!store) return [];
+  return INGREDIENTS.flatMap((ing) => {
+    const o = typicalOffer(ing, store);
+    return o ? [o] : [];
+  });
+}
+
+/**
+ * The estimate an ingredient is priced from when no flyer prices it: the first basis in ESTIMATE_PRIORITY that any
+ * estimate for it has. Undefined when none does.
+ */
+export function estimateBasisFor(ingredientId: string, estimates: Offer[]): EstimateBasis | undefined {
+  for (const basis of ESTIMATE_PRIORITY) {
+    if (estimates.some((e) => e.ingredientId === ingredientId && e.estimate?.basis === basis)) return basis;
+  }
+  return undefined;
 }
 
 /** The cheapest offer in a list, or undefined. */

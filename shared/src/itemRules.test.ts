@@ -16,9 +16,21 @@ describe('expandRule: the household terms', () => {
     expect(pork).toEqual(withProtein('pork'));
   });
 
-  it('corn covers the five corn items: cobs, frozen, canned, tortillas and chips', () => {
-    const five = ['corn-cobs', 'frozen-corn', 'canned-corn', 'corn-tortillas', 'tortilla-chips'];
-    expect([...expandRule('corn')].sort()).toEqual([...five].sort());
+  it('corn covers the corn items: cobs, frozen, canned, tortillas and chips, but not the processed cornstarch, polenta or masa harina', () => {
+    const corn = ['corn-cobs', 'frozen-corn', 'canned-corn', 'corn-tortillas', 'tortilla-chips'];
+    expect([...expandRule('corn')].sort()).toEqual([...corn].sort());
+  });
+
+  it('a rule that names a derived food still covers it: cornstarch, polenta and masa harina', () => {
+    expect(expandRule('cornstarch')).toEqual(['cornstarch']);
+    expect(expandRule('corn starch')).toEqual(['cornstarch']);
+    expect(expandRule('polenta')).toEqual(['polenta']);
+    expect(expandRule('masa')).toEqual(['masa-harina']);
+    expect(expandRule('cornmeal')).toEqual(['polenta']);
+  });
+
+  it('a plain word matches an exact alias even when the ingredient name is derived: tortillas covers flour tortillas', () => {
+    expect(expandRule('tortillas')).toEqual(expect.arrayContaining(['flour-tortillas', 'corn-tortillas']));
   });
 
   it('oats covers every oats ingredient', () => {
