@@ -1,6 +1,6 @@
 // The store number a person types for a Loblaw-family store. Pure: no DOM.
 import { describe, expect, it } from 'vitest';
-import { TNT_PRICE_NOTE, storeNumberOf } from './SiteLocation';
+import { storeNumberOf } from './SiteLocation';
 
 describe('storeNumberOf', () => {
   it('takes exactly four digits, with spaces around them ignored', () => {
@@ -17,10 +17,3 @@ describe('storeNumberOf', () => {
   });
 });
 
-describe('TNT_PRICE_NOTE', () => {
-  it('says T&T blocks automated lookups, a browser sync is next, and receipts still count', () => {
-    expect(TNT_PRICE_NOTE).toBe(
-      'T&T blocks automated lookups from our server. A browser sync for T&T prices is coming next; prices from your scanned receipts still count.',
-    );
-  });
-});

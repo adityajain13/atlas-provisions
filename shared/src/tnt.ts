@@ -65,3 +65,40 @@ export function normaliseTntItem(raw: unknown): TntProduct | null {
     inStock: typeof stock !== 'string' || !/out/i.test(stock),
   };
 }
+
+/** The product search the storefront sends, trimmed to the fields the app reads. Captured from the site's own requests. */
+export const TNT_QUERY =
+  'query ProductSearch($currentPage:Int=1 $inputText:String! $pageSize:Int=6 $filters:ProductAttributeFilterInput! $sort:ProductAttributeSortInput){products(currentPage:$currentPage pageSize:$pageSize search:$inputText filter:$filters sort:$sort){items{id sku name stock_status url_key price{regularPrice{amount{currency value}}} price_range{minimum_price{final_price{currency value}}} was_price uom_type weight_uom} total_count}}';
+
+/** The name T&T's rows carry in price_history and on the list. */
+export const TNT_STORE_NAME = 'T&T Supermarket';
+
+/** The province T&T prices a delivery in. */
+export type TntRegion = 'ON' | 'BC' | 'AB' | 'QC';
+
+/** The regions the sync covers. A postal code elsewhere in Canada has no T&T region here. */
+export const TNT_REGIONS: readonly TntRegion[] = ['ON', 'BC', 'AB', 'QC'];
+
+/**
+ * The region from the first letter of a postal code: Ontario, British Columbia, Alberta or Quebec. Null for a postal
+ * code outside those four (or no postal code), so the sync says so instead of guessing.
+ */
+export function tntRegionOf(postalCode: string | undefined): TntRegion | null {
+  const first = (postalCode ?? '').trim().toUpperCase().charAt(0);
+  if (first === 'K' || first === 'L' || first === 'M' || first === 'N' || first === 'P') return 'ON';
+  if (first === 'V') return 'BC';
+  if (first === 'T') return 'AB';
+  if (first === 'G' || first === 'H' || first === 'J') return 'QC';
+  return null;
+}
+
+/** The forward sortation area of a Canadian postal code, e.g. "L5L" for "L5L 3T4", or undefined when it is not one. */
+export function fsaOf(postalCode: string | undefined): string | undefined {
+  const s = (postalCode ?? '').replace(/[\s-]/g, '').toUpperCase();
+  return /^[A-Z]\d[A-Z]/.test(s) ? s.slice(0, 3) : undefined;
+}
+
+/** The store id T&T's price rows are keyed by: one per region. */
+export function tntStoreIdOf(region: TntRegion): string {
+  return `tnt-${region}`;
+}

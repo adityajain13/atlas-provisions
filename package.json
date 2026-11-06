@@ -13,7 +13,10 @@
     "typecheck": "tsc -p web --noEmit && tsc -p worker --noEmit",
     "db:migrate:local": "wrangler d1 migrations apply atlas-provisions --local",
     "deploy": "npm run build && wrangler deploy",
-    "test": "vitest run"
+    "test": "vitest run",
+    "ext:sync": "vite-node scripts/syncExtension.ts",
+    "ext:zip": "npx --yes web-ext@8.3.0 build --source-dir extension --artifacts-dir extension-dist --overwrite-dest --ignore-files README.md",
+    "ext:lint": "npx --yes web-ext@8.3.0 lint --source-dir extension"
   },
   "engines": {
     "node": ">=20"

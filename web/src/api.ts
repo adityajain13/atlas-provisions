@@ -528,3 +528,44 @@ export async function getIngredientFeedback(): Promise<FeedbackSummary> {
 export async function forgetIngredientFeedback(ingredientId: string): Promise<void> {
   await ensureOk(await authFetch(`${BASE}/ingredient-feedback/${ingredientId}`, { method: 'DELETE' }));
 }
+
+// ---- T&T prices from the signed-in browser (the extension or the bookmark) ----
+
+/** The last browser sync of the household's T&T prices. */
+export interface TntSyncStatus {
+  enabled: boolean;
+  lastRun: { finishedAt: string; ok: boolean; lookups: number; matched: number } | null;
+  /** Ingredients with a T&T price in the last fourteen days. */
+  prices: number;
+}
+
+export async function getTntSyncStatus(): Promise<TntSyncStatus> {
+  return json(await authFetch(`${BASE}/tnt-sync/status`), (raw) => raw as TntSyncStatus);
+}
+
+/** One of the household's sync keys: a browser, a device, or the iPhone bookmark. Never the key itself. */
+export interface SyncKeyRow {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export async function listSyncKeys(): Promise<SyncKeyRow[]> {
+  return json(await authFetch(`${BASE}/sync-keys`), (raw) => raw as SyncKeyRow[]);
+}
+
+/** Makes a sync key with this label. The key is returned once. Other keys are not changed. */
+export async function createSyncKey(label: string): Promise<{ id: string; label: string; key: string }> {
+  const res = await authFetch(`${BASE}/sync-keys`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ label }),
+  });
+  return json(await ensureOk(res), (raw) => raw as { id: string; label: string; key: string });
+}
+
+/** Revokes one sync key. The browser or bookmark holding it stops working; the others are not affected. */
+export async function revokeSyncKey(id: string): Promise<void> {
+  await ensureOk(await authFetch(`${BASE}/sync-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+}

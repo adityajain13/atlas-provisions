@@ -274,3 +274,5 @@ export * from './dishes';
 export * from './amounts';
 export * from './repeats';
 export * from './feedback';
+export * from './tntSyncScript';
+export * from './tntBookmarklet';

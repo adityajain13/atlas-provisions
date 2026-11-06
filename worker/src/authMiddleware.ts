@@ -7,6 +7,8 @@ import { API } from './authCore';
 import { endSession, getSession, type SessionEnv } from './session';
 
 const PUBLIC_PATHS = new Set([`${API}/health`]);
+/** The browser sync's routes: called without a cookie, and they check their own Bearer sync key (tntSyncRoutes). */
+export const BEARER_PATHS = new Set([`${API}/tnt-sync/plan`, `${API}/tnt-sync/results`]);
 
 /** Set on the request for routes behind sign-in: the signed-in address and the household it works in. */
 export type SessionVars = { email: string; householdId: string; role: HouseholdRole };
@@ -18,7 +20,7 @@ export const requireSession: MiddlewareHandler<{ Bindings: AuthMiddlewareEnv; Va
   next,
 ) => {
   const { pathname } = new URL(c.req.url);
-  if (PUBLIC_PATHS.has(pathname) || pathname.startsWith(`${API}/auth/`)) return next();
+  if (PUBLIC_PATHS.has(pathname) || BEARER_PATHS.has(pathname) || pathname.startsWith(`${API}/auth/`)) return next();
 
   const s = await getSession(c.req.raw, c.env);
   if (!s) return c.json({ error: 'Sign in' }, 401, { 'Cache-Control': 'no-store' });
