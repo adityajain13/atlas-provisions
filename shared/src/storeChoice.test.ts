@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { HouseholdSchema, ItemRuleSchema, defaultHousehold, type Household } from './index';
 import { DEFAULT_STORE_PREFERENCE } from './stores';
 import { estimateOffers, collectOffers, type Offer } from './offers';
-import { buildList, pinsOf, validate, type ValidateContext } from './validate';
+import { assignStores, buildList, pinsOf, subsetsCached, subsetsUpTo, validate, type ValidateContext } from './validate';
 import { INGREDIENTS } from './catalog';
 import type { FixedCost } from './fixed';
 import type { ItemRule } from './index';
@@ -313,5 +313,79 @@ describe('household schema: store preference and pins', () => {
     expect(ItemRuleSchema.safeParse({ id: '2', name: 'milk', rule: 'always', store: 'Costco' }).success).toBe(true);
     expect(ItemRuleSchema.safeParse({ id: '3', name: 'milk', rule: 'always' }).success).toBe(true);
     expect(ItemRuleSchema.safeParse({ id: '4', name: 'milk', rule: 'sometimes' }).success).toBe(false);
+  });
+});
+
+describe('assignStores: memoised subsets match the walk', () => {
+  // mulberry32, seeded, so the random cases are the same on every run.
+  let state = 7;
+  const rand = () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const shuffle = <T,>(xs: T[]): T[] => {
+    const out = [...xs];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [out[i], out[j]] = [out[j]!, out[i]!];
+    }
+    return out;
+  };
+  const STORES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+  const INGS = ['i1', 'i2', 'i3', 'i4'];
+  const CHEAPEST_PREF = { mode: 'cheapest' as const, minSaving: 0 };
+  const PREFER_PREF = { mode: 'prefer' as const, minSaving: 2 };
+
+  /** A random store set in random order, offers that sometimes skip a store, and whole-dollar prices so ties happen. */
+  function randomCase() {
+    const stores = shuffle(STORES).slice(0, 2 + Math.floor(rand() * 5));
+    const offers = new Map<string, Offer[]>();
+    for (const id of INGS) {
+      const list: Offer[] = [];
+      for (const store of stores) {
+        if (rand() < 0.3) continue;
+        const packQty = 1 + Math.floor(rand() * 2);
+        const pricePerUnit = 1 + Math.floor(rand() * 8);
+        list.push({ ingredientId: id, store, pricePerUnit, packQty, packPrice: pricePerUnit * packQty });
+      }
+      if (list.length > 0) offers.set(id, list);
+    }
+    const ids = [...offers.keys()].filter(() => rand() < 0.8);
+    const qty = new Map(ids.map((id) => [id, 1 + Math.floor(rand() * 3)] as const));
+    const required = rand() < 0.5 ? [] : [stores[Math.floor(rand() * stores.length)]!];
+    const maxStores = 1 + Math.floor(rand() * 3);
+    return { ids, qty, offers, stores, maxStores, required };
+  }
+
+  it('gives the same picks as the un-memoised walk, with and without required stores', () => {
+    for (let trial = 0; trial < 300; trial++) {
+      const c = randomCase();
+      for (const pref of [CHEAPEST_PREF, PREFER_PREF]) {
+        const memo = assignStores(c.ids, c.qty, c.offers, c.stores, c.maxStores, pref, c.required);
+        const walk = assignStores(c.ids, c.qty, c.offers, c.stores, c.maxStores, pref, c.required, subsetsUpTo);
+        expect([...memo]).toEqual([...walk]);
+      }
+    }
+  });
+
+  it('lists the same subsets, in the same order, for any input order', () => {
+    for (let trial = 0; trial < 60; trial++) {
+      const items = shuffle(STORES).slice(0, 1 + Math.floor(rand() * STORES.length));
+      for (const k of [1, 2, 3, 4]) expect(subsetsCached(items, k)).toEqual(subsetsUpTo(items, k));
+    }
+  });
+
+  it('stays correct when the cache fills and is cleared', () => {
+    // Every 3-store set of ten letters at two sizes: 240 keys, more than the cache holds.
+    const letters = 'ABCDEFGHIJ'.split('');
+    for (let i = 0; i < 10; i++)
+      for (let j = i + 1; j < 10; j++)
+        for (let k = j + 1; k < 10; k++)
+          for (const size of [2, 3]) {
+            const input = shuffle([letters[i]!, letters[j]!, letters[k]!]);
+            expect(subsetsCached(input, size)).toEqual(subsetsUpTo(input, size));
+          }
   });
 });

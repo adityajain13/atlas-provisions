@@ -82,7 +82,7 @@ export function toPlannedMeals(
 // ---------- shopping list ----------
 
 /** All subsets of `items` with 1..maxSize members, in input order. */
-function subsetsUpTo<T>(items: T[], maxSize: number): T[][] {
+export function subsetsUpTo<T>(items: T[], maxSize: number): T[][] {
   const out: T[][] = [];
   const walk = (start: number, cur: T[]) => {
     if (cur.length > 0) out.push([...cur]);
@@ -95,6 +95,41 @@ function subsetsUpTo<T>(items: T[], maxSize: number): T[][] {
   };
   walk(0, []);
   return out;
+}
+
+// Subset lists per store set, kept across buildList calls: a plan's lists are rebuilt with the same few stores. Cleared
+// past SUBSET_CACHE_LIMIT entries so the map stays bounded.
+const SUBSET_CACHE_LIMIT = 200;
+const subsetCache = new Map<string, number[][]>();
+
+/** Lexicographic order on index lists, a prefix first: the order subsetsUpTo's walk emits them in. */
+function compareIndexLists(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) return a[i]! - b[i]!;
+  return a.length - b.length;
+}
+
+/**
+ * subsetsUpTo(items, maxSize), memoised per store set. The subsets are generated once for the ids in sorted order, then
+ * mapped back to the caller's order, so the result is the same list, members and order, that subsetsUpTo gives.
+ */
+export function subsetsCached(items: string[], maxSize: number): string[][] {
+  if (new Set(items).size !== items.length) return subsetsUpTo(items, maxSize);
+  const order = items.map((_, i) => i).sort((a, b) => (items[a]! < items[b]! ? -1 : 1));
+  const key = `${maxSize}\u0000${order.map((i) => items[i]!).join('\u0000')}`;
+  let sorted = subsetCache.get(key);
+  if (!sorted) {
+    if (subsetCache.size >= SUBSET_CACHE_LIMIT) subsetCache.clear();
+    sorted = subsetsUpTo(
+      order.map((_, j) => j),
+      maxSize,
+    );
+    subsetCache.set(key, sorted);
+  }
+  return sorted
+    .map((combo) => combo.map((j) => order[j]!).sort((a, b) => a - b))
+    .sort(compareIndexLists)
+    .map((positions) => positions.map((i) => items[i]!));
 }
 
 /** An item rule that buys one ingredient at one store whenever it is on the list. It does not put the item on the list. */
@@ -175,7 +210,7 @@ interface StoreCandidate {
  * always counts). Among those, the lowest rank sum wins, where a store's rank is its place in `stores`. Then lowest
  * total, then fewest stores. A lower-ranked set of stores therefore wins only when it saves at least minSaving.
  */
-function assignStores(
+export function assignStores(
   ids: string[],
   qty: Map<string, number>,
   offers: Map<string, Offer[]>,
@@ -183,12 +218,14 @@ function assignStores(
   maxStores: number,
   pref: StorePreference,
   required: string[],
+  subsetsOf: (items: string[], maxSize: number) => string[][] = subsetsCached,
 ): Map<string, Offer> {
   const cap = Math.max(1, maxStores);
+  // Subsets without a required store are dropped here, before any of them is scored.
   const subsets =
     required.length > cap
       ? [required]
-      : subsetsUpTo(stores, cap).filter((sub) => required.every((r) => sub.includes(r)));
+      : subsetsOf(stores, cap).filter((sub) => required.every((r) => sub.includes(r)));
 
   const cands: StoreCandidate[] = subsets.map((subset) => {
     const picks = new Map<string, Offer>();
