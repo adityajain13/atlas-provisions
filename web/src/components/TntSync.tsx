@@ -393,7 +393,18 @@ export function TntSync() {
                     Bookmark any page in Safari, then edit the bookmark: name it &quot;Sync T&amp;T prices&quot; and paste the code as
                     its address.
                   </li>
-                  <li>Open tntsupermarket.com and tap the bookmark.</li>
+                  <li>
+                    Open{' '}
+                    <a
+                      href="https://www.tntsupermarket.com/eng/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-herbLight underline underline-offset-2"
+                    >
+                      tntsupermarket.com
+                    </a>{' '}
+                    and tap the bookmark.
+                  </li>
                 </ol>
               </div>
             )}

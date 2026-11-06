@@ -34,6 +34,12 @@ export function IngredientPicker({
   const typed = query.trim();
   const offerFreeText = onFreeText !== undefined && typed !== '' && !isExactMatch(typed);
 
+  // Picking closes the results and empties the box, ready for the next item.
+  function pick(i: CatalogIngredient) {
+    onPick(i);
+    setQuery('');
+  }
+
   return (
     <div>
       <input
@@ -43,6 +49,16 @@ export function IngredientPicker({
         autoFocus={autoFocus}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setQuery('');
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          if (results[0]) pick(results[0]);
+          else if (offerFreeText) {
+            onFreeText(typed);
+            setQuery('');
+          }
+        }}
       />
       {results.length > 0 && (
         <ul className="mt-2 space-y-1.5">
@@ -50,7 +66,7 @@ export function IngredientPicker({
             <li key={i.id}>
               <button
                 type="button"
-                onClick={() => onPick(i)}
+                onClick={() => pick(i)}
                 className="flex h-11 w-full items-center justify-between rounded-md border border-edge px-3 text-left"
               >
                 <span className="text-[15px] text-paper">{i.name}</span>
