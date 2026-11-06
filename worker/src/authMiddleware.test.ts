@@ -109,14 +109,17 @@ describe('sign-in flow (dev mode: code is logged, nothing sent)', () => {
     expect(count(raw, 'login_codes')).toBe(0);
   });
 
-  it('rejects a wrong code, and a second request within 45 seconds', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('rejects a wrong code, and answers a second request within 45 seconds without a new code', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { DB } = await setup([]);
     const env = testEnv(DB, { DEV: '1', DEV_AUTH_EMAIL: OWNER });
     expect((await call(`${H}/auth/request`, json('POST', { email: OWNER }), env)).status).toBe(200);
+    const logged = log.mock.calls.length;
 
     const again = await call(`${H}/auth/request`, json('POST', { email: OWNER }), env);
-    expect(again.status).toBe(429);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ ok: true, alreadySent: true });
+    expect(log.mock.calls.length).toBe(logged); // no second code was made
 
     const wrong = await call(`${H}/auth/verify`, json('POST', { email: OWNER, code: '000000' }), env);
     expect(wrong.status).toBe(400);
