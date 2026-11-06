@@ -90,6 +90,8 @@ import { requireSession, type SessionVars } from './authMiddleware';
 import { householdRoutes } from './householdRoutes';
 import { accessRoutes } from './accessRoutes';
 import { feedbackRoutes, planFeedback } from './feedbackRoutes';
+import { tntSyncRoutes } from './tntSyncRoutes';
+import { tntLocations } from './tntSync';
 import { capMessage, recordUsage } from './usage';
 import { householdHasAdmin } from './access';
 import { SITE_BUDGET, SITE_PRICE_DAYS, SCHEDULED_SUBREQUEST_LIMIT, cachedLocations, runScheduledSite, runSitePrices, siteStatus, siteTargets, siteWaitMinutes } from './sitePrices';
@@ -121,6 +123,7 @@ app.route(`${API}/auth`, authRoutes);
 app.route(API, householdRoutes);
 app.route(API, accessRoutes);
 app.route(API, feedbackRoutes);
+app.route(API, tntSyncRoutes);
 
 function formatZod(error: ZodError): string {
   return error.issues
@@ -196,7 +199,7 @@ async function loadDeals(
   // A store's regular site price (its location picked in Household) comes before a receipt price for the same store.
   const sitePrices = await sitePriceRows(
     env.DB,
-    siteTargets(household).map((t) => ({ store: t.store.name, storeId: t.storeId })),
+    [...siteTargets(household).map((t) => ({ store: t.store.name, storeId: t.storeId })), ...tntLocations(household)],
     addDaysIso(today, -SITE_PRICE_DAYS),
   );
   const estimates = [

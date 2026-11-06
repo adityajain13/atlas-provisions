@@ -2,3 +2,5 @@ node_modules
 dist
 .wrangler
 .dev.vars
+extension-dist
+web-ext-artifacts

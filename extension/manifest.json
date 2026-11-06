@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Atlas Provisions Sync",
+  "version": "1.0.0",
+  "description": "Reads T&T prices from your own browser for Atlas Provisions, when you press Sync in the app.",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "permissions": ["scripting", "tabs", "storage"],
+  "host_permissions": ["https://www.tntsupermarket.com/*", "https://adityajain.ca/provisions/*"],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["tnt-sync.js", "background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://adityajain.ca/provisions/*"],
+      "js": ["content-app.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.tntsupermarket.com/*"],
+      "js": ["content-tnt.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "provisions-sync@adityajain.ca",
+      "strict_min_version": "128.0"
+    },
+    "gecko_android": {
+      "strict_min_version": "128.0"
+    }
+  }
+}

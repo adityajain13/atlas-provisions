@@ -78,6 +78,7 @@ import {
 import { FlyerRefresh } from '../components/FlyerRefresh';
 import { RegularPriceLocation, kmLabel } from '../components/SiteLocation';
 import { SitePrices } from '../components/SitePrices';
+import { TNT_STORE_ID, TntSync } from '../components/TntSync';
 import { SaveStatus, useSaveScope, useSaveStatus } from '../components/SaveStatus';
 import { Header } from '../components/Header';
 import { Page } from '../components/Page';
@@ -1809,6 +1810,11 @@ function StoreRow({
         </div>
       ) : (
         <StoreAddress store={s} change={change} />
+      )}
+      {s.id === TNT_STORE_ID && (
+        <div className="mt-6 border-t border-line2 pt-4">
+          <TntSync />
+        </div>
       )}
     </Disclosure>
   );

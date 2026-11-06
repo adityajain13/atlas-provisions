@@ -193,7 +193,7 @@ type Db = D1Database;
 export async function nextSiteHousehold(db: Db): Promise<string | null> {
   const { results } = await db
     .prepare(
-      `SELECT h.id, h.data, (SELECT MAX(r.started_at) FROM site_price_runs r WHERE r.household_id = h.id) AS last_run
+      `SELECT h.id, h.data, (SELECT MAX(r.started_at) FROM site_price_runs r WHERE r.household_id = h.id AND r.mode = 'server') AS last_run
        FROM households h`,
     )
     .all<{ id: string; data: string; last_run: string | null }>();
@@ -425,7 +425,7 @@ export function matchLocations(
 /** Minutes left before a household can refresh its regular prices by hand. Zero when it can now. */
 export async function siteWaitMinutes(db: Db, householdId: string, now: Date): Promise<number> {
   const last = await db
-    .prepare('SELECT started_at FROM site_price_runs WHERE household_id = ? ORDER BY started_at DESC LIMIT 1')
+    .prepare("SELECT started_at FROM site_price_runs WHERE household_id = ? AND mode = 'server' ORDER BY started_at DESC LIMIT 1")
     .bind(householdId)
     .first<{ started_at: string }>();
   if (!last) return 0;
@@ -469,7 +469,7 @@ export async function siteStatus(
   const row = await db
     .prepare(
       `SELECT id, started_at, finished_at, ok, lookups, matched, errors, auth_needed${debug ? ', sample' : ''}
-       FROM site_price_runs WHERE household_id = ? ORDER BY started_at DESC LIMIT 1`,
+       FROM site_price_runs WHERE household_id = ? AND mode = 'server' ORDER BY started_at DESC LIMIT 1`,
     )
     .bind(householdId)
     .first<SiteRunDbRow>();

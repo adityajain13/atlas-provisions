@@ -11,10 +11,6 @@ const MIN_QUERY = 2;
 /** The nearest locations listed under the search before anything is typed. */
 const NEAREST_SHOWN = 5;
 const BASE = '/provisions/api';
-const TNT_STORE_ID = 'tt-supermarket';
-/** Shown for T&T in place of a location picker: its site blocks automated lookups, so only receipts count for now. */
-export const TNT_PRICE_NOTE =
-  'T&T blocks automated lookups from our server. A browser sync for T&T prices is coming next; prices from your scanned receipts still count.';
 
 /** What the search answers: the matches, whether the chain lists no locations at all, and whether distances are rough. */
 interface SearchReply {
@@ -51,7 +47,6 @@ export function kmLabel(km: number): string {
  * The store location whose regular shelf prices the app reads, shown in an expanded store row. A Loblaw-family store
  * shows the nearest locations to the household's postal code first, and searches its banner's locations by street,
  * city or postal code. A store number can be typed instead, and a chain the site lists no locations for gets only that.
- * T&T gets a note instead: its site blocks automated lookups.
  */
 export function RegularPriceLocation({ store: s, change, near = '' }: { store: Store; change: StoresUpdate; near?: string }) {
   const banner = siteBannerOf(s.id);
@@ -106,14 +101,6 @@ export function RegularPriceLocation({ store: s, change, near = '' }: { store: S
     };
   }, [searchable, banner, query, near]);
 
-  if (s.id === TNT_STORE_ID) {
-    return (
-      <div>
-        <span className={eyebrow}>Location for regular prices</span>
-        <p className="mt-2 text-[13px] text-muted">{TNT_PRICE_NOTE}</p>
-      </div>
-    );
-  }
   if (banner === undefined) {
     return (
       <div>

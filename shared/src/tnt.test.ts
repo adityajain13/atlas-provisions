@@ -1,7 +1,7 @@
 // T&T's storefront item, normalised: the final and regular prices, sale detection, weight-priced products, stock, and
 // the items that are dropped. Pure: no network.
 import { describe, expect, it } from 'vitest';
-import { normaliseTntItem } from './tnt';
+import { fsaOf, normaliseTntItem, tntRegionOf, tntStoreIdOf } from './tnt';
 
 /** An item the way the storefront sends it: the regular price, the final price, and the was price when there is one. */
 function item(over: Record<string, unknown> & { name: string }) {
@@ -61,5 +61,23 @@ describe('normaliseTntItem', () => {
     expect(normaliseTntItem({ name: 'Tofu', price: null, price_range: null })).toBeNull();
     expect(normaliseTntItem(item({ name: 'Free Tofu', price_range: { minimum_price: { final_price: { value: 0 } } } }))).toBeNull();
     expect(normaliseTntItem('tofu')).toBeNull();
+  });
+});
+
+describe('the T&T region of a postal code', () => {
+  it('reads Ontario, British Columbia, Alberta and Quebec, and nothing else', () => {
+    expect(tntRegionOf('M5T 1R5')).toBe('ON');
+    expect(tntRegionOf('l5l3t4')).toBe('ON');
+    expect(tntRegionOf('V6B 1A1')).toBe('BC');
+    expect(tntRegionOf('T2P 1J9')).toBe('AB');
+    expect(tntRegionOf('H2X 1Y4')).toBe('QC');
+    expect(tntRegionOf('B3H 1A1')).toBeNull();
+    expect(tntRegionOf(undefined)).toBeNull();
+  });
+
+  it('takes the forward sortation area, and nothing when the code is not one', () => {
+    expect(fsaOf('L5L 3T4')).toBe('L5L');
+    expect(fsaOf('12345')).toBeUndefined();
+    expect(tntStoreIdOf('ON')).toBe('tnt-ON');
   });
 });
