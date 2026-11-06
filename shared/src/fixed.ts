@@ -46,6 +46,7 @@ export function costFixedMeals(
   deals: Deal[],
   matchedItems: MatchedItem[],
   estimates: Offer[] = [],
+  onHand: ReadonlySet<string> = new Set(),
 ): FixedCost {
   const mealById = new Map(household.fixedMeals.map((m) => [m.id, m]));
   const enabled = new Set(household.stores.filter((s) => s.enabled).map((s) => s.name));
@@ -106,6 +107,8 @@ export function costFixedMeals(
   for (const [ingredientId, need] of needs) {
     const catalog = INGREDIENT_BY_ID[ingredientId];
     if (!catalog) continue;
+    // A kept staple is free: it adds nothing to the cost, and is not listed.
+    if (onHand.has(ingredientId)) continue;
     const offer = cheapest(offers.get(ingredientId) ?? []);
     if (!offer) {
       warn(`unpriced|${ingredientId}`, `No enabled store sells ${catalog.name.toLowerCase()}, which the fixed meals need. Add it to a store's flyer or remove it from the fixed meal.`);

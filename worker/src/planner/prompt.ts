@@ -8,6 +8,7 @@ import {
   type Deal,
   type FeedbackSignals,
   type FoodForm,
+  type EstimateBasis,
   type PantryItem,
   type FixedCost,
   type FixedPlacement,
@@ -16,13 +17,16 @@ import {
   type SlotCell,
   type Storage,
   type ValidationIssue,
+  cuisineMixOf,
 } from '@provisions/shared';
 import { PREP_RULES, PREP_STEP_PROPERTIES } from './prep';
 
 export const SYSTEM_PROMPT = [
   'You plan a week of home-cooked meals for a budget-conscious household in Ontario, Canada.',
   'Fill ONLY the meals in `slots`; each lists who eats it. Scale quantities to that headcount. Do not plan `fixedMeals`.',
-  'Use ONLY ingredient ids from `available`. Basic seasonings, oil, salt, pepper and common dried spices are assumed on hand; do not list them.',
+  'Use ONLY ingredient ids from `available`. Only salt, pepper, oil and water are assumed; everything else must come from available (on-hand items are free).',
+  "Plan dinners as authentic home-style dishes from the cuisines in cuisineMix: roughly half from 'often', most of the rest from 'sometimes', at most one from 'rarely', none from 'never'. No cuisine more than 3 dinners a week. Label each meal with its cuisine in `cuisine`.",
+  'Prefer deals; use regular items when a dish needs them. Regular items have no flyer price this week; on-hand items cost nothing.',
   'Never use `neverBuy`. Never use an ingredient containing a listed allergen for a meal eaten by that person (`allergies` maps person id to allergens).',
   "Never plan a meal built around a word in `neverBuyWords` (e.g. 'beef' rules out a beef stir-fry) even if no listed ingredient contains it.",
   'Prefer `useFirst` and pantry/fixed-meal leftovers, then higher-scored deals. Respect packQty: plan to use most of each pack bought.',
@@ -91,6 +95,7 @@ export const SUBMIT_PLAN_TOOL = {
               description: 'At most 4 steps. Leftover meals have none.',
             },
             tags: { type: 'array', maxItems: 2, items: { type: 'string' }, description: 'At most 2 short tags' },
+            cuisine: { type: 'string', description: 'The cuisine key from cuisineMix that this dinner is from, e.g. "indian"' },
           },
           required: ['id', 'slotId', 'name', 'ingredients', 'activeMinutes', 'steps', 'tags'],
         },
@@ -124,7 +129,9 @@ export interface AvailableItem {
   unit: string;
   packQty: number;
   score: number;
-  source: 'deal' | 'staple' | 'pantry' | 'fixed-leftover';
+  // 'on-hand': a staple the household keeps, free. 'regular': no flyer price this week; priced from an estimate.
+  source: 'deal' | 'staple' | 'pantry' | 'fixed-leftover' | 'on-hand' | 'regular';
+  estimate?: { basis: EstimateBasis }; // for regular items: the price basis it is costed from
   allergens: string[];
   vegetarian: boolean;
   shelfLifeDays: number;
@@ -140,13 +147,20 @@ export function eachMeansFor(ing: { baseUnit: string; eachWeightKg?: number; eac
   return `1 = ${ing.eachLabel ?? 'one item'} as sold (~${grams} g)`;
 }
 
+/** Extra items for the planner, after deals, pantry and fixed-meal leftovers. */
+export interface AvailableExtras {
+  onHand?: string[]; // catalogue ids the household keeps: free, so they replace a deal for the same ingredient
+  regular?: { id: string; packQty: number; basis?: EstimateBasis }[]; // regular-priced items, added only when nothing else covers them
+}
+
 /**
  * What the planner may use: one entry per ingredient. Deals and staples come from scoring.
  * Pantry stock is added as 'pantry' with its quantity as packQty and score 1, so it beats a deal
  * for the same ingredient. Fixed-meal pack remainders are added as 'fixed-leftover', with the
- * remainder as packQty, when nothing else covers the ingredient.
+ * remainder as packQty, when nothing else covers the ingredient. On-hand staples are added as 'on-hand'
+ * (free), unless pantry stock covers them. Regular items are added last, as 'regular'.
  */
-export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryItem[] = []): AvailableItem[] {
+export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryItem[] = [], extras: AvailableExtras = {}): AvailableItem[] {
   const byId = new Map<string, AvailableItem>();
   const entry = (
     ingredientId: string,
@@ -191,6 +205,17 @@ export function buildAvailable(deals: Deal[], fixed: FixedCost, pantry: PantryIt
     if (byId.has(l.ingredientId)) continue;
     const item = entry(l.ingredientId, Number(l.qty.toFixed(3)), 0, 'fixed-leftover');
     if (item) byId.set(l.ingredientId, item);
+  }
+  for (const id of extras.onHand ?? []) {
+    if (byId.get(id)?.source === 'pantry') continue;
+    const item = entry(id, 1, 0, 'on-hand');
+    if (item) byId.set(id, item);
+  }
+  for (const r of extras.regular ?? []) {
+    if (byId.has(r.id)) continue;
+    const item = entry(r.id, Number(r.packQty.toFixed(3)), 0, 'regular');
+    if (!item) continue;
+    byId.set(r.id, r.basis ? { ...item, estimate: { basis: r.basis } } : item);
   }
   return [...byId.values()];
 }
@@ -246,6 +271,7 @@ export interface PlannerPayload {
   avoid: string[];
   avoidDishes: string[]; // dish words the household does not want, as typed
   formsAllowed: Record<string, FoodForm[]>; // per form group, the forms the household keeps
+  cuisineMix: Record<'often' | 'sometimes' | 'rarely' | 'never', string[]>; // cuisine keys at each level, from the household's ranking
   storage: Storage;
   feedback: ValidationIssue[] | null;
   ingredientFeedback: FeedbackSignals; // what the household skipped or replaced in past meals
@@ -304,6 +330,7 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
     avoid: [...new Set([...(noRepeat ? input.recentDinnerNames : []), ...(input.avoid ?? [])])],
     avoidDishes: household.avoidDishes,
     formsAllowed: formsAllowedFor(household.forms),
+    cuisineMix: cuisineMixOf(household.cuisines),
     storage: household.storage,
     feedback: null,
     ingredientFeedback: input.feedback ?? { oftenSkipped: [], preferredSwaps: [] },

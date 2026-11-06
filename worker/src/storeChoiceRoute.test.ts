@@ -95,13 +95,13 @@ describe('POST /plan with receipt prices and pins', () => {
     expect(tuna).toMatchObject({ store: 'Loblaws', packs: 2, total: 4.78, estimate: { basis: 'receipt', date: '2026-10-28' } });
   });
 
-  it('leaves the estimate out when the household has no receipt for the item', async () => {
+  it('prices the item at its typical price, not a receipt, when the household has no receipt for it', async () => {
     stubClaude();
     const ctx = await world(household({ stores: [{ id: 'loblaws', name: 'Loblaws', enabled: true, priceMatches: false, group: 'Loblaw' }] }), false);
     const plan = await planList(ctx);
     const tuna = plan.list.find((i) => i.ingredientId === 'canned-tuna')!;
-    expect(tuna.estimate).toBeUndefined();
-    expect(tuna.store).toBe('Unpriced');
+    expect(tuna.estimate).toEqual({ basis: 'typical' });
+    expect(tuna.store).toBe('Loblaws');
   });
 
   it('keeps a pinned item at its store, unpriced there when no price is known', async () => {

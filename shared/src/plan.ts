@@ -86,6 +86,7 @@ export interface PlannedMeal {
   makesLeftoversFor?: string;
   steps: string[];
   tags: string[]; // e.g. 'craving'
+  cuisine?: string; // a cuisine key from the household's cuisines, for a dinner that has one
 }
 
 export interface ListItem {
@@ -106,8 +107,9 @@ export interface ListItem {
   custom?: boolean;
   label?: string; // the name as typed, for custom items
   qtyText?: string; // the quantity as typed, e.g. "750 g", for custom items
-  // The price is an estimate: the household's last receipt price at this store, not a flyer price this week.
-  estimate?: { basis: EstimateBasis; date: string };
+  // The price is an estimate, not a flyer price this week: the store's regular site price, the household's last receipt
+  // price at this store, or a typical price (no date).
+  estimate?: { basis: EstimateBasis; date?: string };
   // Pinned to this store by an item rule ("Eggs at Costco"). Its price is unknown when no store offer is known.
   pinned?: boolean;
   priceUnknown?: boolean; // pinned, and no price is known at its store: listed under the store, not priced
@@ -135,7 +137,8 @@ export interface ValidationIssue {
     | 'prep'
     | 'prep-timing'
     | 'prices'
-    | 'repetition';
+    | 'repetition'
+    | 'cuisine';
   severity: 'error' | 'warning';
   message: string; // written as an instruction to the planner
 }
@@ -151,6 +154,7 @@ export interface RawMeal {
   makesLeftoversFor?: string;
   steps: string[];
   tags: string[];
+  cuisine?: string; // the cuisine the planner labelled the meal with
 }
 
 export interface RawPlan {

@@ -30,6 +30,7 @@ export const RATING_OPTIONS: { value: RatingKind; label: string }[] = [
 
 export const TAG_TONE: Record<ViewTag['kind'], string> = {
   craving: 'border-herb text-herbLight',
+  cuisine: 'border-edge text-muted',
   deal: 'border-[#3A3631] text-[#C9C3B8]',
   leftover: 'border-edge text-muted',
 };

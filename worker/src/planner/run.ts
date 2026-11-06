@@ -1,8 +1,12 @@
 import {
   DAYS,
   DAY_LONG,
+  ESTIMATE_PRIORITY,
+  INGREDIENT_BY_ID,
   SLOTS,
   blockedFormIds,
+  regularCandidates,
+  typicalOffers,
   buildList,
   costFixedMeals,
   pinsOf,
@@ -19,6 +23,7 @@ import {
   type BuildListOptions,
   type Day,
   type Deal,
+  type EstimateBasis,
   type FeedbackSignals,
   type Offer,
   type FixedCost,
@@ -50,6 +55,9 @@ import {
 } from './prompt';
 import type { PlannerClient } from './claude';
 import { normalisePrep } from './prep';
+
+/** Most regular-priced items the planner is offered at once. */
+export const REGULAR_LIMIT = 40;
 
 export const PREP_MISSING: ValidationIssue = {
   check: 'prep',
@@ -133,8 +141,18 @@ export function weekFrame(input: FrameInput): WeekFrame {
   const deals = kept(input.deals);
   const matched = kept(input.matched);
   const { cells, fixed: placements } = expandWeek(household, request);
-  const estimates = kept(input.estimates ?? []);
-  const fixedCost = costFixedMeals(placements, household, deals, matched, estimates);
+  // Typical prices are the last estimate for every ingredient, at the household's top-ranked enabled store.
+  const topStore = household.stores.find((s) => s.enabled)?.name;
+  const estimates = [...kept(input.estimates ?? []), ...typicalOffers(topStore)];
+  // Kept staples: free, never listed. A staple the household may not eat (never-buy, an allergen, a form it does not keep) is left out.
+  const allergens = new Set(household.people.flatMap((p) => p.allergies));
+  const neverSet = new Set(input.neverBuy);
+  const onHand = household.onHand.filter((id) => {
+    const ing = INGREDIENT_BY_ID[id];
+    return ing !== undefined && !formBlocked.has(id) && !neverSet.has(id) && !ing.allergens.some((a) => allergens.has(a));
+  });
+  const onHandSet = new Set(onHand);
+  const fixedCost = costFixedMeals(placements, household, deals, matched, estimates, onHandSet);
   const names = new Map(household.fixedMeals.map((m) => [m.id, m.name]));
   return {
     household,
@@ -161,10 +179,52 @@ export function weekFrame(input: FrameInput): WeekFrame {
       slot: p.slot,
       eaters: p.eaters,
     })),
-    available: buildAvailable(deals, fixedCost, pantry).filter((a) => !formBlocked.has(a.id)),
-    listOptions: { preference: household.storePreference, pins: pinsOf(household.itemRules), estimates },
+    available: buildAvailable(deals, fixedCost, pantry, {
+      onHand,
+      regular: regularItems(household, { neverBuy: neverSet, blocked: formBlocked, allergens, deals, pantry, matched, estimates, onHand }),
+    }).filter((a) => !formBlocked.has(a.id)),
+    listOptions: { preference: household.storePreference, pins: pinsOf(household.itemRules), estimates, onHand },
     guests: input.guests ?? {},
   };
+}
+
+/**
+ * Regular-priced items for the planner: the fresh and pantry staples of the household's cuisines, skipping anything already
+ * on offer (a deal, pantry stock, a flyer price, a kept staple), never-buy and blocked-form ids and allergens. Each is
+ * priced from the first estimate it has (site, receipt, then typical), so it always has a pack size.
+ */
+function regularItems(
+  household: Household,
+  f: {
+    neverBuy: ReadonlySet<string>;
+    blocked: ReadonlySet<string>;
+    allergens: ReadonlySet<string>;
+    deals: Deal[];
+    pantry: PantryItem[];
+    matched: MatchedItem[];
+    estimates: Offer[];
+    onHand: string[];
+  },
+): { id: string; packQty: number; basis: EstimateBasis }[] {
+  const exclude = new Set<string>([
+    ...f.deals.map((d) => d.ingredientId),
+    ...f.pantry.map((p) => p.ingredientId),
+    ...f.matched.map((m) => m.ingredientId),
+    ...f.onHand,
+  ]);
+  const out: { id: string; packQty: number; basis: EstimateBasis }[] = [];
+  for (const id of regularCandidates(household.cuisines, exclude, REGULAR_LIMIT)) {
+    const ing = INGREDIENT_BY_ID[id];
+    if (!ing || f.neverBuy.has(id) || f.blocked.has(id) || ing.allergens.some((a) => f.allergens.has(a))) continue;
+    for (const basis of ESTIMATE_PRIORITY) {
+      const offer = f.estimates.find((e) => e.ingredientId === id && e.estimate?.basis === basis);
+      if (offer) {
+        out.push({ id, packQty: offer.packQty, basis });
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 /** Prices and checks one set of planned meals for the week. Shape issues from toPlannedMeals come in as well. */

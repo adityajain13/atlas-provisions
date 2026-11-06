@@ -9,7 +9,7 @@ import WeekSwitcher from '../components/WeekSwitcher';
 import { useViewedWeek, viewWindow } from '../lib/week';
 import { eyebrow } from '../components/ui';
 import { useChecks } from '../lib/useChecks';
-import { LIST_CATEGORY_ORDER, monthDay, planToList, type ViewItem } from '../lib/planView';
+import { LIST_CATEGORY_ORDER, estimateCaption, planToList, priceLabel, type ViewItem } from '../lib/planView';
 
 type View = { weekOf: string; stores: string[]; items: ViewItem[] };
 
@@ -200,12 +200,11 @@ function ListRow({
             {item.priceUnknown ? (
               <span className="block text-[13px] text-muted">price unknown</span>
             ) : (
-              <span className={`block text-[14px] ${done ? 'text-faint' : 'text-paper'}`}>
-                {item.estimate?.basis === 'receipt' ? '~' : ''}${item.price.toFixed(2)}
-              </span>
+              <span className={`block text-[14px] ${done ? 'text-faint' : 'text-paper'}`}>{priceLabel(item.price, item.estimate)}</span>
             )}
-            {item.estimate?.basis === 'site' && <span className="block text-[12px] text-muted">regular price at {item.store}</span>}
-            {item.estimate?.basis === 'receipt' && <span className="block text-[12px] text-muted">last paid {monthDay(item.estimate.date)}</span>}
+            {estimateCaption(item.estimate, item.store) && (
+              <span className="block text-[12px] text-muted">{estimateCaption(item.estimate, item.store)}</span>
+            )}
           </span>
         )}
       </label>
