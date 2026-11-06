@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SITE_BANNER_NAMES, hasLocationList, siteBannerOf, type Store } from '@provisions/shared';
+import { SITE_BANNER_NAMES, siteBannerOf, type Store } from '@provisions/shared';
 import { errorMessage, type SiteLocationOption } from '../api';
 import { eyebrow, fieldCls, linkBtn, secondaryBtn } from './ui';
 
@@ -11,7 +11,10 @@ const MIN_QUERY = 2;
 /** The nearest locations listed under the search before anything is typed. */
 const NEAREST_SHOWN = 5;
 const BASE = '/provisions/api';
-export const TANDT_NO_LOCATIONS = 'T&T has the same prices at every store, so no branch is needed.';
+const TNT_STORE_ID = 'tt-supermarket';
+/** Shown for T&T in place of a location picker: its site blocks automated lookups, so only receipts count for now. */
+export const TNT_PRICE_NOTE =
+  'T&T blocks automated lookups from our server. A browser sync for T&T prices is coming next; prices from your scanned receipts still count.';
 
 /** What the search answers: the matches, whether the chain lists no locations at all, and whether distances are rough. */
 interface SearchReply {
@@ -48,11 +51,11 @@ export function kmLabel(km: number): string {
  * The store location whose regular shelf prices the app reads, shown in an expanded store row. A Loblaw-family store
  * shows the nearest locations to the household's postal code first, and searches its banner's locations by street,
  * city or postal code. A store number can be typed instead, and a chain the site lists no locations for gets only that.
- * T&T has no location list, so it gets a note instead.
+ * T&T gets a note instead: its site blocks automated lookups.
  */
 export function RegularPriceLocation({ store: s, change, near = '' }: { store: Store; change: StoresUpdate; near?: string }) {
   const banner = siteBannerOf(s.id);
-  const listed = banner !== undefined && hasLocationList(banner);
+  const listed = banner !== undefined;
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   const [found, setFound] = useState<SiteLocationOption[]>([]);
@@ -103,6 +106,14 @@ export function RegularPriceLocation({ store: s, change, near = '' }: { store: S
     };
   }, [searchable, banner, query, near]);
 
+  if (s.id === TNT_STORE_ID) {
+    return (
+      <div>
+        <span className={eyebrow}>Location for regular prices</span>
+        <p className="mt-2 text-[13px] text-muted">{TNT_PRICE_NOTE}</p>
+      </div>
+    );
+  }
   if (banner === undefined) {
     return (
       <div>
@@ -111,16 +122,6 @@ export function RegularPriceLocation({ store: s, change, near = '' }: { store: S
       </div>
     );
   }
-  if (!listed) {
-    return (
-      <div>
-        <span className={eyebrow}>Location for regular prices</span>
-        <p className="mt-2 text-[13px] text-muted">{TANDT_NO_LOCATIONS}</p>
-        {s.address && <p className="mt-2 text-[14px] text-paper">{s.address}</p>}
-      </div>
-    );
-  }
-
   const chainName = SITE_BANNER_NAMES[banner];
   const numberId = `store-number-${s.id}`;
   const helpId = `store-number-help-${s.id}`;

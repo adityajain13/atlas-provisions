@@ -40,8 +40,7 @@ import {
   type Rating,
   type UsageKind,
   estimateOffers,
-  LOCATION_BANNER_IDS,
-  hasLocationList,
+  SITE_BANNER_IDS,
   isSiteBanner,
   normalizePostalCode,
   siteOffers,
@@ -561,11 +560,10 @@ const SITE_AUTH_MESSAGE = "Loblaw's site needs a PC id sign-in for store search,
 // The store locations of a Loblaw-family banner: the ones that match the search text, or the nearest to a postal code.
 // q is a street, city, name or postal code; near is the household's postal code (used for an empty search, and for
 // distances on a text search). Cached for a week. When the site lists no locations for the banner (or refuses the
-// listing), the answer is 200 with unsupported set, and the picker offers a store number instead. T&T has no list.
+// listing), the answer is 200 with unsupported set, and the picker offers a store number instead. T&T is not a banner here.
 app.get(`${API}/site-stores/:banner/locations`, async (c) => {
   const banner = c.req.param('banner');
   if (!isSiteBanner(banner)) return c.text('Unknown store chain', 400);
-  if (!hasLocationList(banner)) return c.json({ locations: [], unsupported: true, status: null });
   const q = (c.req.query('q') ?? '').slice(0, 60);
   const near = (c.req.query('near') ?? '').slice(0, 12);
   if (q.trim() === '' && near.trim() === '') return c.json({ locations: [] });
@@ -594,7 +592,7 @@ app.get(`${API}/site-stores/:banner/locations`, async (c) => {
 
 // The locations of every banner the app searches, for one search. A text search lists the matches by name, street,
 // city or postal code; a postal code or an empty search lists the nearest to that postal code (or, when empty, to the
-// household's). Banners whose list cannot be read are named in unavailable. T&T is not searched.
+// household's). Banners whose list cannot be read are named in unavailable. T&T is not searched (its site blocks lookups).
 app.get(`${API}/site-stores/search`, async (c) => {
   const q = (c.req.query('q') ?? '').slice(0, 60);
   const near = (c.req.query('near') ?? '').slice(0, 12);
@@ -604,7 +602,7 @@ app.get(`${API}/site-stores/search`, async (c) => {
   if (q.trim() === '' && origin === null) return c.json({ locations: [], unavailable: [] });
   const candidates: Candidate[] = [];
   const unavailable: string[] = [];
-  for (const banner of LOCATION_BANNER_IDS) {
+  for (const banner of SITE_BANNER_IDS) {
     const got = await cachedLocations(c.env.DB, banner, fetch, now);
     if (!got.ok) {
       unavailable.push(banner);

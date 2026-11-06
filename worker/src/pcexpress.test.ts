@@ -373,9 +373,9 @@ describe('searchLocations', () => {
   });
 
   it('labels each result with the chain, street and city', () => {
-    expect(searchLocations(LOCS, 'tandt', 'markham')[0]).toEqual({
+    expect(searchLocations(LOCS, 'nofrills', 'markham')[0]).toEqual({
       storeId: '3',
-      label: 'T&T Supermarket · 7161 Woodbine Ave, Markham',
+      label: 'No Frills · 7161 Woodbine Ave, Markham',
       postalCode: 'L3R0Y3',
     });
   });

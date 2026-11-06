@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Logo } from './Logo';
 
 type HeaderProps = {
   title: ReactNode;
@@ -11,23 +12,11 @@ type HeaderProps = {
   desktopBrand?: boolean;
 };
 
-/** The globe mark and the wordmark. Shown in the phone header and in the desktop sidebar. */
+/** The bowl mark and the wordmark. Shown in the phone header and in the desktop sidebar. */
 export function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="#7DB46C"
-        strokeWidth="1.5"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="9" />
-        <ellipse cx="12" cy="12" rx="4" ry="9" />
-        <path d="M3 12h18" />
-      </svg>
+      <Logo size={20} className="shrink-0 text-herb" />
       <span className="text-[12px] uppercase tracking-[0.18em] text-muted">Atlas Provisions</span>
     </div>
   );

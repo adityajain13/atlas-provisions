@@ -111,7 +111,7 @@ describe('stores and the household schema', () => {
   it('maps the Loblaw-family presets to their banners, and leaves other stores out', () => {
     expect(siteBannerOf('no-frills')).toBe('nofrills');
     expect(siteBannerOf('real-canadian-superstore')).toBe('superstore');
-    expect(siteBannerOf('tt-supermarket')).toBe('tandt');
+    expect(siteBannerOf('tt-supermarket')).toBeUndefined();
     expect(siteBannerOf('metro')).toBeUndefined();
     expect(isSiteBanner('valumart')).toBe(true);
     expect(isSiteBanner('metro')).toBe(false);

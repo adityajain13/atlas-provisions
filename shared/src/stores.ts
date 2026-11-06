@@ -79,14 +79,14 @@ export const MAX_MIN_SAVING = 50;
 export const DEFAULT_STORE_PREFERENCE: StorePreference = { mode: 'prefer', minSaving: 3 };
 
 // Loblaw-family banners whose regular shelf prices the app reads, per store location (the unofficial site lookup in
-// worker/src/pcexpress.ts). Keyed by the store preset id; a store with no entry gets no location picker.
+// worker/src/pcexpress.ts). Keyed by the store preset id; a store with no entry gets no location picker. T&T is not
+// here: its site blocks automated lookups, so its regular prices are not read (its flyers and receipts still count).
 export const SITE_BANNER_IDS = [
   'loblaws',
   'nofrills',
   'superstore',
   'zehrs',
   'independent',
-  'tandt',
   'fortinos',
   'valumart',
 ] as const;
@@ -98,7 +98,6 @@ export const SITE_BANNER_NAMES: Record<SiteBanner, string> = {
   superstore: 'Real Canadian Superstore',
   zehrs: 'Zehrs',
   independent: 'Your Independent Grocer',
-  tandt: 'T&T Supermarket',
   fortinos: 'Fortinos',
   valumart: 'Valu-mart',
 };
@@ -109,7 +108,6 @@ const SITE_BANNER_BY_STORE: Record<string, SiteBanner> = {
   'real-canadian-superstore': 'superstore',
   zehrs: 'zehrs',
   'your-independent-grocer': 'independent',
-  'tt-supermarket': 'tandt',
   fortinos: 'fortinos',
   'valu-mart': 'valumart',
 };
@@ -121,14 +119,6 @@ export function siteBannerOf(storeId: string): SiteBanner | undefined {
 
 export function isSiteBanner(value: string): value is SiteBanner {
   return (SITE_BANNER_IDS as readonly string[]).includes(value);
-}
-
-/** The banners whose store locations can be searched. T&T has no location list on the site, so it is left out. */
-export const LOCATION_BANNER_IDS: readonly SiteBanner[] = SITE_BANNER_IDS.filter((b) => b !== 'tandt');
-
-/** Whether the site lists the locations of a banner. T&T does not, so its branch is never searched. */
-export function hasLocationList(banner: SiteBanner): boolean {
-  return LOCATION_BANNER_IDS.includes(banner);
 }
 
 /** The store preset id a site banner belongs to (the inverse of siteBannerOf), or undefined. */
