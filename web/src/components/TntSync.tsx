@@ -124,7 +124,7 @@ type SyncMessage =
  * for an iPhone. Each browser keeps its own key; each bookmark has its own. Devices lists them all, and revoking one
  * leaves the rest working.
  */
-export function TntSync() {
+export function TntSync({ onDone }: { onDone?: () => void }) {
   const { track } = useSaveStatus();
   const confirm = useConfirm();
   const [status, setStatus] = useState<TntSyncStatus | null>(null);
@@ -242,7 +242,8 @@ export function TntSync() {
     }
     if (answer.type === 'done') setOutcome(syncDoneLine(answer.summary));
     refreshStatus();
-  }, [householdId, refreshStatus, refreshKeys]);
+    onDone?.();
+  }, [householdId, refreshStatus, refreshKeys, onDone]);
 
   function syncNow() {
     track(sync(), sync).catch((e: unknown) => setOutcomeError(errorMessage(e)));

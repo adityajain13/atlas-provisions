@@ -50,6 +50,12 @@ import {
   type StorePreset,
   type Unit,
   type UsageView,
+  storeSyncDetail,
+  storeSyncLabel,
+  storeSyncPartLine,
+  storeSyncState,
+  syncSourcesOf,
+  type StoreSyncMap,
 } from '@provisions/shared';
 import { IngredientPicker, searchIngredients } from '../components/IngredientPicker';
 import { Svg } from '../components/Icons';
@@ -72,6 +78,7 @@ import {
   revokeAccess,
   saveHousehold,
   searchStoreBranches,
+  getStoreSync,
   type StoreBranchOption,
 } from '../api';
 import { accessOutcome, accessSourceLabel, inviteOutcome, leaveCopy, removeAccessCopy, roleLabel } from '../lib/members';
@@ -1410,6 +1417,19 @@ export function StoresSection({ h, update }: { h: Household; update: Update }) {
   // One store row open at a time, and the add-store picker.
   const [openId, setOpenId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // When each price source last read each store: the status dots and the Price data blocks. Refetched after a refresh
+  // and when the window regains focus (a T&T sync can run in another tab). Nothing shows until it loads.
+  const [sync, setSync] = useState<StoreSyncMap | null>(null);
+  const loadSync = useCallback(() => {
+    getStoreSync()
+      .then(setSync)
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    loadSync();
+    window.addEventListener('focus', loadSync);
+    return () => window.removeEventListener('focus', loadSync);
+  }, [loadSync]);
   const limit = maxStoresLimit(h.stores);
   const perTrip = clampMaxStores(h.maxStores, h.stores);
   // The list's order is the ranking: the first store is the closest or the favourite.
@@ -1457,10 +1477,10 @@ export function StoresSection({ h, update }: { h: Household; update: Update }) {
           <PostalCodeField h={h} update={update} />
         </div>
         <div className="mt-6 border-t border-line2 pt-4">
-          <FlyerRefresh />
+          <FlyerRefresh onDone={loadSync} />
         </div>
         <div className="mt-6 border-t border-line2 pt-4">
-          <SitePrices stores={h.stores.filter(readsSitePrices).length} />
+          <SitePrices stores={h.stores.filter(readsSitePrices).length} onDone={loadSync} />
         </div>
       </div>
 
@@ -1484,6 +1504,8 @@ export function StoresSection({ h, update }: { h: Household; update: Update }) {
                     open={openId === s.id}
                     onToggle={() => setOpenId((cur) => (cur === s.id ? null : s.id))}
                     change={changeStores}
+                    sync={sync}
+                    onSynced={loadSync}
                     rank={{
                       index,
                       count: rows.length,
@@ -1644,6 +1666,8 @@ function StoreRow({
   onToggle,
   change,
   rank,
+  sync,
+  onSynced,
 }: {
   store: Store;
   postalCode?: string;
@@ -1651,6 +1675,8 @@ function StoreRow({
   onToggle: () => void;
   change: StoresUpdate;
   rank: RankControls;
+  sync: StoreSyncMap | null;
+  onSynced: () => void;
 }) {
   const confirm = useConfirm();
   const shopping = s.enabled;
@@ -1740,15 +1766,17 @@ function StoreRow({
         </span>
       }
       title={
-        <>
-          <span className={shopping ? 'text-paper' : 'text-muted'}>{s.name}</span>
-          {group && <span className="ml-2 text-[12px] text-muted">{group}</span>}
-        </>
+        <span className="flex min-w-0 items-baseline">
+          <span className={`min-w-0 truncate ${shopping ? 'text-paper' : 'text-muted'}`}>{s.name}</span>
+          {group && <span className="ml-2 shrink-0 text-[12px] text-muted">{group}</span>}
+          <SyncStatus store={s} sync={sync} />
+        </span>
       }
       detail={addressOf(s)}
+      wideTitle
       summary={
         s.priceMatches ? (
-          <span className="inline-block rounded-full border border-herb/40 px-2 py-0.5 text-[11px] text-herbLight">
+          <span className="hidden rounded-full sm:inline-block border border-herb/40 px-2 py-0.5 text-[11px] text-herbLight">
             Price-matches
           </span>
         ) : undefined
@@ -1789,6 +1817,7 @@ function StoreRow({
         />
       </label>
 
+      <PriceData store={s} sync={sync} />
       <FlippNames store={s} change={change} />
       {takesBranch(s.id) ? (
         <div className="mt-6">
@@ -1798,11 +1827,77 @@ function StoreRow({
         <StoreAddress store={s} change={change} />
       )}
       {s.id === TNT_STORE_ID && (
-        <div className="mt-6 border-t border-line2 pt-4">
-          <TntSync />
+        <div id="tnt-sync" className="mt-6 border-t border-line2 pt-4">
+          <TntSync onDone={onSynced} />
         </div>
       )}
     </Disclosure>
+  );
+}
+
+/**
+ * The store's price status in its row, after the chain: a dot (herb when fresh, amber when stale, a hollow ring when
+ * nothing has been read) and the label from the small screens up. The dot's title and label give each source's detail.
+ * Off stores and the first load show nothing.
+ */
+function SyncStatus({ store, sync }: { store: Store; sync: StoreSyncMap | null }) {
+  if (!store.enabled || sync === null) return null;
+  const now = new Date();
+  const result = storeSyncState(syncSourcesOf(sync[store.id] ?? {}), now);
+  const label = storeSyncLabel(result, now);
+  const detail = storeSyncDetail(result, now) || label;
+  const dot =
+    result.state === 'fresh' ? 'bg-herb' : result.state === 'stale' ? 'bg-[#D9A55A]' : 'border border-muted';
+  return (
+    <span className="ml-2 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap align-middle text-[12px] text-muted">
+      <span role="img" aria-label={detail} title={detail} className={`inline-block h-2 w-2 shrink-0 rounded-full ${dot}`} />
+      <span className="hidden sm:inline">{label}</span>
+    </span>
+  );
+}
+
+/**
+ * The Price data block in an open store: each source with its count and time. For a store nothing has read, the block
+ * says which action fills it. Off stores and the first load show nothing.
+ */
+function PriceData({ store, sync }: { store: Store; sync: StoreSyncMap | null }) {
+  if (!store.enabled || sync === null) return null;
+  const now = new Date();
+  const result = storeSyncState(syncSourcesOf(sync[store.id] ?? {}), now);
+  return (
+    <div className="border-t border-line2 pt-4">
+      <p className={eyebrow}>Price data</p>
+      {result.state === 'none' ? (
+        <div className="mt-2 space-y-1 text-[13px] text-muted">
+          <p>No prices read for this store yet.</p>
+          <p>Refresh flyers above to read its flyer.</p>
+          {takesBranch(store.id) && (
+            <p>
+              {store.siteStore
+                ? 'Refresh regular prices above to read its shelf prices.'
+                : 'Pick a location below, then refresh regular prices above.'}
+            </p>
+          )}
+          {store.id === TNT_STORE_ID && (
+            <p>
+              <button
+                type="button"
+                onClick={() => document.getElementById('tnt-sync')?.scrollIntoView({ block: 'center' })}
+                className={linkBtn}
+              >
+                Sync T&amp;T from your browser
+              </button>
+            </p>
+          )}
+        </div>
+      ) : (
+        <ul className="mt-2 space-y-1 text-[13px] text-muted">
+          {result.parts.map((p) => (
+            <li key={p.source}>{storeSyncPartLine(p, now)}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

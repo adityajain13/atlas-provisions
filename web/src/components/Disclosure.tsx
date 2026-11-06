@@ -12,6 +12,8 @@ type Props = {
   detail?: ReactNode;
   /** Row only: muted text at the right of the header, such as "18 meals a week". */
   summary?: ReactNode;
+  /** Row only, with a summary: from sm up the title may use the header and the summary keeps its own width. For a title that carries a status. */
+  wideTitle?: boolean;
   /** Row only: a control before the header, outside its button, such as a switch. Clicking it does not toggle. */
   lead?: ReactNode;
   /** Row only: hide the Done footer, for short groups that need no confirm step. */
@@ -44,6 +46,7 @@ export function Disclosure({
   title,
   detail,
   summary,
+  wideTitle = false,
   lead,
   remove,
   noFooter = false,
@@ -113,7 +116,13 @@ export function Disclosure({
       } ${open ? "rounded-t-xl" : "rounded-lg"}`}
     >
       <span
-        className={`min-w-0 ${summary ? "max-w-[55%] shrink-0" : "flex-1"}`}
+        className={`min-w-0 ${
+          !summary
+            ? "flex-1"
+            : wideTitle
+              ? "max-w-[55%] shrink-0 sm:max-w-none sm:flex-1"
+              : "max-w-[55%] shrink-0"
+        }`}
       >
         <span className="block truncate text-[16px] text-paper">{title}</span>
         {detail && (
@@ -123,7 +132,13 @@ export function Disclosure({
         )}
       </span>
       {summary && (
-        <span className="min-w-0 flex-1 truncate text-right text-[13px] text-muted">
+        <span
+          className={
+            wideTitle
+              ? "min-w-0 flex-1 truncate text-right text-[13px] text-muted sm:flex-none sm:shrink-0 sm:whitespace-nowrap"
+              : "min-w-0 flex-1 truncate text-right text-[13px] text-muted"
+          }
+        >
           {summary}
         </span>
       )}

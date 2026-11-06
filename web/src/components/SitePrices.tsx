@@ -21,7 +21,7 @@ export function siteResultLine(r: SiteRunResult, stores: number): string {
  * there are, a button to read them now, and the result of the last run. `stores` is how many enabled stores have a
  * location picked.
  */
-export function SitePrices({ stores }: { stores: number }) {
+export function SitePrices({ stores, onDone }: { stores: number; onDone?: () => void }) {
   const { track, status: saveStatus } = useSaveStatus();
   // A location picked a moment ago may not be saved yet, and the refresh reads the saved household. Wait for the save.
   const saving = saveStatus.kind === 'pending' || saveStatus.kind === 'saving';
@@ -56,6 +56,7 @@ export function SitePrices({ stores }: { stores: number }) {
     } finally {
       setRunning(false);
       load();
+      onDone?.();
     }
   }
 
