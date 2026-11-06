@@ -333,6 +333,22 @@ export async function runScheduledSite(
   return { householdId, summary: await runSitePrices(env, householdId, fetchImpl, budget, now) };
 }
 
+/** The version of the cached location list. Version 2 keeps coordinates; a bare array (version 1) is read as stale. */
+const LOCATION_CACHE_VERSION = 2;
+
+/** The locations a cache row holds, or null for a row that is not the current version or is damaged. */
+export function readCachedLocations(data: string): SiteLocation[] | null {
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    const v = (parsed as { v?: unknown }).v;
+    const locations = (parsed as { locations?: unknown }).locations;
+    return v === LOCATION_CACHE_VERSION && Array.isArray(locations) ? (locations as SiteLocation[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The locations of a banner, from the store's site or from the cache when it is under a week old. A failed or empty
  * listing is not cached, so the next search asks again.
@@ -343,18 +359,14 @@ export async function cachedLocations(db: Db, banner: string, fetchImpl: typeof 
     .bind(banner)
     .first<{ data: string; fetched_at: string }>();
   if (row && now.getTime() - Date.parse(row.fetched_at) < LOCATION_CACHE_MS) {
-    try {
-      const cached = JSON.parse(row.data) as SiteLocation[];
-      if (Array.isArray(cached)) return { ok: true, value: cached };
-    } catch {
-      // A damaged cache row is replaced below.
-    }
+    const cached = readCachedLocations(row.data);
+    if (cached) return { ok: true, value: cached };
   }
   const got = await listLocations(banner, fetchImpl);
   if (got.ok && got.value.length > 0) {
     await db
       .prepare('INSERT OR REPLACE INTO site_locations (banner, data, fetched_at) VALUES (?, ?, ?)')
-      .bind(banner, JSON.stringify(got.value), now.toISOString())
+      .bind(banner, JSON.stringify({ v: LOCATION_CACHE_VERSION, locations: got.value }), now.toISOString())
       .run();
   }
   return got;

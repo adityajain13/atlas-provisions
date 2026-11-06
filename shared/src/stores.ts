@@ -122,3 +122,16 @@ export function siteBannerOf(storeId: string): SiteBanner | undefined {
 export function isSiteBanner(value: string): value is SiteBanner {
   return (SITE_BANNER_IDS as readonly string[]).includes(value);
 }
+
+/** The banners whose store locations can be searched. T&T has no location list on the site, so it is left out. */
+export const LOCATION_BANNER_IDS: readonly SiteBanner[] = SITE_BANNER_IDS.filter((b) => b !== 'tandt');
+
+/** Whether the site lists the locations of a banner. T&T does not, so its branch is never searched. */
+export function hasLocationList(banner: SiteBanner): boolean {
+  return LOCATION_BANNER_IDS.includes(banner);
+}
+
+/** The store preset id a site banner belongs to (the inverse of siteBannerOf), or undefined. */
+export function presetIdOfBanner(banner: SiteBanner): string | undefined {
+  return Object.keys(SITE_BANNER_BY_STORE).find((id) => SITE_BANNER_BY_STORE[id] === banner);
+}

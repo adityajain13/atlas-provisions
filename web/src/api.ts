@@ -334,6 +334,13 @@ export interface SiteLocationOption {
   storeId: string;
   label: string;
   postalCode: string | null;
+  /** Kilometres from the household's postal code, when the server could place both. */
+  distanceKm?: number;
+}
+
+/** A location found by the cross-banner search: the banner it is on, with the option's fields. */
+export interface StoreBranchOption extends SiteLocationOption {
+  banner: string;
 }
 
 /** One regular-price batch: what it looked up and matched, and whether the site asked for a sign-in. */
@@ -350,13 +357,30 @@ export interface SiteStatus {
   prices: number; // ingredient and store pairs with a site price in the last two weeks, at the household's locations
 }
 
-/** Store locations of a banner that match the search text. */
-export async function searchSiteLocations(banner: string, q: string): Promise<SiteLocationOption[]> {
+/** The query string of a site search: the text, and the household postal code when there is one. */
+function siteQuery(q: string, near: string): string {
+  return `q=${encodeURIComponent(q)}${near ? `&near=${encodeURIComponent(near)}` : ''}`;
+}
+
+/** Store locations of a banner that match the search text, or the nearest to a postal code when it is empty. */
+export async function searchSiteLocations(banner: string, q: string, near = ''): Promise<SiteLocationOption[]> {
   const body = await json(
-    await authFetch(`${BASE}/site-stores/${encodeURIComponent(banner)}/locations?q=${encodeURIComponent(q)}`),
+    await authFetch(`${BASE}/site-stores/${encodeURIComponent(banner)}/locations?${siteQuery(q, near)}`),
     (raw) => raw as { locations: SiteLocationOption[] },
   );
   return body.locations;
+}
+
+/** The locations of every banner that match the address or postal code, or the nearest to the household's when empty. */
+export interface StoreBranchReply {
+  locations: StoreBranchOption[];
+  /** Chains whose list could not be read right now. */
+  unavailable?: string[];
+  approx?: boolean;
+}
+
+export async function searchStoreBranches(q: string, near: string): Promise<StoreBranchReply> {
+  return json(await authFetch(`${BASE}/site-stores/search?${siteQuery(q, near)}`), (raw) => raw as StoreBranchReply);
 }
 
 export async function getSitePriceStatus(): Promise<SiteStatus> {

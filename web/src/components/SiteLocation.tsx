@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SITE_BANNER_NAMES, siteBannerOf, type Store } from '@provisions/shared';
+import { SITE_BANNER_NAMES, hasLocationList, siteBannerOf, type Store } from '@provisions/shared';
 import { errorMessage, type SiteLocationOption } from '../api';
 import { eyebrow, fieldCls, linkBtn, secondaryBtn } from './ui';
 
@@ -8,23 +8,29 @@ type StoresUpdate = (fn: (stores: Store[]) => Store[]) => void;
 const ERROR_TEXT = 'text-[#D98C7A]';
 const SEARCH_DELAY_MS = 300;
 const MIN_QUERY = 2;
+/** The nearest locations listed under the search before anything is typed. */
+const NEAREST_SHOWN = 5;
 const BASE = '/provisions/api';
+export const TANDT_NO_LOCATIONS = "Regular prices aren't available for T&T yet. Prices from your scanned receipts still count.";
 
-/** What the search answers: the matches, and whether the chain lists no locations at all (the picker then asks for a number). */
+/** What the search answers: the matches, whether the chain lists no locations at all, and whether distances are rough. */
 interface SearchReply {
   locations: SiteLocationOption[];
   unsupported: boolean;
+  approx: boolean;
 }
 
 /**
- * The locations of a banner that match the search text. The worker answers 200 with unsupported set when the site lists
- * none for the chain, so that case is a reply, not an error. A refusal (a sign-in) comes back as an error with its text.
+ * The locations of a banner that match the search text, or the nearest to the household's postal code when the text is
+ * empty. The worker answers 200 with unsupported set when the site lists none for the chain, so that case is a reply,
+ * not an error. A refusal (a sign-in) comes back as an error with its text.
  */
-async function searchLocations(banner: string, q: string): Promise<SearchReply> {
-  const res = await fetch(`${BASE}/site-stores/${encodeURIComponent(banner)}/locations?q=${encodeURIComponent(q)}`);
+async function searchLocations(banner: string, q: string, near: string): Promise<SearchReply> {
+  const query = `q=${encodeURIComponent(q)}${near ? `&near=${encodeURIComponent(near)}` : ''}`;
+  const res = await fetch(`${BASE}/site-stores/${encodeURIComponent(banner)}/locations?${query}`);
   if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
-  const body = (await res.json()) as { locations?: SiteLocationOption[]; unsupported?: boolean };
-  return { locations: body.locations ?? [], unsupported: body.unsupported === true };
+  const body = (await res.json()) as { locations?: SiteLocationOption[]; unsupported?: boolean; approx?: boolean };
+  return { locations: body.locations ?? [], unsupported: body.unsupported === true, approx: body.approx === true };
 }
 
 /** The store number a person typed: exactly four digits, spaces around it ignored. Null when it is not one. */
@@ -33,17 +39,25 @@ export function storeNumberOf(text: string): string | null {
   return /^\d{4}$/.test(t) ? t : null;
 }
 
+/** A distance for a location row, such as "2.1 km". */
+export function kmLabel(km: number): string {
+  return `${km.toFixed(1)} km`;
+}
+
 /**
  * The store location whose regular shelf prices the app reads, shown in an expanded store row. A Loblaw-family store
- * searches its banner's locations by street, city or postal code and keeps the one picked. A store number can be
- * typed instead, and a chain the site lists no locations for gets only that. Other stores say so.
+ * shows the nearest locations to the household's postal code first, and searches its banner's locations by street,
+ * city or postal code. A store number can be typed instead, and a chain the site lists no locations for gets only that.
+ * T&T has no location list, so it gets a note instead.
  */
-export function RegularPriceLocation({ store: s, change }: { store: Store; change: StoresUpdate }) {
+export function RegularPriceLocation({ store: s, change, near = '' }: { store: Store; change: StoresUpdate; near?: string }) {
   const banner = siteBannerOf(s.id);
+  const listed = banner !== undefined && hasLocationList(banner);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   const [found, setFound] = useState<SiteLocationOption[]>([]);
   const [unsupported, setUnsupported] = useState(false);
+  const [approx, setApprox] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [numberOpen, setNumberOpen] = useState(false);
@@ -52,21 +66,25 @@ export function RegularPriceLocation({ store: s, change }: { store: Store; chang
   const query = text.trim();
   // The search is open until a location is picked: when the store has none yet, or when it is being changed.
   const choosing = s.siteStore === undefined || editing;
-  const searchable = choosing && banner !== undefined && query.length >= MIN_QUERY;
+  // Nothing typed and a household postal code: the nearest locations are listed first.
+  const nearby = choosing && listed && query === '' && near !== '';
+  const searchable = choosing && listed && (query.length >= MIN_QUERY || nearby);
   // The site lists no locations for this chain: the number form is the way to pick one.
   const noLocations = searchable && !searching && !searchError && unsupported;
   const showNumber = numberOpen || noLocations;
+  const shown = nearby ? found.slice(0, NEAREST_SHOWN) : found;
 
   useEffect(() => {
     if (!searchable || banner === undefined) return;
     let alive = true;
     const timer = setTimeout(() => {
       setSearching(true);
-      searchLocations(banner, query)
+      searchLocations(banner, query, near)
         .then((reply) => {
           if (!alive) return;
           setFound(reply.locations);
           setUnsupported(reply.unsupported);
+          setApprox(reply.approx);
           setSearchError(null);
         })
         .catch((e: unknown) => {
@@ -83,13 +101,21 @@ export function RegularPriceLocation({ store: s, change }: { store: Store; chang
       alive = false;
       clearTimeout(timer);
     };
-  }, [searchable, banner, query]);
+  }, [searchable, banner, query, near]);
 
   if (banner === undefined) {
     return (
       <div>
         <span className={eyebrow}>Location for regular prices</span>
         <p className="mt-2 text-[13px] text-muted">Regular prices aren&apos;t available for this store yet.</p>
+      </div>
+    );
+  }
+  if (!listed) {
+    return (
+      <div>
+        <span className={eyebrow}>Location for regular prices</span>
+        <p className="mt-2 text-[13px] text-muted">{TANDT_NO_LOCATIONS}</p>
       </div>
     );
   }
@@ -103,6 +129,7 @@ export function RegularPriceLocation({ store: s, change }: { store: Store; chang
     setText('');
     setFound([]);
     setUnsupported(false);
+    setApprox(false);
     setNumberOpen(false);
     setNumber('');
     setNumberError(null);
@@ -174,25 +201,34 @@ export function RegularPriceLocation({ store: s, change }: { store: Store; chang
               {`Store locations for ${chainName} aren't available from Loblaw's site. Enter the store number instead.`}
             </p>
           )}
+          {nearby && shown.length > 0 && !searching && <p className="mt-3 text-[12px] text-muted">Nearest to {near}</p>}
           {searchable && !searching && !searchError && !unsupported && found.length === 0 && (
-            <p className="mt-2 text-[13px] text-muted">No {chainName} locations match. Try a city or the first letters of the postal code.</p>
+            <p className="mt-2 text-[13px] text-muted">
+              {nearby
+                ? `No ${chainName} locations near ${near}. Search by street, city or postal code.`
+                : `No ${chainName} locations match. Try a city or the first letters of the postal code.`}
+            </p>
           )}
-          {searchable && found.length > 0 && (
-            <ul className="mt-3 divide-y divide-line2 overflow-hidden rounded-lg border border-edge">
-              {found.map((loc) => (
+          {searchable && shown.length > 0 && (
+            <ul className="mt-2 divide-y divide-line2 overflow-hidden rounded-lg border border-edge">
+              {shown.map((loc) => (
                 <li key={loc.storeId}>
                   <button
                     type="button"
                     onClick={() => choose(loc)}
                     className="flex min-h-11 w-full items-center justify-between gap-3 px-4 py-2 text-left text-[14px] text-paper hover:bg-field focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-herb"
                   >
-                    <span className="min-w-0">{loc.label}</span>
-                    {loc.postalCode && <span className="shrink-0 text-[12px] text-muted">{loc.postalCode}</span>}
+                    <span className="min-w-0 truncate">{loc.label}</span>
+                    <span className="flex shrink-0 gap-3 text-[12px] text-muted">
+                      {loc.distanceKm !== undefined && <span>{kmLabel(loc.distanceKm)}</span>}
+                      {loc.postalCode && <span>{loc.postalCode}</span>}
+                    </span>
                   </button>
                 </li>
               ))}
             </ul>
           )}
+          {approx && shown.length > 0 && !searching && <p className="mt-2 text-[12px] text-muted">Distances are approximate.</p>}
 
           {!showNumber && (
             <button type="button" onClick={() => setNumberOpen(true)} className={`${linkBtn} mt-2`}>
@@ -226,7 +262,7 @@ export function RegularPriceLocation({ store: s, change }: { store: Store; chang
                 </button>
               </div>
               <p id={helpId} className="mt-2 text-[12px] text-muted">
-                {`It's in the store page URL on the chain's website, e.g. …/store-locator/details/1234`}
+                On the chain&apos;s website it&apos;s the last part of the store page address, e.g. nofrills.ca/store-locator/details/3643.
               </p>
               {numberError && <p className={`mt-2 text-[13px] ${ERROR_TEXT}`}>{numberError}</p>}
             </div>

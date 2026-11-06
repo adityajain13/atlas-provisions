@@ -29,6 +29,7 @@ export {
   type Slot,
 } from './calendar';
 export * from './stores';
+export * from './geo';
 
 export const UNITS = ['g', 'kg', 'ml', 'l', 'each'] as const;
 export type Unit = (typeof UNITS)[number];
@@ -123,6 +124,8 @@ export const StoreSchema = z.object({
   group: z.enum(STORE_GROUPS).optional(),
   // Extra merchant names Flipp uses for this store (e.g. "RCSS" for Real Canadian Superstore).
   flippNames: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+  // Where the store is, for a store without a location picker. Optional: stored stores without it still parse.
+  address: z.string().trim().min(1).max(160).optional(),
   // The store location whose regular shelf prices are read (Loblaw-family stores only). Optional: stored stores without it still parse.
   siteStore: z
     .object({
