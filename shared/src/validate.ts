@@ -1,6 +1,6 @@
 import { CATEGORY_ORDER, INGREDIENT_BY_ID, INGREDIENTS, inSeason, type Category } from './catalog';
 import { CUISINES, cuisineKey, cuisineLevel } from './cuisines';
-import { DAY_LONG, DAYS, MONTH_NAMES, isWeeknight, monthOfWeek, type Day, type Slot } from './calendar';
+import { DAY_LONG, DAYS, MONTH_NAMES, SLOTS, isWeeknight, monthOfWeek, type Day, type Slot } from './calendar';
 import type { FixedCost } from './fixed';
 import type { Household, ItemRule } from './index';
 import type { ListItem, MealPlan, PlannedMeal, RawMeal, SlotCell, ValidationIssue } from './plan';
@@ -21,7 +21,10 @@ const WASTE_LIMIT = 0.3;
 const SHORT_SHELF_DAYS = 7;
 const WEEKNIGHT_MINUTES = 40;
 const PRICE_MATCH_GAP = 0.1; // a store must be at least 10% cheaper to count
-const VEG_TARGET = 5;
+export const VEG_TARGET = 5;
+/** A week over budget by no more than this (the larger of the floor and the rate, in dollars) is a warning, not an error. */
+const BUDGET_TOLERANCE_FLOOR = 3;
+const BUDGET_TOLERANCE_RATE = 0.03;
 const FRUIT_HINTS = ['grape', 'banana', 'apple', 'berr', 'lemon', 'lime', 'orange', 'mango', 'pineapple', 'pear'];
 
 const ingName = (id: string) => INGREDIENT_BY_ID[id]?.name ?? id;
@@ -426,12 +429,56 @@ export interface ValidateContext {
   onDeal?: ReadonlySet<string>; // ingredient ids on a flyer deal this week: exempt from the season check
 }
 
-function proteinOf(meal: PlannedMeal): string | undefined {
+/** The first protein tag among a meal's ingredients, or undefined when none has one. */
+export function proteinOf(meal: PlannedMeal): string | undefined {
   for (const ing of meal.ingredients) {
     const p = INGREDIENT_BY_ID[ing.ingredientId]?.protein;
     if (p) return p;
   }
   return undefined;
+}
+
+/**
+ * Dinners that repeat the protein of the dinner on the day before. Each later one is returned with the earlier one it
+ * repeats. A dinner with no protein tag is skipped, and so is a dinner with no dinner on the day before it.
+ */
+export function consecutiveProteinRepeats(dinners: PlannedMeal[]): { prev: PlannedMeal; cur: PlannedMeal; protein: string }[] {
+  const byDay = dinners
+    .map((m) => ({ meal: m, idx: dayIndex(m.day), protein: proteinOf(m) }))
+    .filter((d): d is { meal: PlannedMeal; idx: number; protein: string } => d.protein !== undefined)
+    .sort((a, b) => a.idx - b.idx);
+  const out: { prev: PlannedMeal; cur: PlannedMeal; protein: string }[] = [];
+  for (let i = 1; i < byDay.length; i++) {
+    const prev = byDay[i - 1]!;
+    const cur = byDay[i]!;
+    if (cur.idx === prev.idx + 1 && cur.protein === prev.protein) out.push({ prev: prev.meal, cur: cur.meal, protein: cur.protein });
+  }
+  return out;
+}
+
+/** Vegetable ids the week uses, from planned meals and fixed meals. */
+export function vegetablesUsed(plan: MealPlan, ctx: ValidateContext): string[] {
+  const used = new Set<string>();
+  for (const m of plan.meals) for (const ing of m.ingredients) used.add(ing.ingredientId);
+  for (const n of ctx.fixed.needs) used.add(n.ingredientId);
+  return [...used].filter(isVegetable);
+}
+
+/**
+ * Why a produce item is imported or out of season this month. Undefined when it is in season and home-grown, or is not
+ * produce. The one rule for both the planner's flags and the season warning.
+ */
+export function seasonStatus(id: string, month: number): { imported: boolean; outOfSeason: boolean } | undefined {
+  const c = INGREDIENT_BY_ID[id];
+  if (!c || c.category !== 'produce') return undefined;
+  const outOfSeason = !inSeason(c, month);
+  if (!outOfSeason && !c.imported) return undefined;
+  return { imported: c.imported === true, outOfSeason };
+}
+
+/** The most the budget may be over by and still count as a warning. */
+export function budgetTolerance(budget: number): number {
+  return Math.max(BUDGET_TOLERANCE_FLOOR, budget * BUDGET_TOLERANCE_RATE);
 }
 
 function checkIngredients(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
@@ -594,11 +641,14 @@ function checkBudget(plan: MealPlan): ValidationIssue[] {
     .slice(0, 2);
   const topText = top.map((i) => `${i.name} ($${i.total.toFixed(2)})`).join(', ');
   const swap = top[0] ? ` Swap one meal that uses ${top[0].name.toLowerCase()} for a cheaper protein.` : '';
+  // Items with no price are left out of the total, so the planner is told how many there are.
+  const unpriced = plan.list.filter((i) => i.store === 'Unpriced' || i.priceUnknown === true).length;
+  const unpricedText = unpriced > 0 ? ` (+${unpriced} ${unpriced === 1 ? 'item' : 'items'} without a price)` : '';
   return [
     {
       check: 'budget',
-      severity: 'error',
-      message: `Over budget by $${over.toFixed(2)}.${top.length ? ` Most expensive: ${topText}.` : ''}${swap}`,
+      severity: over <= budgetTolerance(budget) ? 'warning' : 'error',
+      message: `Over budget by $${over.toFixed(2)}${unpricedText}.${top.length ? ` Most expensive: ${topText}.` : ''}${swap}`,
     },
   ];
 }
@@ -726,7 +776,7 @@ const CRAVING_PROTEINS: ReadonlySet<string> = new Set(['chicken', 'beef', 'pork'
  * "shrimp", "paneer", "butter"), or one protein word ("chicken", "eggs") that covers every ingredient with that protein.
  * Pantry staples such as stock do not count. A dish name ("butter chicken", "ramen") names no ingredient here.
  */
-function featuredIdsOf(craving: string): Set<string> {
+export function featuredIdsOf(craving: string): Set<string> {
   const c = craving.toLowerCase().replace(/\s+/g, ' ').trim();
   const ids = new Set<string>();
   if (!c) return ids;
@@ -744,6 +794,16 @@ function featuredIdsOf(craving: string): Set<string> {
 /** Dinners an ingredient craving must feature in: a third of the dinners, at least 2, never more than there are. */
 export function cravingDinnerMinimum(dinnerCount: number): number {
   return Math.min(dinnerCount, Math.max(2, Math.ceil(dinnerCount / 3)));
+}
+
+/**
+ * The ingredients the cravings name (see featuredIdsOf). An ingredient craving needs them in many dinners, so the
+ * repeat limit does not count them.
+ */
+export function cravingExemptIds(cravings: string[]): Set<string> {
+  const ids = new Set<string>();
+  for (const c of cravings) for (const id of featuredIdsOf(c)) ids.add(id);
+  return ids;
 }
 
 /**
@@ -796,20 +856,12 @@ function checkVariety(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   const dinners = plan.meals.filter((m) => m.slot === 'dinner');
 
   if (rules.noRepeatProteinConsecutive) {
-    const byDay = dinners
-      .map((m) => ({ meal: m, idx: dayIndex(m.day), protein: proteinOf(m) }))
-      .filter((d): d is { meal: PlannedMeal; idx: number; protein: string } => d.protein !== undefined)
-      .sort((a, b) => a.idx - b.idx);
-    for (let i = 1; i < byDay.length; i++) {
-      const prev = byDay[i - 1]!;
-      const cur = byDay[i]!;
-      if (cur.idx === prev.idx + 1 && cur.protein === prev.protein) {
-        out.push({
-          check: 'variety',
-          severity: 'error',
-          message: `${DAY_LONG[prev.meal.day]} and ${DAY_LONG[cur.meal.day]} dinners both use ${cur.protein}. Make one of them a different protein.`,
-        });
-      }
+    for (const { prev, cur, protein } of consecutiveProteinRepeats(dinners)) {
+      out.push({
+        check: 'variety',
+        severity: 'error',
+        message: `${DAY_LONG[prev.day]} and ${DAY_LONG[cur.day]} dinners both use ${protein}. Make one of them a different protein.`,
+      });
     }
   }
 
@@ -830,12 +882,9 @@ function checkVariety(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   }
 
   if (rules.minVeg5) {
-    const used = new Set<string>();
-    for (const m of plan.meals) for (const ing of m.ingredients) used.add(ing.ingredientId);
-    for (const n of ctx.fixed.needs) used.add(n.ingredientId);
-    const vegs = [...used].filter(isVegetable);
+    const vegs = vegetablesUsed(plan, ctx);
     if (vegs.length < VEG_TARGET) {
-      const extras = [...ctx.available].filter((id) => isVegetable(id) && !used.has(id)).slice(0, 3).map(ingName);
+      const extras = [...ctx.available].filter((id) => isVegetable(id) && !vegs.includes(id)).slice(0, 3).map(ingName);
       const hint = extras.length ? ` Add ${extras.join(', ')} to a meal.` : ' Add more vegetables to a meal.';
       out.push({
         check: 'variety',
@@ -872,15 +921,14 @@ function checkSeason(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   for (const meal of plan.meals) {
     for (const ing of meal.ingredients) {
       const id = ing.ingredientId;
-      const c = INGREDIENT_BY_ID[id];
-      if (!c || c.category !== 'produce' || seen.has(id) || ctx.onDeal?.has(id)) continue;
-      if (inSeason(c, month) && !c.imported) continue;
+      const status = seasonStatus(id, month);
+      if (!status || seen.has(id) || ctx.onDeal?.has(id)) continue;
       seen.add(id);
-      const why = c.imported ? 'imported' : `out of season in ${MONTH_NAMES[month - 1]}`;
+      const why = status.imported ? 'imported' : `out of season in ${MONTH_NAMES[month - 1]}`;
       out.push({
         check: 'season',
         severity: 'warning',
-        message: `${c.name} is ${why} and not on a deal this week, used in "${meal.name}". Prefer in-season produce, or turn off "Prefer in-season produce".`,
+        message: `${ingName(id)} is ${why} and not on a deal this week, used in "${meal.name}". Prefer in-season produce, or turn off "Prefer in-season produce".`,
       });
     }
   }
@@ -998,7 +1046,7 @@ function checkPins(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
  */
 function checkRepetition(plan: MealPlan): ValidationIssue[] {
   const out: ValidationIssue[] = [];
-  for (const [id, meals] of repeatedMeals(plan.meals)) {
+  for (const [id, meals] of repeatedMeals(plan.meals, cravingExemptIds(plan.request.cravings))) {
     for (const meal of meals) {
       out.push({
         check: 'repetition',
@@ -1041,9 +1089,39 @@ function checkCuisine(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   return out;
 }
 
+/**
+ * Leftover links that do not pair up: a meal that uses leftovers must name an earlier meal that makes them for it, and a
+ * meal that makes leftovers must name a later meal that eats them from it. Each broken meal is returned with its message.
+ */
+export function leftoverBreaks(plan: MealPlan): { meal: PlannedMeal; message: string }[] {
+  const byId = new Map(plan.meals.map((m) => [m.id, m]));
+  const order = (m: PlannedMeal) => DAYS.indexOf(m.day) * SLOTS.length + SLOTS.indexOf(m.slot);
+  const out: { meal: PlannedMeal; message: string }[] = [];
+  for (const m of plan.meals) {
+    if (m.usesLeftoversFrom !== undefined) {
+      const from = byId.get(m.usesLeftoversFrom);
+      if (!from || order(from) >= order(m) || from.makesLeftoversFor !== m.id) {
+        out.push({ meal: m, message: `"${m.name}" eats leftovers from a meal that does not make them for it, or is not earlier. Link it to an earlier meal that makes leftovers for it, or drop the link.` });
+      }
+    }
+    if (m.makesLeftoversFor !== undefined) {
+      const to = byId.get(m.makesLeftoversFor);
+      if (!to || order(to) <= order(m) || to.usesLeftoversFrom !== m.id) {
+        out.push({ meal: m, message: `"${m.name}" makes leftovers for a meal that does not eat them from it, or is not later. Link it to a later meal that eats them, or drop the link.` });
+      }
+    }
+  }
+  return out;
+}
+
+function checkLeftovers(plan: MealPlan): ValidationIssue[] {
+  return leftoverBreaks(plan).map((b) => ({ check: 'leftovers' as const, severity: 'error' as const, message: b.message }));
+}
+
 /** Every check on a plan. Errors make the planner retry. Warnings are shown to the user. */
 export function validate(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   return [
+    ...checkLeftovers(plan),
     ...checkIngredients(plan, ctx),
     ...checkNeverNames(plan, ctx),
     ...checkForms(plan, ctx),

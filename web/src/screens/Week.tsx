@@ -22,8 +22,9 @@ import {
   addPlanLeftovers,
   clearMealStatus,
   errorMessage,
-  getHousehold,
+  getHouseholdCached,
   getRatings,
+  getRatingsCached,
   getWeekPlan,
   regeneratePrep,
   saveRating,
@@ -157,7 +158,8 @@ function WeekScreen({ weekOf, current, go }: { weekOf: string; current: string; 
 
   useEffect(() => {
     let alive = true;
-    Promise.all([getWeekPlan(weekOf), getHousehold().catch(() => null), getRatings().catch(() => [] as Rating[])])
+    // The household and ratings come from the cache: switching weeks loads only the week's plan.
+    Promise.all([getWeekPlan(weekOf), getHouseholdCached().catch(() => null), getRatingsCached().catch(() => [] as Rating[])])
       .then(([found, household, saved]) => {
         if (!alive) return;
         setNames(new Map((household?.people ?? []).map((p) => [p.id, p.name])));

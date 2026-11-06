@@ -68,9 +68,10 @@ const STAPLES = new Set(REPEAT_STAPLE_IDS);
 /**
  * The meals beyond the limit, for each non-staple ingredient. Meals are counted in week order, and a meal that eats
  * leftovers (usesLeftoversFrom) is not counted: it reuses a meal's food rather than buying more. The first
- * MAX_MEALS_PER_INGREDIENT meals keep the ingredient; each later one is returned, keyed by ingredient id.
+ * MAX_MEALS_PER_INGREDIENT meals keep the ingredient; each later one is returned, keyed by ingredient id. Ingredients in
+ * `exempt` (a craving's ingredients) are not counted at all.
  */
-export function repeatedMeals(meals: PlannedMeal[]): Map<string, PlannedMeal[]> {
+export function repeatedMeals(meals: PlannedMeal[], exempt: ReadonlySet<string> = new Set()): Map<string, PlannedMeal[]> {
   const ordered = [...meals].sort(
     (a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || SLOTS.indexOf(a.slot) - SLOTS.indexOf(b.slot),
   );
@@ -80,7 +81,7 @@ export function repeatedMeals(meals: PlannedMeal[]): Map<string, PlannedMeal[]> 
     if (meal.usesLeftoversFrom !== undefined) continue;
     const ids = new Set(meal.ingredients.map((i) => i.ingredientId));
     for (const id of ids) {
-      if (STAPLES.has(id)) continue;
+      if (STAPLES.has(id) || exempt.has(id)) continue;
       const n = (seen.get(id) ?? 0) + 1;
       seen.set(id, n);
       if (n > MAX_MEALS_PER_INGREDIENT) over.set(id, [...(over.get(id) ?? []), meal]);

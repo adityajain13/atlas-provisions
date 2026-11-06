@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, expandWeek, type Household, type MealPlan, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, PARTNER, call, householdWith, json, rows, setup } from './testing/app';
 import { toolReply } from './testing/sse';
+import { sentPlannerPayload } from './testing/payload';
 
 const H = API;
 const KEYED = { ANTHROPIC_API_KEY: 'test-key' };
@@ -77,7 +78,7 @@ interface Sent {
 }
 
 /** The payload the Worker sent in a call, as the model received it. */
-const sentPayload = (init: RequestInit): Sent => JSON.parse(JSON.parse(init.body as string).messages[0].content) as Sent;
+const sentPayload = (init: RequestInit): Sent => sentPlannerPayload(JSON.parse(init.body as string)) as unknown as Sent;
 
 /** The planner's answer for the slots it was asked to fill: one new meal each, with no ingredients. */
 const answerFor = (payload: { slots: { id: string }[] }, name = 'New') => ({

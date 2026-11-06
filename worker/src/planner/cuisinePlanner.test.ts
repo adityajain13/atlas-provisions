@@ -92,7 +92,6 @@ describe('planner payload and prompt', () => {
       fixed,
       fixedCost: { cost: 0, listItems: [], macrosByPerson: {}, leftovers: [], needs: [], issues: [] },
       available: frame(h).available,
-      neverBuy: [],
       recentDinnerNames: [],
     });
     expect(payload.cuisineMix.often).toEqual(expect.arrayContaining(['indian', 'indonesian', 'hakka', 'italian', 'thai']));
@@ -103,7 +102,8 @@ describe('planner payload and prompt', () => {
   it('tells the planner the cuisine rule, the regular and on-hand sources, and that only salt, pepper, oil and water are assumed', () => {
     expect(SYSTEM_PROMPT).toContain("Plan dinners as authentic home-style dishes from the cuisines in cuisineMix: roughly half from 'often', most of the rest from 'sometimes', at most one from 'rarely', none from 'never'. No cuisine more than 3 dinners a week. Label each meal with its cuisine in `cuisine`.");
     expect(SYSTEM_PROMPT).toContain('Prefer deals; use regular items when a dish needs them.');
-    expect(SYSTEM_PROMPT).toContain('Only salt, pepper, oil and water are assumed; everything else must come from available (on-hand items are free).');
+    expect(SYSTEM_PROMPT).toContain('Only salt, pepper, oil and water are assumed. ');
+    expect(SYSTEM_PROMPT).toContain('which holds everything the household may buy or use');
     expect(SYSTEM_PROMPT).not.toContain('common dried spices are assumed on hand');
   });
 

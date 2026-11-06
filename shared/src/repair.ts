@@ -2,14 +2,23 @@
 // those meals (and the meals linked to them by leftovers). The rest of the attempt is kept byte-for-byte. Pure, so the
 // Worker's attempt loop and its tests share one rule. Anything that cannot be pinned on meals returns null, and the
 // caller asks for a whole new attempt instead.
-import { DAYS } from './calendar';
 import { INGREDIENT_BY_ID } from './catalog';
 import { avoidedDish } from './dishes';
 import { nameHasWord } from './itemRules';
 import type { MealPlan, PlannedMeal, SlotCell, ValidationIssue } from './plan';
 import { swapClosure } from './swap';
 import { repeatedMeals } from './repeats';
-import { isVegetable, type ValidateContext } from './validate';
+import {
+  VEG_TARGET,
+  cravingDinnerMinimum,
+  cravingExemptIds,
+  consecutiveProteinRepeats,
+  featuredIdsOf,
+  isVegetable,
+  leftoverBreaks,
+  vegetablesUsed,
+  type ValidateContext,
+} from './validate';
 
 export interface Repair {
   replaceIds: string[]; // the meals to replace, leftover links included, in plan order
@@ -17,7 +26,7 @@ export interface Repair {
   reason: string; // the first error's check, for the progress line
 }
 
-// Checks a targeted repair can answer. Anything else (macros, waste, cravings, prices, minimum vegetables) gets a full attempt.
+// Checks a targeted repair can answer. Anything else (macros, waste, prices) gets a full attempt.
 const REPAIRABLE = new Set([
   'budget',
   'slot-coverage',
@@ -30,7 +39,12 @@ const REPAIRABLE = new Set([
   'form',
   'avoid-dish',
   'repetition',
+  'cravings',
+  'leftovers',
 ]);
+
+/** Over budget by more than this share of the budget: the three most expensive meals are rewritten, not two. */
+const BUDGET_REPAIR_GAP = 0.15;
 
 const cellOf = (c: { day: string; slot: string }) => `${c.day}-${c.slot}`;
 const nameKey = (s: string) => s.trim().toLowerCase();
@@ -56,13 +70,14 @@ export function mealCosts(plan: Pick<MealPlan, 'meals' | 'list'>): Map<string, n
   return costs;
 }
 
-/** The two most expensive meals that are not eaten as leftovers, when they cost something. */
+/** The most expensive meals that are not eaten as leftovers, when they cost something: two, or three when far over budget. */
 function mostExpensive(plan: MealPlan): string[] {
   const costs = mealCosts(plan);
+  const far = plan.totalCost - plan.request.budget > plan.request.budget * BUDGET_REPAIR_GAP;
   return plan.meals
     .filter((m) => m.usesLeftoversFrom === undefined && (costs.get(m.id) ?? 0) > 0)
     .sort((a, b) => (costs.get(b.id) ?? 0) - (costs.get(a.id) ?? 0))
-    .slice(0, 2)
+    .slice(0, far ? 3 : 2)
     .map((m) => m.id);
 }
 
@@ -104,8 +119,31 @@ function attribute(check: string, plan: MealPlan, ctx: ValidateContext): { meals
       for (const m of plan.meals) if (avoidedDish(m.name, ctx.avoidDishes) !== undefined) meals.push(m.id);
       break;
     case 'repetition':
-      // Only the meals past the third use of an ingredient: the first ones keep it.
-      for (const later of repeatedMeals(plan.meals).values()) for (const m of later) meals.push(m.id);
+      // Only the meals past the third use of an ingredient: the first ones keep it. A craving's ingredients do not count.
+      for (const later of repeatedMeals(plan.meals, cravingExemptIds(plan.request.cravings)).values()) for (const m of later) meals.push(m.id);
+      break;
+    case 'cravings': {
+      // An ingredient craving short of dinners: the non-leftover dinners that lack it are written again, untagged ones first.
+      const dinners = plan.meals.filter((m) => m.slot === 'dinner');
+      const need = cravingDinnerMinimum(dinners.length);
+      const taken = new Set<string>();
+      for (const craving of plan.request.cravings) {
+        const featured = featuredIdsOf(craving);
+        if (featured.size === 0) continue;
+        const have = dinners.filter((m) => m.ingredients.some((i) => featured.has(i.ingredientId)));
+        const more = need - have.length;
+        if (more <= 0) continue;
+        const lacking = dinners.filter((m) => m.usesLeftoversFrom === undefined && !have.includes(m) && !taken.has(m.id));
+        const pick = [...lacking.filter((m) => !m.tags.includes('craving')), ...lacking.filter((m) => m.tags.includes('craving'))].slice(0, more);
+        for (const m of pick) {
+          taken.add(m.id);
+          meals.push(m.id);
+        }
+      }
+      break;
+    }
+    case 'leftovers':
+      for (const b of leftoverBreaks(plan)) meals.push(b.meal.id);
       break;
     case 'busy':
       for (const m of plan.meals) {
@@ -114,22 +152,22 @@ function attribute(check: string, plan: MealPlan, ctx: ValidateContext): { meals
       }
       break;
     case 'variety': {
-      // Only the two rules that name meals. The minimum-vegetables rule names none, so it gets a full attempt.
-      if (ctx.household.varietyRules.minVeg5 === true) break;
+      const rules = ctx.household.varietyRules;
       const dinners = plan.meals.filter((m) => m.slot === 'dinner');
-      if (ctx.household.varietyRules.noRepeatDinner14 === true) {
+      if (rules.noRepeatDinner14 === true) {
         const recent = new Set((ctx.recentDinnerNames ?? []).map(nameKey));
         for (const m of dinners) if (recent.has(nameKey(m.name))) meals.push(m.id);
       }
-      if (ctx.household.varietyRules.noRepeatProteinConsecutive === true) {
-        const protein = (m: PlannedMeal) => m.ingredients.map((i) => INGREDIENT_BY_ID[i.ingredientId]?.protein).find((p) => p);
-        const order = (m: PlannedMeal) => DAYS.indexOf(m.day);
-        const byDay = dinners.filter((m) => protein(m) !== undefined).sort((a, b) => order(a) - order(b));
-        for (let i = 1; i < byDay.length; i++) {
-          const prev = byDay[i - 1]!;
-          const cur = byDay[i]!;
-          if (order(cur) === order(prev) + 1 && protein(cur) === protein(prev)) meals.push(cur.id);
-        }
+      if (rules.noRepeatProteinConsecutive === true) {
+        for (const { cur } of consecutiveProteinRepeats(dinners)) meals.push(cur.id);
+      }
+      if (rules.minVeg5 === true && vegetablesUsed(plan, ctx).length < VEG_TARGET) {
+        // The minimum-vegetables rule: the two dinners with the fewest vegetables (plan order breaks ties).
+        const fewest = dinners
+          .map((m) => ({ m, n: m.ingredients.filter((i) => isVegetable(i.ingredientId)).length }))
+          .sort((a, b) => a.n - b.n)
+          .slice(0, 2);
+        for (const { m } of fewest) meals.push(m.id);
       }
       break;
     }

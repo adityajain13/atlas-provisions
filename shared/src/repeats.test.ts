@@ -55,3 +55,12 @@ describe('repeatedMeals', () => {
     expect(INGREDIENT_BY_ID['celery']).toBeDefined();
   });
 });
+
+describe('repeatedMeals with an exempt set', () => {
+  it('does not count an ingredient in the exempt set at all', () => {
+    const meals = [meal('mon', 'dinner', ['chicken-thigh-boneless']), meal('tue', 'dinner', ['chicken-thigh-boneless']), meal('wed', 'dinner', ['chicken-thigh-boneless']), meal('thu', 'dinner', ['chicken-thigh-boneless'])];
+    expect(repeatedMeals(meals).has('chicken-thigh-boneless')).toBe(true);
+    expect(repeatedMeals(meals, new Set(['chicken-thigh-boneless'])).size).toBe(0);
+  });
+});
+

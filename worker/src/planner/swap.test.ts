@@ -23,7 +23,7 @@ import {
 } from '@provisions/shared';
 import flyer from '../../fixtures/flyer-sample.json';
 import type { PlannerClient } from './claude';
-import { SWAP_PROMPT, SYSTEM_PROMPT, type PlannerPayload } from './prompt';
+import { plannerSystem, swapPrompt, type PlannerPayload } from './prompt';
 import { evaluateWeek, PREP_MISSING, weekFrame } from './run';
 import { runSwap } from './swap';
 
@@ -119,8 +119,8 @@ const newMealsFor = (cells: [Day, Slot][], extra: (day: Day, slot: Slot) => Part
 
 /** Client that returns the scripted answers in order and records each payload and system prompt. */
 function scripted(answers: RawPlan[]) {
-  const seen: { system: string; payload: PlannerPayload }[] = [];
-  const submitPlan = vi.fn(async (system: string, payload: unknown) => {
+  const seen: { system: { cached: string; uncached?: string }; payload: PlannerPayload }[] = [];
+  const submitPlan = vi.fn(async (system: { cached: string; uncached?: string }, payload: unknown) => {
     seen.push({ system, payload: structuredClone(payload) as PlannerPayload });
     const answer = answers[Math.min(seen.length - 1, answers.length - 1)];
     if (!answer) throw new Error('no scripted answer');
@@ -159,7 +159,8 @@ describe('runSwap', () => {
 
     // The model saw only the freed slots, the kept meals, and the swap rules.
     expect(seen).toHaveLength(1);
-    expect(seen[0]!.system).toBe(`${SYSTEM_PROMPT}\n${SWAP_PROMPT}`);
+    // No prep day in this household, and no new leftover chain for a swap: the swap block follows the cached base.
+    expect(seen[0]!.system).toEqual({ cached: plannerSystem({ prep: false, leftovers: false }), uncached: swapPrompt(false) });
     expect(seen[0]!.payload.slots.map((s) => s.id).sort()).toEqual(['mon-dinner', 'tue-lunch']);
     expect(seen[0]!.payload.keptMeals).toHaveLength(19);
     expect(seen[0]!.payload.replacing).toEqual([label('mon', 'dinner'), label('tue', 'lunch')]);
@@ -280,7 +281,7 @@ describe('runSwap', () => {
 
     const out = await runSwap({ household: h, plan: saved, mealIds: ['mon-dinner'], deals, matched, neverBuy: [], recentDinnerNames: [], client });
 
-    expect(seen[0]!.system).toContain(SWAP_PROMPT);
+    expect(seen[0]!.system.uncached).toBe(swapPrompt(true));
     expect(out.plan.prep?.steps.map((s) => s.task)).toEqual(['Make the dal']);
     expect(out.plan.issues.some((i) => i.check === 'prep')).toBe(false);
   });

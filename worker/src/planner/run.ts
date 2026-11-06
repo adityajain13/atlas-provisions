@@ -5,6 +5,7 @@ import {
   INGREDIENT_BY_ID,
   SLOTS,
   blockedFormIds,
+  featuredIdsOf,
   regularCandidates,
   typicalOffers,
   buildList,
@@ -12,6 +13,7 @@ import {
   pinsOf,
   expandWeek,
   expiringSoon,
+  nameHasWord,
   repairFor,
   round2,
   swapClosure,
@@ -47,17 +49,21 @@ import {
 import {
   buildAvailable,
   buildPayload,
-  SWAP_PROMPT,
-  SYSTEM_PROMPT,
+  leftoverChainsOf,
+  plannerSystem,
+  swapPrompt,
   type AvailableItem,
   type KeptMealPayload,
   type PlannerPayload,
 } from './prompt';
-import type { PlannerClient } from './claude';
+import type { PlannerClient, SystemText } from './claude';
 import { normalisePrep } from './prep';
 
 /** Most regular-priced items the planner is offered at once. */
 export const REGULAR_LIMIT = 40;
+
+/** No new attempt starts once this much time has passed since the first one. The best attempt so far is kept. */
+export const ATTEMPT_TIME_LIMIT_MS = 150_000;
 
 export const PREP_MISSING: ValidationIssue = {
   check: 'prep',
@@ -116,6 +122,7 @@ export interface WeekFrame {
   formBlocked: ReadonlySet<string>; // ingredient ids in a form the household does not keep: not planned, not bought
   listOptions: BuildListOptions; // store preference, pins and estimates, for buildList
   guests: Record<string, { allergies: string[] }>; // every guest on the plan, kept with the plan and checked for allergies
+  notes: ValidationIssue[]; // warnings about the request itself, such as a craving the household never buys
 }
 
 type FrameInput = Omit<RunInput, 'client' | 'maxAttempts' | 'onProgress' | 'now'>;
@@ -129,7 +136,7 @@ function storeNames(household: Household, deals: Deal[], matched: MatchedItem[])
 
 /** The week's cells, fixed placements, costs and what the planner may use, for the request as saved. */
 export function weekFrame(input: FrameInput): WeekFrame {
-  const { household, request } = input;
+  const { household } = input;
   const today = input.today ?? torontoDate();
   const pantry = usableItems(input.pantry ?? [], today);
   const ratings = input.ratings ?? { favourites: [], avoid: [], never: [] };
@@ -137,6 +144,19 @@ export function weekFrame(input: FrameInput): WeekFrame {
   const neverWords = household.itemRules.filter((r) => r.rule === 'never').map((r) => r.name);
   // Forms the household does not keep are taken out of the prices and the planner's choices, so they are neither planned nor bought.
   const formBlocked = blockedFormIds(household.forms);
+  const neverSet = new Set(input.neverBuy);
+  // A craving the household never buys cannot be planned: it is dropped, with a warning, before anything is built from it.
+  const cravingBlocked = (craving: string) => {
+    const ids = [...featuredIdsOf(craving)];
+    const allBlocked = ids.length > 0 && ids.every((id) => neverSet.has(id) || formBlocked.has(id));
+    return allBlocked || neverWords.some((w) => nameHasWord(craving, w));
+  };
+  const notes: ValidationIssue[] = input.request.cravings.filter(cravingBlocked).map((c) => ({
+    check: 'cravings',
+    severity: 'warning',
+    message: `Craving "${c}" is on your never-buy list, so it is not planned.`,
+  }));
+  const request: PlanRequest = { ...input.request, cravings: input.request.cravings.filter((c) => !cravingBlocked(c)) };
   const kept = <T extends { ingredientId: string }>(items: T[]) => items.filter((i) => !formBlocked.has(i.ingredientId));
   const deals = kept(input.deals);
   const matched = kept(input.matched);
@@ -146,7 +166,6 @@ export function weekFrame(input: FrameInput): WeekFrame {
   const estimates = [...kept(input.estimates ?? []), ...typicalOffers(topStore)];
   // Kept staples: free, never listed. A staple the household may not eat (never-buy, an allergen, a form it does not keep) is left out.
   const allergens = new Set(household.people.flatMap((p) => p.allergies));
-  const neverSet = new Set(input.neverBuy);
   const onHand = household.onHand.filter((id) => {
     const ing = INGREDIENT_BY_ID[id];
     return ing !== undefined && !formBlocked.has(id) && !neverSet.has(id) && !ing.allergens.some((a) => allergens.has(a));
@@ -179,12 +198,14 @@ export function weekFrame(input: FrameInput): WeekFrame {
       slot: p.slot,
       eaters: p.eaters,
     })),
+    // Never-buy and blocked-form ids are left out of everything the planner may use, pantry stock and leftovers included.
     available: buildAvailable(deals, fixedCost, pantry, {
       onHand,
       regular: regularItems(household, { neverBuy: neverSet, blocked: formBlocked, allergens, deals, pantry, matched, estimates, onHand }),
-    }).filter((a) => !formBlocked.has(a.id)),
+    }).filter((a) => !formBlocked.has(a.id) && !neverSet.has(a.id)),
     listOptions: { preference: household.storePreference, pins: pinsOf(household.itemRules), estimates, onHand },
     guests: input.guests ?? {},
+    notes,
   };
 }
 
@@ -205,21 +226,21 @@ function regularItems(
     estimates: Offer[];
     onHand: string[];
   },
-): { id: string; packQty: number; basis: EstimateBasis }[] {
+): { id: string; packQty: number; packPrice: number; basis: EstimateBasis }[] {
   const exclude = new Set<string>([
     ...f.deals.map((d) => d.ingredientId),
     ...f.pantry.map((p) => p.ingredientId),
     ...f.matched.map((m) => m.ingredientId),
     ...f.onHand,
   ]);
-  const out: { id: string; packQty: number; basis: EstimateBasis }[] = [];
+  const out: { id: string; packQty: number; packPrice: number; basis: EstimateBasis }[] = [];
   for (const id of regularCandidates(household.cuisines, exclude, REGULAR_LIMIT)) {
     const ing = INGREDIENT_BY_ID[id];
     if (!ing || f.neverBuy.has(id) || f.blocked.has(id) || ing.allergens.some((a) => f.allergens.has(a))) continue;
     for (const basis of ESTIMATE_PRIORITY) {
       const offer = f.estimates.find((e) => e.ingredientId === id && e.estimate?.basis === basis);
       if (offer) {
-        out.push({ id, packQty: offer.packQty, basis });
+        out.push({ id, packQty: offer.packQty, packPrice: offer.packPrice, basis });
         break;
       }
     }
@@ -248,6 +269,7 @@ export function evaluateWeek(frame: WeekFrame, meals: PlannedMeal[], shapeIssues
     ...(Object.keys(frame.guests).length > 0 ? { guests: frame.guests } : {}),
   };
   plan.issues = [
+    ...frame.notes,
     ...fixedCost.issues,
     ...shapeIssues,
     ...validate(plan, validationContext(frame)),
@@ -396,19 +418,19 @@ interface Step {
 }
 
 function payloadFor(frame: WeekFrame, step: Step): PlannerPayload {
-  const payload = buildPayload({
+  return buildPayload({
     household: frame.household,
     request: frame.request,
     cells: step.cells,
     fixed: frame.placements,
     fixedCost: frame.fixedCost,
     available: frame.available,
-    neverBuy: frame.neverBuy,
     neverBuyWords: frame.neverWords,
     recentDinnerNames: frame.recentDinnerNames,
     pantryUseFirst: frame.dueSoon.map((i) => i.ingredientId),
     favourites: frame.ratings.favourites,
     avoid: [...frame.ratings.avoid, ...frame.ratings.never],
+    issues: step.feedback ?? undefined,
     feedback: frame.feedback,
     guests: frame.guests,
     ...(swapStyle(step)
@@ -420,12 +442,21 @@ function payloadFor(frame: WeekFrame, step: Step): PlannerPayload {
         }
       : {}),
   });
-  payload.feedback = step.feedback;
-  return payload;
 }
 
 /** Repairs and swaps keep meals, so they use the swap prompt. A new plan's first attempt does not. */
 const swapStyle = (step: Step) => step.swap || step.mode === 'repair';
+
+/**
+ * The system prompt for a step: the variant for this week's prep day and leftover chains (cached), and the swap block
+ * for a swap or repair (sent after it, uncached). A new plan with nothing to chain drops the leftover sentence.
+ */
+function systemFor(step: Step, prepDay: Day | null): SystemText {
+  const prep = prepDay !== null;
+  const swap = swapStyle(step);
+  const leftovers = !swap && leftoverChainsOf(step.cells) > 0;
+  return { cached: plannerSystem({ prep, leftovers }), ...(swap ? { uncached: swapPrompt(prep) } : {}) };
+}
 
 /** One model call for a step, checked against the whole week. A step with nothing to write is checked without a call. */
 async function attemptStep(job: WeekJob, step: Step): Promise<Attempt> {
@@ -433,8 +464,7 @@ async function attemptStep(job: WeekJob, step: Step): Promise<Attempt> {
   if (step.cells.length === 0) return { plan: evaluateWeek(frame, step.kept, [], step.notes) };
 
   const payload = payloadFor(frame, step);
-  const system = swapStyle(step) ? `${SYSTEM_PROMPT}\n${SWAP_PROMPT}` : SYSTEM_PROMPT;
-  const raw = await job.client.submitPlan(system, payload);
+  const raw = await job.client.submitPlan(systemFor(step, job.prepDay), payload);
   const { meals: everyNew, issues: shapeIssues } = toPlannedMeals(raw.meals, frame.cells);
 
   let merged: PlannedMeal[] = everyNew;
@@ -543,6 +573,8 @@ export async function runWeek(job: WeekJob): Promise<WeekResult> {
       best = tried;
     }
     if (errors === 0 || attempts >= job.maxAttempts) break;
+    // Out of time: the best attempt so far is kept, with its issues, rather than starting another call.
+    if (job.now() - started > ATTEMPT_TIME_LIMIT_MS) break;
 
     const next = nextStep(job, tried);
     if (next.repaired) {

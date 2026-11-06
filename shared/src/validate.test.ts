@@ -954,3 +954,61 @@ describe('validate: protein balance', () => {
     expect(balanceIssues(meals, { household: veg }).some((i) => i.message.includes('no meat or fish'))).toBe(false);
   });
 });
+
+describe('validate: budget tolerance and unpriced items', () => {
+  const budgetIssue = (totalCost: number, budget: number, list: ListItem[] = []) =>
+    validate(planOf(cleanMeals(), { totalCost, list }, { budget }), ctxOf()).find((i) => i.check === 'budget');
+
+  it('a small overrun (the larger of $3 and 3% of the budget) is a warning, not an error', () => {
+    expect(budgetIssue(102.5, 100, [])?.severity).toBe('warning');
+    expect(budgetIssue(104, 100, [])?.severity).toBe('error');
+    expect(budgetIssue(1020, 1000, [])?.severity).toBe('warning');
+    expect(budgetIssue(1040, 1000, [])?.severity).toBe('error');
+  });
+
+  it('says how many items have no price', () => {
+    const list = [item('broccoli', { total: 20, store: 'FreshCo' }), item('rice', { total: 0, store: 'Unpriced' }), item('milk', { total: 0, store: 'Unpriced' })];
+    expect(budgetIssue(110, 100, list)?.message.startsWith('Over budget by $10.00 (+2 items without a price).')).toBe(true);
+  });
+
+  it('uses the singular for one item without a price, and says nothing when every item is priced', () => {
+    const one = [item('rice', { total: 0, store: 'Unpriced' })];
+    expect(budgetIssue(110, 100, one)?.message).toContain('(+1 item without a price)');
+    expect(budgetIssue(110, 100, [item('broccoli', { total: 20, store: 'FreshCo' })])?.message).not.toContain('without a price');
+  });
+});
+
+describe('validate: leftover links', () => {
+  const linked = (changes: Record<string, Partial<PlannedMeal>>) => cleanMeals().map((m) => ({ ...m, ...(changes[m.id] ?? {}) }));
+  const leftoverIssues = (meals: PlannedMeal[]) => validate(planOf(meals), ctxOf()).filter((i) => i.check === 'leftovers');
+
+  it('accepts a dinner that makes leftovers for a later lunch, and that lunch eating them from it', () => {
+    expect(leftoverIssues(linked({ 'sun-dinner': { makesLeftoversFor: 'mon-lunch' }, 'mon-lunch': { usesLeftoversFrom: 'sun-dinner' } }))).toEqual([]);
+  });
+
+  it('flags a meal that eats leftovers from a meal that does not make them for it', () => {
+    const issues = leftoverIssues(linked({ 'mon-lunch': { usesLeftoversFrom: 'sun-dinner' } }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.severity).toBe('error');
+    expect(issues[0]!.message).toContain(`"${cleanMeals().find((m) => m.id === 'mon-lunch')!.name}" eats leftovers`);
+  });
+
+  it('flags a meal that names a missing meal, or one that is not later, as the place its leftovers go', () => {
+    expect(leftoverIssues(linked({ 'mon-lunch': { usesLeftoversFrom: 'gone-dinner' } }))).toHaveLength(1);
+    expect(leftoverIssues(linked({ 'mon-lunch': { makesLeftoversFor: 'sun-dinner' }, 'sun-dinner': { usesLeftoversFrom: 'mon-lunch' } })).length).toBeGreaterThan(0);
+  });
+});
+
+describe('validate: a craving does not trip the repeat limit for its ingredient', () => {
+  const chickenMeals = () =>
+    cleanMeals()
+      .slice(0, 4)
+      .map((m) => ({ ...m, ingredients: [{ ingredientId: 'chicken-thigh-boneless', qty: 0.3, unit: 'kg' as const }] }));
+
+  it('flags the fourth use of chicken, unless a chicken craving names it', () => {
+    const repeats = (cravings: string[]) => validate(planOf(chickenMeals(), {}, { cravings }), ctxOf()).filter((i) => i.check === 'repetition');
+    expect(repeats([])).toHaveLength(1);
+    expect(repeats(['chicken'])).toHaveLength(0);
+  });
+});
+

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAYS, SLOTS, defaultHousehold, type Household, type PlanRequest } from '@provisions/shared';
 import { API, OWNER, PARTNER, call, count, householdOf, householdWith, json, rows, setup, signIn, withCookie } from './testing/app';
 import { toolReply } from './testing/sse';
+import { sentPlannerPayload } from './testing/payload';
 
 const H = API;
 const FRIEND = 'friend@example.com';
@@ -419,8 +420,8 @@ describe('households are isolated from each other', () => {
     // The planner's payload is JSON inside the request's message content.
     const sentBy = () =>
       fetchMock.mock.calls.map((c) => {
-        const body = JSON.parse(String((c as unknown as [string, RequestInit])[1].body)) as { messages: { content: string }[] };
-        return JSON.stringify(JSON.parse(body.messages[0]!.content));
+        const body = JSON.parse(String((c as unknown as [string, RequestInit])[1].body)) as { messages: { content: unknown }[] };
+        return JSON.stringify(sentPlannerPayload(body));
       });
 
     // Positive control: the owner's plan uses its pantry stock, so the request carries it.

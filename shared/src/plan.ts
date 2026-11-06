@@ -140,7 +140,8 @@ export interface ValidationIssue {
     | 'repetition'
     | 'season'
     | 'balance'
-    | 'cuisine';
+    | 'cuisine'
+    | 'leftovers';
   severity: 'error' | 'warning';
   message: string; // written as an instruction to the planner
 }

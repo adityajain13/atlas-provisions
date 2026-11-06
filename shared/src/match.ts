@@ -26,7 +26,7 @@ const BRAND_PREFIX =
   /^(?:pc|no name|compliments|great value|selection|presidents? choice|kirkland|sobeys|irresistibles|lactantia|dempsters|natures touch|farmers market|our finest)\s+/;
 
 // Words that hint at a category. Used for a small confidence bonus.
-const CATEGORY_HINTS: Partial<Record<Category, string[]>> = {
+export const CATEGORY_HINTS: Partial<Record<Category, string[]>> = {
   meat: ['chicken', 'beef', 'pork', 'turkey', 'sausage', 'mince', 'chkn', 'bnls', 'drumstick'],
   seafood: ['fish', 'salmon', 'tilapia', 'cod', 'shrimp', 'tuna'],
   dairy: ['milk', 'cheese', 'yogurt', 'yoghurt', 'cream', 'butter', 'eggs', 'egg'],
@@ -39,7 +39,7 @@ const CATEGORY_HINTS: Partial<Record<Category, string[]>> = {
 };
 
 // Lines that share a word with an ingredient but are not one. Nestle Drumstick is ice cream, not chicken.
-const NON_INGREDIENT_PHRASES = ['nestle drumstick', 'haagen dazs'];
+export const NON_INGREDIENT_PHRASES = ['nestle drumstick', 'haagen dazs'];
 
 /** Lowercase, accents removed, trademark signs and apostrophes dropped, whitespace collapsed. */
 function foldText(s: string): string {
@@ -133,6 +133,25 @@ const ALIAS_INDEX: { ingredient: Ingredient; aliases: AliasTokens[] }[] = INGRED
     .filter((a) => a.tokens.length > 0),
 }));
 
+/**
+ * Inverted index from a word to the aliases that contain it, as [ingredient index, alias index] pairs in the order
+ * ALIAS_INDEX lists them. An alias can only match a name that has every one of its words, so a name is scored only
+ * against the aliases sharing at least one word with it, not against all of them.
+ */
+const TOKEN_INDEX: Map<string, [number, number][]> = (() => {
+  const index = new Map<string, [number, number][]>();
+  ALIAS_INDEX.forEach((entry, e) =>
+    entry.aliases.forEach((alias, a) => {
+      for (const t of new Set(alias.tokens)) {
+        const list = index.get(t);
+        if (list) list.push([e, a]);
+        else index.set(t, [[e, a]]);
+      }
+    }),
+  );
+  return index;
+})();
+
 const NON_INGREDIENT_TOKENS = NON_INGREDIENT_PHRASES.map(tokensOf);
 
 const HINT_TOKENS: Partial<Record<Category, string[][]>> = Object.fromEntries(
@@ -152,11 +171,25 @@ export function matchIngredient(rawName: string): { ingredientId: string; confid
   if (NON_INGREDIENT_TOKENS.some((seq) => containsSeq(tokens, seq))) return null;
   const present = new Set(tokens);
 
+  // Only the aliases that share a word with the name can match, and they are visited in ALIAS_INDEX order, so the
+  // result is the same as scoring every alias.
+  const candidates = new Map<number, Set<number>>();
+  for (const t of present) {
+    for (const [e, a] of TOKEN_INDEX.get(t) ?? []) {
+      const aliases = candidates.get(e) ?? new Set<number>();
+      aliases.add(a);
+      candidates.set(e, aliases);
+    }
+  }
+  const entries = [...candidates.keys()].sort((x, y) => x - y);
+
   let best: { ingredientId: string; score: number; aliasLen: number; confidence: number } | null = null;
 
-  for (const entry of ALIAS_INDEX) {
+  for (const e of entries) {
+    const entry = ALIAS_INDEX[e];
     let hit: { size: number; contiguous: boolean; length: number; score: number } | null = null;
-    for (const alias of entry.aliases) {
+    for (const a of [...candidates.get(e)!].sort((x, y) => x - y)) {
+      const alias = entry.aliases[a];
       if (!alias.tokens.every((t) => present.has(t))) continue;
       const contiguous = containsSeq(tokens, alias.tokens);
       const size = alias.tokens.length;

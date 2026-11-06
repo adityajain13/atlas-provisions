@@ -176,9 +176,74 @@ describe('repairFor', () => {
     expect(repairFor(plan, ctxFor(), [err('busy'), err('macros')])).toBeNull();
   });
 
-  it('refuses a variety repair under the minimum-vegetables rule, which names no meal', () => {
+  it('variety under the minimum-vegetables rule rewrites the two dinners with the fewest vegetables', () => {
     const h = household({ varietyRules: { ...defaultHousehold().varietyRules, minVeg5: true } });
-    expect(repairFor(planOf(weekOf()), ctxFor(h), [err('variety')])).toBeNull();
+    const plan = planOf(
+      weekOf({
+        'sun-dinner': { ingredients: [{ ingredientId: 'broccoli', qty: 1, unit: 'kg' }, { ingredientId: 'carrots', qty: 1, unit: 'kg' }] },
+        'mon-dinner': { ingredients: [{ ingredientId: RICE, qty: 1, unit: 'g' }] },
+        'tue-dinner': { ingredients: [{ ingredientId: 'broccoli', qty: 1, unit: 'kg' }] },
+      }),
+    );
+    // Only two vegetables in the whole week, so the rule is short: mon-dinner (none) and wed-dinner (none) are the two fewest.
+    expect(repairFor(plan, ctxFor(h), [err('variety')])?.replaceIds).toEqual(['mon-dinner', 'wed-dinner']);
+  });
+
+  it('variety with no repeat or vegetable problem is refused', () => {
+    expect(repairFor(planOf(weekOf()), ctxFor(), [err('variety')])).toBeNull();
+  });
+
+  it('cravings: rewrites the non-leftover dinners that lack the ingredient, untagged ones first, up to the minimum', () => {
+    const h = household();
+    // Two dinners feature chicken; a week of seven dinners needs three. The third is a craving-tagged dinner: an untagged one comes first.
+    const plan = planOf(
+      weekOf({
+        'sun-dinner': { ingredients: [{ ingredientId: 'chicken-thigh-boneless', qty: 1, unit: 'kg' }] },
+        'mon-dinner': { ingredients: [{ ingredientId: 'chicken-thigh-boneless', qty: 1, unit: 'kg' }] },
+        'tue-dinner': { tags: ['craving'] },
+        'wed-dinner': { usesLeftoversFrom: 'tue-lunch' },
+      }),
+    );
+    const withCraving = { ...plan, request: { ...plan.request, cravings: ['chicken'] } };
+    const rep = repairFor(withCraving, ctxFor(h), [err('cravings')]);
+    // thu, fri, sat, and the tagged tue are candidates; the untagged thu comes first, so one dinner is picked and it is thu.
+    expect(rep?.replaceIds).toEqual(['thu-dinner']);
+    expect(rep?.reason).toBe('cravings');
+  });
+
+  it('cravings: refuses when every dinner is a leftover meal, so none can take the ingredient', () => {
+    const leftovers = Object.fromEntries(DAYS.map((d) => [`${d}-dinner`, { usesLeftoversFrom: 'x' }]));
+    const plan = planOf(weekOf(leftovers));
+    expect(repairFor({ ...plan, request: { ...plan.request, cravings: ['chicken'] } }, ctxFor(), [err('cravings')])).toBeNull();
+  });
+
+  it('leftovers: replaces the meal whose leftover link is broken, and the meal it links to', () => {
+    // mon-lunch says it eats sun-dinner's leftovers, but sun-dinner makes them for tue-lunch.
+    const plan = planOf(
+      weekOf({
+        'sun-dinner': { makesLeftoversFor: 'tue-lunch' },
+        'mon-lunch': { usesLeftoversFrom: 'sun-dinner', activeMinutes: 5 },
+      }),
+    );
+    // The linked lunch (tue-lunch, which sun-dinner makes leftovers for) comes with them, as every leftover link does.
+    const rep = repairFor(plan, ctxFor(), [err('leftovers')]);
+    expect(rep?.replaceIds).toEqual(['sun-dinner', 'mon-lunch', 'tue-lunch']);
+    expect(rep?.reason).toBe('leftovers');
+  });
+
+  it('budget: rewrites two meals when over by no more than 15% of the budget, and three when further over', () => {
+    const base = planOf(
+      weekOf({
+        'sun-dinner': { ingredients: [{ ingredientId: RICE, qty: 9, unit: 'g' }] },
+        'tue-dinner': { ingredients: [{ ingredientId: RICE, qty: 1, unit: 'g' }] },
+        'wed-dinner': { ingredients: [{ ingredientId: RICE, qty: 0.5, unit: 'g' }] },
+      }),
+      [{ ingredientId: RICE, name: 'Rice', category: 'pantry', store: 'FreshCo', packs: 1, packQty: 10, packPrice: 50, total: 50, usedIn: [] }],
+    );
+    // A budget of 100: a total of 110 is 10% over (two meals); 130 is 30% over (three).
+    const at = (totalCost: number) => ({ ...base, totalCost, request: { ...base.request, budget: 100 } });
+    expect(repairFor(at(110), ctxFor(), [err('budget')])?.replaceIds).toEqual(['sun-dinner', 'tue-dinner']);
+    expect(repairFor(at(130), ctxFor(), [err('budget')])?.replaceIds).toEqual(['sun-dinner', 'tue-dinner', 'wed-dinner']);
   });
 
   it('variety: the later of two dinners that repeat a protein on consecutive days is replaced', () => {

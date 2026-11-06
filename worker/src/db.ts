@@ -124,13 +124,18 @@ export async function overlappingFlyerItems(
 }
 
 /**
- * Price history for deal scoring: flyer and receipt rows. Site rows are left out, since a regular shelf price is not a
- * sale and would make every flyer deal look bigger; they reach the list as offers (sitePriceRows).
+ * Price history for deal scoring: the shared flyer rows (household_id '') and this household's own receipt rows.
+ * Other households' receipts are left out, so what one household paid never moves another's deals. Site rows are left
+ * out too, since a regular shelf price is not a sale and would make every flyer deal look bigger; they reach the list
+ * as offers (sitePriceRows).
  */
-export async function priceHistory(db: D1Database, sinceDate: string): Promise<HistoryPoint[]> {
+export async function priceHistory(db: D1Database, householdId: string, sinceDate: string): Promise<HistoryPoint[]> {
   const { results } = await db
-    .prepare("SELECT ingredient_id, store, date, price_per_unit FROM price_history WHERE date >= ? AND source <> 'site'")
-    .bind(sinceDate)
+    .prepare(
+      `SELECT ingredient_id, store, date, price_per_unit FROM price_history
+       WHERE date >= ? AND source <> 'site' AND (household_id = '' OR household_id = ?)`,
+    )
+    .bind(sinceDate, householdId)
     .all<HistoryRow>();
   return results.map((r) => ({
     ingredientId: r.ingredient_id,
@@ -392,11 +397,23 @@ const toRating = (r: RatingRow): Rating => ({
   date: r.date,
 });
 
-export async function loadRatings(db: D1Database, householdId: string): Promise<Rating[]> {
-  const { results } = await db
-    .prepare('SELECT * FROM meal_ratings WHERE household_id = ?')
-    .bind(householdId)
-    .all<RatingRow>();
+/** How far back the planner reads ratings. Down and never ratings are read whatever their age, since they always count. */
+export const RATING_WINDOW_DAYS = 180;
+
+/**
+ * The household's ratings. With `since` (YYYY-MM-DD), only ratings dated on or after it are read, plus every 'down' and
+ * 'never': those keep a meal out of the favourites and off the plan whatever their age. Without it, every rating is read.
+ */
+export async function loadRatings(db: D1Database, householdId: string, since?: string): Promise<Rating[]> {
+  const { results } =
+    since === undefined
+      ? await db.prepare('SELECT * FROM meal_ratings WHERE household_id = ?').bind(householdId).all<RatingRow>()
+      : await db
+          .prepare(
+            `SELECT * FROM meal_ratings WHERE household_id = ? AND (date >= ? OR rating IN ('down', 'never'))`,
+          )
+          .bind(householdId, since)
+          .all<RatingRow>();
   return results.map(toRating);
 }
 

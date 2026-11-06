@@ -1,18 +1,25 @@
+import { Suspense, lazy } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import TabBar from './components/TabBar';
 import { ConfirmProvider } from './components/ConfirmDialog';
 import { SaveStatusProvider } from './components/SaveStatus';
 import AppShell from './components/AppShell';
 import Week from './screens/Week';
-import List from './screens/List';
-import Plan from './screens/Plan';
-import HouseholdScreen from './screens/Household';
-import Pantry from './screens/Pantry';
-import Setup from './screens/Setup';
 import Login from './screens/Login';
 import { InviteBanner } from './components/InviteBanner';
 import { SessionProvider, safeNext, useSession } from './session';
 import { SetupGateProvider, useSetupGate } from './setupGate';
+
+// Every screen but the week loads when it is first opened. The fallback has the page background, so there is no flash.
+const List = lazy(() => import('./screens/List'));
+const Plan = lazy(() => import('./screens/Plan'));
+const HouseholdScreen = lazy(() => import('./screens/Household'));
+const Pantry = lazy(() => import('./screens/Pantry'));
+const Setup = lazy(() => import('./screens/Setup'));
+
+function ScreenFallback() {
+  return <div className="min-h-[40vh] bg-ink" />;
+}
 
 export default function App() {
   return (
@@ -65,15 +72,17 @@ function SignedInRoutes() {
   if (!gate.setupDone && pathname !== '/setup') return <Navigate to="/setup" replace />;
 
   const routes = (
-    <Routes>
-      <Route path="/" element={<Week />} />
-      <Route path="/list" element={<List />} />
-      <Route path="/plan" element={<Plan />} />
-      <Route path="/household" element={<HouseholdScreen />} />
-      <Route path="/pantry" element={<Pantry />} />
-      <Route path="/setup" element={<Setup />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense fallback={<ScreenFallback />}>
+      <Routes>
+        <Route path="/" element={<Week />} />
+        <Route path="/list" element={<List />} />
+        <Route path="/plan" element={<Plan />} />
+        <Route path="/household" element={<HouseholdScreen />} />
+        <Route path="/pantry" element={<Pantry />} />
+        <Route path="/setup" element={<Setup />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 
   if (pathname === '/setup') {

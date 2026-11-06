@@ -76,6 +76,7 @@ import {
   loadPantryItem,
   loadPlan,
   loadPlanData,
+  RATING_WINDOW_DAYS,
   loadRatings,
   plansBetween,
   priceHistory,
@@ -183,12 +184,21 @@ async function loadDeals(
   estimates: Offer[]; // site prices from the last 14 days, then receipt prices from the last 90 days, where no flyer prices a store
 }> {
   const household = await loadHousehold(env.DB, householdId);
-  const { items: flyerItems, source: priceSource } = await flyerItemsFor(
-    env.DB,
-    flyerPostal(household),
-    date,
-    torontoDate(),
-  );
+  // What the household last paid at each store, from its receipts. Estimates only where no flyer prices that store.
+  const today = torontoDate();
+  const estimateFrom = addDaysIso(today, -RECEIPT_ESTIMATE_DAYS);
+  // The flyers, the price history and the store prices depend only on the household and the date, so they load together.
+  // A store's regular site price (its location picked in Household) comes before a receipt price for the same store.
+  const [{ items: flyerItems, source: priceSource }, history, sitePrices, receipts] = await Promise.all([
+    flyerItemsFor(env.DB, flyerPostal(household), date, today),
+    priceHistory(env.DB, householdId, addDaysIso(date, -56)),
+    sitePriceRows(
+      env.DB,
+      [...siteTargets(household).map((t) => ({ store: t.store.name, storeId: t.storeId })), ...tntLocations(household)],
+      addDaysIso(today, -SITE_PRICE_DAYS),
+    ),
+    householdReceiptPrices(env.DB, householdId, estimateFrom, today),
+  ]);
 
   // Only enabled stores count. If none are enabled, every store in the flyer is used.
   const enabled = new Set(household.stores.filter((s) => s.enabled).map((s) => s.name));
@@ -202,19 +212,9 @@ async function loadDeals(
     else unmatched.push(item.rawName);
   }
 
-  const history = await priceHistory(env.DB, addDaysIso(date, -56));
-  // What the household last paid at each store, from its receipts. Estimates only where no flyer prices that store.
-  const today = torontoDate();
-  const estimateFrom = addDaysIso(today, -RECEIPT_ESTIMATE_DAYS);
-  // A store's regular site price (its location picked in Household) comes before a receipt price for the same store.
-  const sitePrices = await sitePriceRows(
-    env.DB,
-    [...siteTargets(household).map((t) => ({ store: t.store.name, storeId: t.storeId })), ...tntLocations(household)],
-    addDaysIso(today, -SITE_PRICE_DAYS),
-  );
   const estimates = [
     ...siteOffers(sitePrices, addDaysIso(today, -SITE_PRICE_DAYS), today),
-    ...estimateOffers(await householdReceiptPrices(env.DB, householdId, estimateFrom, today), estimateFrom, today),
+    ...estimateOffers(receipts, estimateFrom, today),
   ];
 
   // Item rules name foods in free text. A never-buy name blocks every ingredient it covers, less the ones the
@@ -296,14 +296,19 @@ function ndjson(c: Context, work: (emit: Emit) => Promise<object>): Response {
  * the JSON and the streamed responses of POST /plan.
  */
 async function planWeek(env: Env, apiKey: string, householdId: string, request: PlanRequest, emit: Emit): Promise<MealPlan> {
-  const { household, matched, deals, neverBuy, priceSource, estimates } = await loadDeals(env, householdId, request.weekOf);
-  // Plans starting up to 21 days before the week can hold dinners in the 14-day window.
-  const earlier = await plansBetween(env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf);
-  const earlierStatuses = await loadStatusesBetween(env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf);
   const today = torontoDate();
-  const pantry = await loadPantry(env.DB, householdId);
-  const ratings = ratingSignals(await loadRatings(env.DB, householdId), household.people, today);
-  const feedback = await planFeedback(env.DB, householdId, today);
+  // Plans starting up to 21 days before the week can hold dinners in the 14-day window. None of these depend on each
+  // other, so they load together.
+  const [deal, earlier, earlierStatuses, pantry, ratingRows, feedback] = await Promise.all([
+    loadDeals(env, householdId, request.weekOf),
+    plansBetween(env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf),
+    loadStatusesBetween(env.DB, householdId, addDaysIso(request.weekOf, -21), request.weekOf),
+    loadPantry(env.DB, householdId),
+    loadRatings(env.DB, householdId, addDaysIso(today, -RATING_WINDOW_DAYS)),
+    planFeedback(env.DB, householdId, today),
+  ]);
+  const { household, matched, deals, neverBuy, priceSource, estimates } = deal;
+  const ratings = ratingSignals(ratingRows, household.people, today);
   // One Claude call makes the meals and, when a prep day is set, the prep list.
   const plan = await runPlanner({
     household,
@@ -487,11 +492,17 @@ app.post(`${API}/plan/:weekOf/swap`, async (c) => {
     : undefined;
 
   const swapWeek = async (emit: Emit) => {
-    const household = await loadHousehold(c.env.DB, householdId);
-    const { matched, deals, neverBuy, estimates } = await loadDeals(c.env, householdId, weekOf);
-    const earlier = await plansBetween(c.env.DB, householdId, addDaysIso(weekOf, -21), weekOf);
-    const earlierStatuses = await loadStatusesBetween(c.env.DB, householdId, addDaysIso(weekOf, -21), weekOf);
     const today = torontoDate();
+    const [household, deal, earlier, earlierStatuses, pantry, ratingRows, feedback] = await Promise.all([
+      loadHousehold(c.env.DB, householdId),
+      loadDeals(c.env, householdId, weekOf),
+      plansBetween(c.env.DB, householdId, addDaysIso(weekOf, -21), weekOf),
+      loadStatusesBetween(c.env.DB, householdId, addDaysIso(weekOf, -21), weekOf),
+      loadPantry(c.env.DB, householdId),
+      loadRatings(c.env.DB, householdId, addDaysIso(today, -RATING_WINDOW_DAYS)),
+      planFeedback(c.env.DB, householdId, today),
+    ]);
+    const { matched, deals, neverBuy, estimates } = deal;
     const result = await runSwap({
       household,
       plan: saved,
@@ -503,9 +514,9 @@ app.post(`${API}/plan/:weekOf/swap`, async (c) => {
       neverBuy,
       estimates,
       recentDinnerNames: recentDinnerNames(earlier, weekOf, 14, earlierStatuses),
-      pantry: await loadPantry(c.env.DB, householdId),
-      ratings: ratingSignals(await loadRatings(c.env.DB, householdId), household.people, today),
-      feedback: await planFeedback(c.env.DB, householdId, today),
+      pantry,
+      ratings: ratingSignals(ratingRows, household.people, today),
+      feedback,
       today,
       client: anthropicClient(apiKey, c.env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
       onProgress: (p: PlanProgress) => emit(p),
