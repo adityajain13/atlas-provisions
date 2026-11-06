@@ -36,6 +36,24 @@ export const PantryPatchSchema = z
   .refine((o) => o.qty !== undefined || o.expiresOn !== undefined, 'Nothing to change');
 export type PantryPatch = z.infer<typeof PantryPatchSchema>;
 
+/**
+ * Body for POST /plan/:weekOf/meals/:mealId/to-pantry: the unused amounts of a planned meal's ingredients, in base
+ * units. Each ingredient appears once. The Worker checks each one is in that meal.
+ */
+export const PantryFromPlanSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        ingredientId: z.string().min(1),
+        qty: z.number().positive('Quantity must be more than zero').max(MAX_QTY),
+      }),
+    )
+    .min(1, 'Choose at least one ingredient')
+    .max(50, 'At most 50 ingredients')
+    .refine((items) => new Set(items.map((i) => i.ingredientId)).size === items.length, 'Each ingredient appears once'),
+});
+export type PantryFromPlan = z.infer<typeof PantryFromPlanSchema>;
+
 /** Use-by date for a new item: the day it was added plus the ingredient's shelf life. */
 export function defaultExpiry(ingredientId: string, addedOn: string): string {
   const shelf = INGREDIENT_BY_ID[ingredientId]?.shelfLifeDays ?? DEFAULT_SHELF_DAYS;

@@ -511,14 +511,25 @@ function checkNeverNames(plan: MealPlan, ctx: ValidateContext): ValidationIssue[
   return out;
 }
 
+/** A guest's name in messages: "guest-2" reads "Guest 2". */
+const guestName = (id: string) => `Guest ${id.replace(/^guest-/, '')}`;
+
+/**
+ * Allergies are checked for every eater of a meal: household members from the household, and guests who joined a swapped
+ * meal from the plan's guest list. A guest's allergy is held to the same rule as a person's.
+ */
 function checkAllergens(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
   const out: ValidationIssue[] = [];
   for (const meal of plan.meals) {
     for (const eaterId of meal.eaters) {
       const person = ctx.household.people.find((p) => p.id === eaterId);
-      if (!person || person.allergies.length === 0) continue;
+      const guest = person ? undefined : plan.guests?.[eaterId];
+      const allergies = person ? person.allergies : (guest?.allergies ?? []);
+      const label = person ? person.name : guestName(eaterId);
+      if (!person && !guest) continue;
+      if (allergies.length === 0) continue;
       const hits = meal.ingredients
-        .map((ing) => ({ name: ingName(ing.ingredientId), clash: (INGREDIENT_BY_ID[ing.ingredientId]?.allergens ?? []).filter((a) => person.allergies.includes(a)) }))
+        .map((ing) => ({ name: ingName(ing.ingredientId), clash: (INGREDIENT_BY_ID[ing.ingredientId]?.allergens ?? []).filter((a) => allergies.includes(a)) }))
         .filter((h) => h.clash.length > 0);
       if (hits.length === 0) continue;
       const allergens = [...new Set(hits.flatMap((h) => h.clash))].join(', ');
@@ -526,7 +537,7 @@ function checkAllergens(plan: MealPlan, ctx: ValidateContext): ValidationIssue[]
       out.push({
         check: 'allergen',
         severity: 'error',
-        message: `${person.name} is allergic to ${allergens}, and "${meal.name}" uses ${names}, which ${person.name} eats. Replace ${names} in that meal.`,
+        message: `${label} is allergic to ${allergens}, and "${meal.name}" uses ${names}, which ${label} eats. Replace ${names} in that meal.`,
       });
     }
   }

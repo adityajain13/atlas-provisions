@@ -15,6 +15,8 @@ import {
 } from '@provisions/shared';
 import { readStoredPlan } from '@provisions/shared';
 import type {
+  MealStatus,
+  WeekStatuses,
   FeedbackKind,
   FeedbackRecord,
   WeekFeedback,
@@ -709,10 +711,14 @@ export async function insertMissingChecks(
 // ---- Retention (the Sunday job) ----
 
 /** Deletes plans and ticks of every household for weeks starting before `cutoff`. Returns how many rows went. */
-export async function pruneWeeksBefore(db: D1Database, cutoff: string): Promise<{ plans: number; checks: number }> {
+export async function pruneWeeksBefore(
+  db: D1Database,
+  cutoff: string,
+): Promise<{ plans: number; checks: number; statuses: number }> {
   const plans = await db.prepare('DELETE FROM meal_plans WHERE week_of < ?').bind(cutoff).run();
   const checks = await db.prepare('DELETE FROM checks WHERE week_of < ?').bind(cutoff).run();
-  return { plans: plans.meta.changes ?? 0, checks: checks.meta.changes ?? 0 };
+  const statuses = await db.prepare('DELETE FROM meal_status WHERE week_of < ?').bind(cutoff).run();
+  return { plans: plans.meta.changes ?? 0, checks: checks.meta.changes ?? 0, statuses: statuses.meta.changes ?? 0 };
 }
 
 // ---- Ingredient changes (what the household skipped or replaced in a meal) ----
@@ -793,4 +799,119 @@ export async function forgetIngredientFeedback(db: D1Database, householdId: stri
     .bind(householdId, ingredientId)
     .run();
   return res.meta.changes ?? 0;
+}
+
+// ---- Didn't go to plan? (meal_status, migration 0015) ----
+
+interface MealStatusRow {
+  meal_id: string;
+  status: MealStatus['status'];
+  reason: string | null;
+  made_name: string | null;
+  guests: number | null;
+  guest_allergies: string | null;
+  note: string | null;
+}
+
+/** A stored row as the API and the planner read it: only the fields that are set. */
+function toMealStatus(r: MealStatusRow): MealStatus {
+  const allergies = parseJsonArray(r.guest_allergies ?? undefined).filter((a): a is string => typeof a === 'string');
+  return {
+    status: r.status,
+    ...(r.reason ? { reason: r.reason as MealStatus['reason'] } : {}),
+    ...(r.made_name ? { madeName: r.made_name } : {}),
+    ...(r.guests !== null ? { guests: r.guests } : {}),
+    ...(r.guest_allergies !== null ? { guestAllergies: allergies } : {}),
+    ...(r.note ? { note: r.note } : {}),
+  };
+}
+
+/** Every status saved for one week, by meal id. */
+export async function loadWeekStatuses(db: D1Database, householdId: string, weekOf: string): Promise<Record<string, MealStatus>> {
+  const { results } = await db
+    .prepare('SELECT meal_id, status, reason, made_name, guests, guest_allergies, note FROM meal_status WHERE household_id = ? AND week_of = ?')
+    .bind(householdId, weekOf)
+    .all<MealStatusRow>();
+  return Object.fromEntries(results.map((r) => [r.meal_id, toMealStatus(r)]));
+}
+
+/** The statuses of the weeks starting in [fromWeek, beforeWeek), by week and then by meal id. */
+export async function loadStatusesBetween(
+  db: D1Database,
+  householdId: string,
+  fromWeek: string,
+  beforeWeek: string,
+): Promise<WeekStatuses> {
+  const { results } = await db
+    .prepare(
+      'SELECT week_of, meal_id, status, reason, made_name, guests, guest_allergies, note FROM meal_status WHERE household_id = ? AND week_of >= ? AND week_of < ?',
+    )
+    .bind(householdId, fromWeek, beforeWeek)
+    .all<MealStatusRow & { week_of: string }>();
+  const out: WeekStatuses = {};
+  for (const r of results) {
+    (out[r.week_of] ??= {})[r.meal_id] = toMealStatus(r);
+  }
+  return out;
+}
+
+/** Replaces the row for one meal. Only the fields given are kept, so a row never carries a field its status does not use. */
+export async function upsertMealStatus(
+  db: D1Database,
+  householdId: string,
+  weekOf: string,
+  mealId: string,
+  status: MealStatus,
+  createdAt: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO meal_status (household_id, week_of, meal_id, status, reason, made_name, guests, guest_allergies, note, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(household_id, week_of, meal_id) DO UPDATE SET
+         status = excluded.status,
+         reason = excluded.reason,
+         made_name = excluded.made_name,
+         guests = excluded.guests,
+         guest_allergies = excluded.guest_allergies,
+         note = excluded.note,
+         created_at = excluded.created_at`,
+    )
+    .bind(
+      householdId,
+      weekOf,
+      mealId,
+      status.status,
+      status.reason ?? null,
+      status.madeName ?? null,
+      status.guests ?? null,
+      status.guestAllergies !== undefined ? JSON.stringify(status.guestAllergies) : null,
+      status.note ?? null,
+      createdAt,
+    )
+    .run();
+}
+
+/** Clears one meal's status. Returns false when it had none. */
+export async function deleteMealStatus(db: D1Database, householdId: string, weekOf: string, mealId: string): Promise<boolean> {
+  const res = await db
+    .prepare('DELETE FROM meal_status WHERE household_id = ? AND week_of = ? AND meal_id = ?')
+    .bind(householdId, weekOf, mealId)
+    .run();
+  return (res.meta.changes ?? 0) > 0;
+}
+
+/**
+ * Drops the statuses of a week's meals: all of them (a new plan for the week), or only the listed ones (meals a swap
+ * replaced, whose ids the new meals may reuse).
+ */
+export async function clearWeekStatuses(db: D1Database, householdId: string, weekOf: string, mealIds?: string[]): Promise<void> {
+  if (mealIds === undefined) {
+    await db.prepare('DELETE FROM meal_status WHERE household_id = ? AND week_of = ?').bind(householdId, weekOf).run();
+    return;
+  }
+  const stmts = mealIds.map((id) =>
+    db.prepare('DELETE FROM meal_status WHERE household_id = ? AND week_of = ? AND meal_id = ?').bind(householdId, weekOf, id),
+  );
+  if (stmts.length > 0) await db.batch(stmts);
 }

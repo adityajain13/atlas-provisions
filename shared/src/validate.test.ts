@@ -170,6 +170,24 @@ describe('validate: allergen', () => {
   it('does not flag a meal with no allergen for an allergic person', () => {
     expect(checksOf(validate(planOf(cleanMeals()), ctxOf()))).not.toContain('allergen');
   });
+
+  it('flags a guest with an allergy eating a meal with the allergen, and names the guest', () => {
+    const meals = cleanMeals();
+    meals[0]!.ingredients = [{ ingredientId: 'cheddar', qty: 0.1, unit: 'kg' }];
+    meals[0]!.eaters = ['ben', 'guest-1'];
+    const issues = validate(planOf(meals, { guests: { 'guest-1': { allergies: ['dairy'] } } }), ctxOf());
+    const hit = issues.find((i) => i.check === 'allergen');
+    expect(hit?.message).toContain('Guest 1 is allergic to dairy');
+    expect(hit?.severity).toBe('error');
+  });
+
+  it('does not flag a guest whose allergies the meal does not break, or a guest with no allergies', () => {
+    const meals = cleanMeals();
+    meals[0]!.ingredients = [{ ingredientId: 'cheddar', qty: 0.1, unit: 'kg' }];
+    meals[0]!.eaters = ['ben', 'guest-1', 'guest-2'];
+    const guests = { 'guest-1': { allergies: ['peanut'] }, 'guest-2': { allergies: [] } };
+    expect(checksOf(validate(planOf(meals, { guests }), ctxOf()))).not.toContain('allergen');
+  });
 });
 
 describe('validate: slot-coverage', () => {

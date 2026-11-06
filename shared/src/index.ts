@@ -267,6 +267,7 @@ export * from './checks';
 export * from './households';
 export * from './itemRules';
 export * from './swap';
+export * from './mealStatus';
 export * from './repair';
 export * from './storage';
 export * from './forms';

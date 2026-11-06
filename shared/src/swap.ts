@@ -1,6 +1,7 @@
 // Meal swapping: which meals a swap takes in with the ones chosen (leftover chains), and the body a swap is sent with.
 // Pure, so the Worker and the web app agree on what a selection replaces.
 import { z } from 'zod';
+import { GuestsSchema } from './mealStatus';
 
 export const SWAP_MAX_MEALS = 21;
 export const SWAP_NOTE_MAX = 200;
@@ -12,6 +13,8 @@ export const SwapRequestSchema = z.object({
     .min(1, 'Choose at least one meal')
     .max(SWAP_MAX_MEALS, `Choose at most ${SWAP_MAX_MEALS} meals`),
   note: z.string().trim().max(SWAP_NOTE_MAX, `The note is at most ${SWAP_NOTE_MAX} characters`).optional(),
+  // Guests joining the swapped slots. Each one eats the new meals there, and their allergies are kept out of them.
+  guests: GuestsSchema.optional(),
 });
 export type SwapRequest = z.infer<typeof SwapRequestSchema>;
 
@@ -58,4 +61,26 @@ export function swapClosure(meals: readonly LeftoverLinked[], selectedIds: reado
     }
   }
   return meals.map((m) => m.id).filter((id) => taken.has(id));
+}
+
+/**
+ * The meals that eat this meal's leftovers, directly or through a chain (A makes leftovers for B, B for C): the
+ * meals this one feeds, not the meals it eats from. Returns their ids in plan order, never the meal itself.
+ */
+export function leftoverDependents(meals: readonly LeftoverLinked[], mealId: string): string[] {
+  const byId = new Map(meals.map((m) => [m.id, m]));
+  const found = new Set<string>();
+  const queue = [mealId];
+  while (queue.length > 0) {
+    const id = queue.pop()!;
+    const meal = byId.get(id);
+    if (!meal) continue;
+    const next = [meal.makesLeftoversFor, ...meals.filter((m) => m.usesLeftoversFrom === id).map((m) => m.id)];
+    for (const n of next) {
+      if (n === undefined || n === mealId || !byId.has(n) || found.has(n)) continue;
+      found.add(n);
+      queue.push(n);
+    }
+  }
+  return meals.map((m) => m.id).filter((id) => found.has(id));
 }

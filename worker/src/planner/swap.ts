@@ -20,13 +20,15 @@ import {
   type SlotCell,
 } from '@provisions/shared';
 import type { PlannerClient } from './claude';
-import { attachWeekPrep, evaluateWeek, keptCostOf, PREP_MISSING, runWeek, weekFrame, type Attempt, type PlanProgress } from './run';
+import { attachWeekPrep, evaluateWeek, keptCostOf, PREP_MISSING, runWeek, weekFrame, type Attempt, type PlanProgress, type WeekFrame } from './run';
 
 export interface SwapInput {
   household: Household;
   plan: MealPlan; // the saved plan being changed
   mealIds: string[]; // the meals chosen; the meals linked to them by leftovers come in too
   note?: string;
+  // Guests joining the swapped slots: their new ids, and the allergies they share. Their allergies are checked there.
+  guests?: { ids: string[]; allergies: string[] };
   deals: Deal[];
   matched: MatchedItem[];
   neverBuy: string[];
@@ -80,6 +82,12 @@ function swapPrep(plan: MealPlan, prep: PrepPlan | undefined, saved: MealPlan, k
 export async function runSwap(input: SwapInput): Promise<SwapOutcome> {
   const { household, plan: saved } = input;
   const maxAttempts = Math.max(1, input.maxAttempts ?? 3);
+  // Guests on the plan stay on it. The ones joining now are added, with the allergies they came with.
+  const joining = input.guests && input.guests.ids.length > 0 ? input.guests : undefined;
+  const guests = {
+    ...(saved.guests ?? {}),
+    ...Object.fromEntries((joining?.ids ?? []).map((id) => [id, { allergies: joining!.allergies }])),
+  };
   const frame = weekFrame({
     household,
     request: saved.request,
@@ -92,6 +100,7 @@ export async function runSwap(input: SwapInput): Promise<SwapOutcome> {
     feedback: input.feedback,
     estimates: input.estimates,
     today: input.today,
+    guests,
   });
 
   const closure = swapClosure(saved.meals, input.mealIds);
@@ -99,17 +108,22 @@ export async function runSwap(input: SwapInput): Promise<SwapOutcome> {
   const replaced = saved.meals.filter((m) => replacedIds.has(m.id));
   const kept = saved.meals.filter((m) => !replacedIds.has(m.id));
   const keptIds = new Set(kept.map((m) => m.id));
-  // The freed slots: the cells of the replaced meals that the week still has.
-  const refill: SlotCell[] = frame.cells.filter((c) => replaced.some((m) => m.day === c.day && m.slot === c.slot));
+  // The freed slots: the cells of the replaced meals that the week still has. Guests who join take a seat in every freed
+  // slot, alongside the people who already eat there. The cells carry them, so the meals written for them carry them too.
+  const freed = (c: SlotCell) => replaced.some((m) => m.day === c.day && m.slot === c.slot);
+  const swapFrame: WeekFrame = joining
+    ? { ...frame, cells: frame.cells.map((c) => (freed(c) ? { ...c, eaters: [...c.eaters, ...joining.ids] } : c)) }
+    : frame;
+  const refill: SlotCell[] = swapFrame.cells.filter(freed);
   const replacing = [...new Set(replaced.map((m) => m.name))];
   const keptCost = keptCostOf(frame, kept);
 
   // Nothing to fill (the freed slots have left the schedule): the replaced meals just go, and the model is not called.
   const outcome: { best: Attempt; attempts: number; timings: PlanTimings } =
     refill.length === 0
-      ? { best: { plan: evaluateWeek(frame, kept, [], saved.notes) }, attempts: 0, timings: { totalMs: 0, attempts: [] } }
+      ? { best: { plan: evaluateWeek(swapFrame, kept, [], saved.notes) }, attempts: 0, timings: { totalMs: 0, attempts: [] } }
       : await runWeek({
-          frame,
+          frame: swapFrame,
           start: { cells: refill, kept, replacing, keptCost, swap: true, note: input.note, notes: saved.notes },
           client: input.client,
           maxAttempts,

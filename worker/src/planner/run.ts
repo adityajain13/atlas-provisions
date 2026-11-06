@@ -78,6 +78,7 @@ export interface RunInput {
   ratings?: RatingSignals; // favourites, avoid and never from meal ratings
   feedback?: FeedbackSignals; // ingredients skipped often, and swaps the household makes
   estimates?: Offer[]; // site and receipt prices, used where no flyer prices a store
+  guests?: Record<string, { allergies: string[] }>; // guests who joined swapped meals, with their allergies
   today?: string; // YYYY-MM-DD on the Toronto calendar; defaults to today
   maxAttempts?: number;
   onProgress?: (p: PlanProgress) => void;
@@ -106,6 +107,7 @@ export interface WeekFrame {
   available: AvailableItem[];
   formBlocked: ReadonlySet<string>; // ingredient ids in a form the household does not keep: not planned, not bought
   listOptions: BuildListOptions; // store preference, pins and estimates, for buildList
+  guests: Record<string, { allergies: string[] }>; // every guest on the plan, kept with the plan and checked for allergies
 }
 
 type FrameInput = Omit<RunInput, 'client' | 'maxAttempts' | 'onProgress' | 'now'>;
@@ -161,6 +163,7 @@ export function weekFrame(input: FrameInput): WeekFrame {
     })),
     available: buildAvailable(deals, fixedCost, pantry).filter((a) => !formBlocked.has(a.id)),
     listOptions: { preference: household.storePreference, pins: pinsOf(household.itemRules), estimates },
+    guests: input.guests ?? {},
   };
 }
 
@@ -182,6 +185,7 @@ export function evaluateWeek(frame: WeekFrame, meals: PlannedMeal[], shapeIssues
     attempts: 0,
     generatedAt: new Date().toISOString(),
     notes,
+    ...(Object.keys(frame.guests).length > 0 ? { guests: frame.guests } : {}),
   };
   plan.issues = [
     ...fixedCost.issues,
@@ -345,6 +349,7 @@ function payloadFor(frame: WeekFrame, step: Step): PlannerPayload {
     favourites: frame.ratings.favourites,
     avoid: [...frame.ratings.avoid, ...frame.ratings.never],
     feedback: frame.feedback,
+    guests: frame.guests,
     ...(swapStyle(step)
       ? {
           keptMeals: step.kept.map(keptPayload),

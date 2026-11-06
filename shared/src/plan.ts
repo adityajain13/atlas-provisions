@@ -3,6 +3,7 @@ import { DAYS, PLAN_RETENTION_WEEKS, SLOTS, WEEKS_AHEAD, addWeeks, isSunday, typ
 import type { Category, BaseUnit } from './catalog';
 import type { PrepPlan } from './prep';
 import type { EstimateBasis } from './offers';
+import type { WeekStatuses } from './mealStatus';
 
 // ---- Request ----
 
@@ -177,6 +178,8 @@ export interface MealPlan {
   generatedAt: string;
   notes: string;
   prep?: PrepPlan; // batch prep for the household's prep day, when one is set and generated
+  // Guests who joined swapped meals: their ids (guest-1, ...) are in those meals' eaters, with their allergies.
+  guests?: Record<string, { allergies: string[] }>;
 }
 
 /** One model call: how long it took, whether it wrote a whole week or only some meals, how many meals it was asked for, and the errors it left. */
@@ -241,16 +244,19 @@ export function addDaysIso(date: string, days: number): string {
 /**
  * Dinner names served in the `windowDays` before `weekOf`, from earlier saved plans.
  * Each meal's date is its plan's Sunday plus its day offset in DAYS order (Sunday first).
+ * A dinner marked skipped was not served, so it does not count. A dinner made instead counts under the name made.
  */
-export function recentDinnerNames(plans: MealPlan[], weekOf: string, windowDays = 14): string[] {
+export function recentDinnerNames(plans: MealPlan[], weekOf: string, windowDays = 14, statuses: WeekStatuses = {}): string[] {
   const start = addDaysIso(weekOf, -windowDays);
   const names = new Set<string>();
   for (const plan of plans) {
     if (plan.weekOf >= weekOf) continue;
     for (const meal of plan.meals) {
       if (meal.slot !== 'dinner') continue;
+      const status = statuses[plan.weekOf]?.[meal.id];
+      if (status?.status === 'skipped') continue;
       const date = addDaysIso(plan.weekOf, DAYS.indexOf(meal.day));
-      if (date >= start && date < weekOf) names.add(meal.name);
+      if (date >= start && date < weekOf) names.add(status?.madeName ?? meal.name);
     }
   }
   return [...names];
