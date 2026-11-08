@@ -258,3 +258,25 @@ describe('repairFor', () => {
     expect(repairFor(plan, ctxFor(h), [err('variety')])?.replaceIds).toEqual(['mon-dinner']);
   });
 });
+
+describe('targeted repair: assigned cravings, and one vegetarian meal', () => {
+  it('a new plan rewrites only the assigned dinners that lack the craving ingredient', () => {
+    const plan = planOf(
+      weekOf({
+        'sun-dinner': { ingredients: [{ ingredientId: 'chicken-thigh-boneless', qty: 1, unit: 'kg' }] },
+        'tue-dinner': { ingredients: [{ ingredientId: 'chicken-thigh-boneless', qty: 1, unit: 'kg' }] },
+      }),
+    );
+    const withCraving = { ...plan, request: { ...plan.request, cravings: ['chicken'] } };
+    // Chicken was assigned to Monday, Tuesday and Thursday: Tuesday has it, so Monday and Thursday are written again.
+    const ctx = ctxFor(household(), undefined, { cravingDinners: { mon: 'chicken', tue: 'chicken', thu: 'chicken' } });
+    expect(repairFor(withCraving, ctx, [err('cravings')])?.replaceIds).toEqual(['mon-dinner', 'thu-dinner']);
+  });
+
+  it('one vegetarian meal: with no meatless lunch or dinner, one dinner is rewritten, the first without a craving in it', () => {
+    const meat = { ingredients: [{ ingredientId: 'chicken-thigh-boneless', qty: 1, unit: 'kg' as const }] };
+    const plan = planOf(weekOf(Object.fromEntries(DAYS.flatMap((d) => ['lunch', 'dinner'].map((s) => [`${d}-${s}`, meat])))));
+    const h = household({ varietyRules: { ...defaultHousehold().varietyRules, oneVegDinner: true } });
+    expect(repairFor(plan, ctxFor(h), [err('variety')])?.replaceIds).toEqual(['sun-dinner']);
+  });
+});

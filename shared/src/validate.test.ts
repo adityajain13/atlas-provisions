@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { INGREDIENTS } from './catalog';
 import { DAYS, SLOTS, type Day, type Slot } from './calendar';
-import { buildList, cravingDinnerMinimum, toPlannedMeals, validate, type ValidateContext } from './validate';
+import { assignCravingDinners, buildList, cravingDinnerMinimum, cravingQuotas, toPlannedMeals, validate, type ValidateContext } from './validate';
 import { repairFor } from './repair';
 import { defaultHousehold, type Household } from './index';
 import { expandWeek } from './grid';
@@ -451,15 +451,36 @@ describe('validate: variety rules', () => {
     expect(checksOf(validate(planOf(meals), ctxOf({ household: rules({ minVeg5: true }) })))).not.toContain('variety');
   });
 
-  it('oneVegDinner errors when every dinner has a meat or fish', () => {
-    const meals = cleanMeals().map((m) => (m.slot === 'dinner' ? { ...m, ingredients: [{ ingredientId: 'chicken-thigh-boneless', qty: 0.2, unit: 'kg' as const }] } : m));
+  // One vegetarian meal a week: any non-leftover lunch or dinner with no meat, fish or seafood. Breakfast does not count.
+  const meatAt = (m: PlannedMeal) => (m.slot === 'breakfast' ? m : { ...m, ingredients: [{ ingredientId: 'chicken-thigh-boneless', qty: 0.2, unit: 'kg' as const }] });
+  const vegetarianMeal = (over: Partial<PlannedMeal>) => (m: PlannedMeal) => (m.day === 'tue' && m.slot === 'lunch' ? { ...m, ...over } : m);
+
+  it('oneVegDinner errors when every lunch and dinner has meat or fish', () => {
+    const meals = cleanMeals().map(meatAt);
     const issues = validate(planOf(meals), ctxOf({ household: rules({ oneVegDinner: true }) }));
-    expect(issues.some((i) => i.check === 'variety' && i.message.includes('No dinner is vegetarian'))).toBe(true);
+    expect(issues.some((i) => i.check === 'variety' && i.message.includes('No lunch or dinner is vegetarian'))).toBe(true);
   });
 
-  it('oneVegDinner passes with a dinner of vegetarian ingredients', () => {
+  it('oneVegDinner passes with one vegetarian dinner', () => {
     const meals = cleanMeals().map((m) => (m.slot === 'dinner' && m.day === 'tue' ? { ...m, ingredients: [{ ingredientId: 'lentils-red-dry', qty: 0.2, unit: 'kg' as const }] } : m));
     expect(checksOf(validate(planOf(meals), ctxOf({ household: rules({ oneVegDinner: true }) })))).not.toContain('variety');
+  });
+
+  it('oneVegDinner passes with one vegetarian lunch when every dinner has meat', () => {
+    const meals = cleanMeals().map(meatAt).map(vegetarianMeal({ ingredients: [{ ingredientId: 'lentils-red-dry', qty: 0.2, unit: 'kg' }] }));
+    expect(checksOf(validate(planOf(meals), ctxOf({ household: rules({ oneVegDinner: true }) })))).not.toContain('variety');
+  });
+
+  it('oneVegDinner does not count a breakfast with no meat, or a leftover lunch', () => {
+    const meals = cleanMeals().map(meatAt).map((m) => (m.slot === 'breakfast' ? { ...m, ingredients: [{ ingredientId: 'lentils-red-dry', qty: 0.2, unit: 'kg' as const }] } : m));
+    expect(validate(planOf(meals), ctxOf({ household: rules({ oneVegDinner: true }) })).some((i) => i.message.includes('No lunch or dinner is vegetarian'))).toBe(true);
+    const leftover = cleanMeals().map(meatAt).map(vegetarianMeal({ ingredients: [], usesLeftoversFrom: 'mon-dinner' }));
+    expect(validate(planOf(leftover), ctxOf({ household: rules({ oneVegDinner: true }) })).some((i) => i.message.includes('No lunch or dinner is vegetarian'))).toBe(true);
+  });
+
+  it('oneVegDinner counts every ingredient, so a chicken and lentil dish is not meatless', () => {
+    const meals = cleanMeals().map(meatAt).map(vegetarianMeal({ ingredients: [{ ingredientId: 'lentils-red-dry', qty: 0.2, unit: 'kg' }, { ingredientId: 'chicken-thigh-boneless', qty: 0.2, unit: 'kg' }] }));
+    expect(validate(planOf(meals), ctxOf({ household: rules({ oneVegDinner: true }) })).some((i) => i.message.includes('No lunch or dinner is vegetarian'))).toBe(true);
   });
 
   it('no variety check runs when the rules are off', () => {
@@ -1012,3 +1033,66 @@ describe('validate: a craving does not trip the repeat limit for its ingredient'
   });
 });
 
+describe('validate: craving quotas, shared by the validator and the dinner assignment', () => {
+  it('gives one ingredient craving its minimum, and shares two thirds of the dinners between several', () => {
+    expect(cravingQuotas(['chicken'], 7)).toEqual(new Map([['chicken', 3]]));
+    // Chicken and salmon: 3 + 3 is more than two thirds of 7 (4), so each gets 4 / 2.
+    expect(cravingQuotas(['chicken', 'salmon'], 7)).toEqual(new Map([['chicken', 2], ['salmon', 2]]));
+    expect(cravingQuotas(['chicken', 'salmon'], 6)).toEqual(new Map([['chicken', 2], ['salmon', 2]]));
+  });
+
+  it('leaves out dish cravings, and never gives less than one dinner', () => {
+    expect(cravingQuotas(['butter chicken', 'ramen'], 7).size).toBe(0);
+    expect(cravingQuotas(['chicken', 'salmon', 'tofu'], 3).get('chicken')).toBe(1);
+  });
+
+  it('the validator counts two ingredient cravings against their quotas, not a third of the dinners each', () => {
+    let dinner = 0;
+    const meals = cleanMeals().map((m) => {
+      if (m.slot !== 'dinner') return m;
+      const k = dinner++;
+      const ingredientId = k < 2 ? 'chicken-thigh-boneless' : k < 4 ? 'salmon-fillet' : undefined;
+      return ingredientId ? { ...m, ingredients: [...m.ingredients, { ingredientId, qty: 0.3, unit: 'kg' as const }] } : m;
+    });
+    const issues = validate(planOf(meals, {}, { cravings: ['chicken', 'salmon'] }), ctxOf()).filter((i) => i.check === 'cravings');
+    expect(issues).toEqual([]);
+  });
+
+  it('names the quota in the error when two ingredient cravings share the week', () => {
+    const meals = cleanMeals().map((m) => (m.slot === 'dinner' && m.day === 'sun' ? { ...m, ingredients: [...m.ingredients, { ingredientId: 'chicken-thigh-boneless', qty: 0.3, unit: 'kg' as const }] } : m));
+    const issues = validate(planOf(meals, {}, { cravings: ['chicken', 'salmon'] }), ctxOf()).filter((i) => i.check === 'cravings');
+    expect(issues).toHaveLength(2);
+    expect(issues[0]!.message).toContain('chicken appears in 1 of 7 dinners; cravings need at least 2');
+  });
+});
+
+describe('assignCravingDinners', () => {
+  const dinners = (cells: SlotCell[]) => cells.filter((c) => c.slot === 'dinner').map((c) => c.day);
+
+  it('gives each ingredient craving its quota of distinct dinners, spread out and not on consecutive days', () => {
+    const cells = allCells();
+    const out = assignCravingDinners(['chicken', 'salmon'], cells);
+    const days = Object.keys(out) as Day[];
+    expect(days).toHaveLength(4);
+    expect(new Set(days).size).toBe(days.length);
+    expect(days.every((d) => dinners(cells).includes(d))).toBe(true);
+    for (const craving of ['chicken', 'salmon']) {
+      const idx = days.filter((d) => out[d] === craving).map((d) => DAYS.indexOf(d)).sort((a, b) => a - b);
+      expect(idx).toHaveLength(2);
+      expect(idx[1]! - idx[0]!).toBeGreaterThan(1);
+    }
+  });
+
+  it('keeps a craving off a dinner that is followed by a lunch, while other dinners are free', () => {
+    // Lunch only on Wednesday, so the Tuesday dinner could be the one that feeds it.
+    const cells = allCells().filter((c) => c.slot !== 'lunch' || c.day === 'wed');
+    const out = assignCravingDinners(['chicken'], cells);
+    expect(Object.keys(out)).toHaveLength(3);
+    expect(out.tue).toBeUndefined();
+  });
+
+  it('assigns nothing when there is no ingredient craving or no dinner', () => {
+    expect(assignCravingDinners(['butter chicken'], allCells())).toEqual({});
+    expect(assignCravingDinners(['chicken'], allCells().filter((c) => c.slot !== 'dinner'))).toEqual({});
+  });
+});

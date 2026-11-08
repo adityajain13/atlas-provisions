@@ -136,6 +136,7 @@ export interface ValidationIssue {
     | 'pin'
     | 'prep'
     | 'prep-timing'
+    | 'prep-ref'
     | 'prices'
     | 'repetition'
     | 'season'

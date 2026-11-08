@@ -71,7 +71,8 @@ export const VARIETY_RULES = [
   { key: 'noRepeatProteinConsecutive', label: 'No same protein two days in a row' },
   { key: 'noRepeatDinner14', label: 'No repeat dinner within 14 days' },
   { key: 'minVeg5', label: 'At least 5 vegetables a week' },
-  { key: 'oneVegDinner', label: 'One vegetarian dinner a week' },
+  // The key stays oneVegDinner (stored households use it); the rule counts any lunch or dinner with no meat or fish.
+  { key: 'oneVegDinner', label: 'One vegetarian meal a week' },
 ] as const;
 export type VarietyRuleKey = (typeof VARIETY_RULES)[number]['key'];
 

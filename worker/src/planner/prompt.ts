@@ -42,7 +42,8 @@ function baseRules(opts: { prep: boolean; leftovers: boolean }): string[] {
       ? [`Chain leftovers: make \`leftoverChains\` dinners produce a later lunch (set makesLeftoversFor / usesLeftoversFrom with meal ids).`]
       : []),
     "A leftover meal's ingredients and steps lists are empty and activeMinutes 5.",
-    "Cravings: a dish craving (e.g. 'butter chicken', 'ramen') is a meal name: plan at least one such dinner and tag it 'craving'. An ingredient craving (e.g. 'chicken', 'tofu') is a main ingredient in at least a third of the dinners (at least 2, rounded up), listed in those meals' ingredients.",
+    "Cravings: a dish craving (e.g. 'butter chicken', 'ramen') is a meal name: plan at least one such dinner and tag it 'craving'. An ingredient craving (e.g. 'chicken', 'tofu') is a main ingredient in at least a third of the dinners (at least 2, rounded up; fewer when several ingredient cravings share the week), listed in those meals' ingredients.",
+    'cravingDinners assigns dinners to ingredient cravings: make that craving a main ingredient of that day\'s dinner (other dinners may also use it).',
     'Balance: every lunch and dinner that is not a leftover meal has a substantial protein (meat, fish, eggs, tofu, paneer or legumes). Unless someone is vegetarian, at most 2 dinners a week have no meat or fish.',
     'Seasonality: payload.month is the plan month. When preferSeasonal: avoid produce marked outOfSeason or imported unless it is on a flyer deal this week; build around in-season and storage produce (root vegetables, squash, cabbage family, apples, citrus in winter).',
     "onHandCustom staples are free: use them in steps when a dish needs them, never in a meal's ingredients, and they never go on the list.",
@@ -53,13 +54,17 @@ function baseRules(opts: { prep: boolean; leftovers: boolean }): string[] {
     "Never plan a dish in `avoidDishes` or a close variant of it (e.g. 'slaw' rules out coleslaw, cabbage slaw and any raw shredded-cabbage salad). An available item with a `form` is that form.",
     'If `ingredientFeedback` is given: avoid `oftenSkipped` ingredients unless essential (then optional in the steps); use an ingredient\'s `to` (or `toId`) from `preferredSwaps` in its place when available.',
     'Variety matters more than using every bit of a big pack: use a non-staple ingredient in at most 3 meals a week. Ingredients of cravings are exempt from the 3-meal limit. Onions, garlic, rice, oil, butter, eggs, milk, flour, stock, soy sauce, spices and bread are exempt. If a pack (like a whole cabbage) would need more, pick a different vegetable or accept some left over.',
+    'Variety rule oneVegDinner ("One vegetarian meal a week", when in varietyRules): one lunch or dinner that week has no meat, fish or seafood.',
     "Quantities are in each ingredient's `unit`, as the total for that meal. Do not estimate prices; code computes cost. For `each` ingredients, qty counts packages or pieces as sold (see eachMeans), never slices or servings: two people having toast all week is 1 loaf, not 7.",
     ...(opts.prep
       ? [
           'Batch prep: when `prepDay` is set, also return `prep` for that day, following the prep rules below.',
+          'Steps may refer to prepped items only if they appear in `prep`.',
           ...PREP_RULES.map((rule) => `Prep rule: ${rule}`),
         ]
-      : []),
+      : [
+          "There is no prep day: every meal's steps must be self-contained — cook rice and other components within the meal, never refer to prepped or batch-cooked items.",
+        ]),
     'If `feedback` is present, the previous plan broke these checks: fix every error listed there and keep what already worked.',
     'Return the plan only via the submit_plan tool.',
   ];
@@ -326,6 +331,7 @@ export interface PayloadInput {
   issues?: ValidationIssue[]; // the previous attempt's errors, for a retry or repair
   feedback?: FeedbackSignals; // skipped and replaced ingredients, from past meals
   guests?: Record<string, { allergies: string[] }>; // guests who joined swapped meals: their ids are eaters, and their allergies go in `allergies`
+  cravingDinners?: Partial<Record<Day, string>>; // a new plan's assignment of ingredient cravings to dinners, for the days being written
 }
 
 /** One available item as the planner sees it: the fields it needs, and only the ones that carry something. */
@@ -372,6 +378,7 @@ export interface PlannerPayload {
   storage: Storage;
   ingredientFeedback?: FeedbackSignals; // what the household skipped or replaced in past meals, when there is any
   prepDay?: Day; // only when the household has a prep day
+  cravingDinners?: Partial<Record<Day, string>>; // the dinner each ingredient craving must feature in, by day key
   keptMeals?: KeptMealPayload[];
   replacing?: string[];
   swapNote?: string;
@@ -477,6 +484,7 @@ export function buildPayload(input: PayloadInput): PlannerPayload {
     storage: household.storage,
     ...(hasFeedback ? { ingredientFeedback: feedback } : {}),
     ...(household.prepDay ? { prepDay: household.prepDay } : {}),
+    ...(input.cravingDinners && Object.keys(input.cravingDinners).length > 0 ? { cravingDinners: input.cravingDinners } : {}),
     ...(input.keptMeals
       ? {
           keptMeals: input.keptMeals,
@@ -496,6 +504,7 @@ const VARIABLE_KEYS: ReadonlySet<string> = new Set([
   'perMealTarget',
   'slots',
   'leftoverChains',
+  'cravingDinners',
   'feedback',
   'keptMeals',
   'replacing',

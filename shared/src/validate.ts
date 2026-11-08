@@ -464,6 +464,7 @@ export interface ValidateContext {
   formBlocked?: ReadonlySet<string>; // ingredient ids whose form the household does not keep
   avoidDishes?: string[]; // dish words the household does not want, as typed
   onDeal?: ReadonlySet<string>; // ingredient ids on a flyer deal this week: exempt from the season check
+  cravingDinners?: Partial<Record<Day, string>>; // the dinner each ingredient craving was assigned to, for a new plan (see assignCravingDinners)
 }
 
 /** The first protein tag among a meal's ingredients, or undefined when none has one. */
@@ -844,6 +845,57 @@ export function cravingExemptIds(cravings: string[]): Set<string> {
 }
 
 /**
+ * How many dinners each ingredient craving must feature in. Each gets cravingDinnerMinimum; when the sum would be more
+ * than two thirds of the dinners, each gets an equal share of that two thirds (at least one). Dish cravings are not here.
+ * The validator and the dinner assignment both read this, so they never disagree.
+ */
+export function cravingQuotas(cravings: string[], dinnerCount: number): Map<string, number> {
+  const ingredient = [...new Set(cravings)].filter((c) => featuredIdsOf(c).size > 0);
+  const min = cravingDinnerMinimum(dinnerCount);
+  const share = Math.floor((dinnerCount * 2) / 3);
+  const each = ingredient.length * min > share ? Math.max(1, Math.floor(share / ingredient.length)) : min;
+  return new Map(ingredient.map((c) => [c, each]));
+}
+
+/**
+ * Which dinner each ingredient craving is assigned to, by day, for a new plan's cells. Each craving gets its quota of
+ * distinct dinners, spread across the week (not on consecutive days), on weekdays first, and away from a dinner that
+ * is followed by a lunch (that lunch may eat its leftovers).
+ */
+export function assignCravingDinners(cravings: string[], cells: SlotCell[]): Partial<Record<Day, string>> {
+  const dinnerDays = DAYS.filter((d) => cells.some((c) => c.slot === 'dinner' && c.day === d));
+  const quotas = cravingQuotas(cravings, dinnerDays.length);
+  const lunchDays = new Set(cells.filter((c) => c.slot === 'lunch').map((c) => c.day));
+  const followedByLunch = (i: number) => lunchDays.has(DAYS[(i + 1) % DAYS.length]!);
+  const chosen = new Map<number, string>(); // day index -> craving
+  for (const [craving, quota] of quotas) {
+    const own: number[] = [];
+    for (let k = 0; k < quota; k++) {
+      let best: number | undefined;
+      let bestScore = -Infinity;
+      for (const day of dinnerDays) {
+        const i = DAYS.indexOf(day);
+        if (chosen.has(i)) continue;
+        const ownGap = own.length > 0 ? Math.min(...own.map((j) => Math.abs(i - j))) : 7;
+        const anyGap = chosen.size > 0 ? Math.min(...[...chosen.keys()].map((j) => Math.abs(i - j))) : 7;
+        const weekend = day === 'sun' || day === 'sat' ? 2 : 0;
+        const score = 2 * Math.min(ownGap, 3) + Math.min(anyGap, 3) - weekend - (followedByLunch(i) ? 3 : 0);
+        if (score > bestScore) {
+          bestScore = score;
+          best = i;
+        }
+      }
+      if (best === undefined) break;
+      chosen.set(best, craving);
+      own.push(best);
+    }
+  }
+  const out: Partial<Record<Day, string>> = {};
+  for (const [i, craving] of [...chosen].sort(([a], [b]) => a - b)) out[DAYS[i]!] = craving;
+  return out;
+}
+
+/**
  * A dish craving ("butter chicken", "ramen") needs a meal whose name matches it (whole-word overlap of 4+ letters, or a
  * substring). A craving with no name match can take a meal tagged 'craving' that no other craving has claimed.
  * An ingredient craving ("chicken") must be a main ingredient in a third of the dinners (see cravingDinnerMinimum): an error.
@@ -852,12 +904,13 @@ function checkCravings(plan: MealPlan): ValidationIssue[] {
   const claimed = new Set<string>();
   const unmatched: string[] = [];
   const dinners = plan.meals.filter((m) => m.slot === 'dinner');
+  const quotas = cravingQuotas(plan.request.cravings, dinners.length);
   const out: ValidationIssue[] = [];
   for (const craving of plan.request.cravings) {
     const featured = featuredIdsOf(craving);
     if (featured.size > 0) {
       const count = dinners.filter((m) => m.ingredients.some((i) => featured.has(i.ingredientId))).length;
-      const need = cravingDinnerMinimum(dinners.length);
+      const need = quotas.get(craving) ?? cravingDinnerMinimum(dinners.length);
       if (count < need) {
         const more = need - count;
         out.push({
@@ -931,17 +984,13 @@ function checkVariety(plan: MealPlan, ctx: ValidateContext): ValidationIssue[] {
     }
   }
 
-  if (rules.oneVegDinner) {
-    const hasVegDinner = dinners.some(
-      (m) => m.ingredients.length > 0 && m.ingredients.every((ing) => INGREDIENT_BY_ID[ing.ingredientId]?.vegetarian === true),
-    );
-    if (!hasVegDinner) {
-      out.push({
-        check: 'variety',
-        severity: 'error',
-        message: 'No dinner is vegetarian this week. Make one dinner from beans, lentils, tofu or vegetables only.',
-      });
-    }
+  // One vegetarian meal a week (the key is oneVegDinner): any non-leftover lunch or dinner with no meat or fish.
+  if (rules.oneVegDinner && !plan.meals.some((m) => m.slot !== 'breakfast' && isMeatlessMeal(m))) {
+    out.push({
+      check: 'variety',
+      severity: 'error',
+      message: 'No lunch or dinner is vegetarian this week. Make one meal from beans, lentils, tofu, eggs or vegetables only.',
+    });
   }
   return out;
 }
@@ -984,6 +1033,14 @@ function isSubstantialProtein(id: string): boolean {
 }
 
 const hasProteinIn = (meal: PlannedMeal, test: (id: string) => boolean) => meal.ingredients.some((i) => test(i.ingredientId));
+
+/**
+ * A cooked meal (not a leftover) with no meat, fish or seafood among its ingredients. Every ingredient is checked, not just
+ * the first protein, so a chicken and lentil dish is not meatless.
+ */
+export function isMeatlessMeal(meal: PlannedMeal): boolean {
+  return meal.usesLeftoversFrom === undefined && meal.ingredients.length > 0 && !hasProteinIn(meal, (id) => MEAT_PROTEINS.has(INGREDIENT_BY_ID[id]?.protein ?? ''));
+}
 
 /**
  * Lunches and dinners that are not leftovers need a substantial protein. More than two dinners a week with no meat or

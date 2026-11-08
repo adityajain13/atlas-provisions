@@ -323,6 +323,7 @@ async function planWeek(env: Env, apiKey: string, householdId: string, request: 
     today,
     estimates,
     client: anthropicClient(apiKey, env.PLANNER_MODEL ?? DEFAULT_PLANNER_MODEL),
+    prepClient: anthropicPrepClient(apiKey, env.PREP_MODEL ?? DEFAULT_PREP_MODEL),
     onProgress: (p: PlanProgress) => emit(p),
   });
   plan.priceSource = priceSource;

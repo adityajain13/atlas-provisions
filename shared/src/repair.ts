@@ -12,8 +12,10 @@ import {
   VEG_TARGET,
   cravingDinnerMinimum,
   cravingExemptIds,
+  cravingQuotas,
   consecutiveProteinRepeats,
   featuredIdsOf,
+  isMeatlessMeal,
   isVegetable,
   leftoverBreaks,
   vegetablesUsed,
@@ -123,13 +125,31 @@ function attribute(check: string, plan: MealPlan, ctx: ValidateContext): { meals
       for (const later of repeatedMeals(plan.meals, cravingExemptIds(plan.request.cravings)).values()) for (const m of later) meals.push(m.id);
       break;
     case 'cravings': {
-      // An ingredient craving short of dinners: the non-leftover dinners that lack it are written again, untagged ones first.
       const dinners = plan.meals.filter((m) => m.slot === 'dinner');
-      const need = cravingDinnerMinimum(dinners.length);
       const taken = new Set<string>();
+      if (ctx.cravingDinners) {
+        // A new plan assigned each ingredient craving to days: the assigned dinners that lack it are written again, and no others.
+        for (const craving of plan.request.cravings) {
+          const featured = featuredIdsOf(craving);
+          if (featured.size === 0) continue;
+          for (const [day, assigned] of Object.entries(ctx.cravingDinners)) {
+            if (assigned !== craving) continue;
+            const m = dinners.find((d) => d.day === day);
+            if (!m || m.usesLeftoversFrom !== undefined || m.ingredients.some((i) => featured.has(i.ingredientId))) continue;
+            if (!taken.has(m.id)) {
+              taken.add(m.id);
+              meals.push(m.id);
+            }
+          }
+        }
+        break;
+      }
+      // Without an assignment (a swap): the non-leftover dinners that lack an ingredient craving are written again, untagged ones first.
+      const quotas = cravingQuotas(plan.request.cravings, dinners.length);
       for (const craving of plan.request.cravings) {
         const featured = featuredIdsOf(craving);
         if (featured.size === 0) continue;
+        const need = quotas.get(craving) ?? cravingDinnerMinimum(dinners.length);
         const have = dinners.filter((m) => m.ingredients.some((i) => featured.has(i.ingredientId)));
         const more = need - have.length;
         if (more <= 0) continue;
@@ -154,6 +174,13 @@ function attribute(check: string, plan: MealPlan, ctx: ValidateContext): { meals
     case 'variety': {
       const rules = ctx.household.varietyRules;
       const dinners = plan.meals.filter((m) => m.slot === 'dinner');
+      if (rules.oneVegDinner === true && !plan.meals.some((m) => m.slot !== 'breakfast' && isMeatlessMeal(m))) {
+        // One vegetarian meal a week: the dinner that is cheapest to change, one without a craving in it.
+        const cravingIds = cravingExemptIds(plan.request.cravings);
+        const weight = (m: PlannedMeal) => (m.tags.includes('craving') ? 1 : 0) + (m.ingredients.some((i) => cravingIds.has(i.ingredientId)) ? 2 : 0);
+        const pick = dinners.filter((m) => m.usesLeftoversFrom === undefined && m.ingredients.length > 0).sort((a, b) => weight(a) - weight(b))[0];
+        if (pick) meals.push(pick.id);
+      }
       if (rules.noRepeatDinner14 === true) {
         const recent = new Set((ctx.recentDinnerNames ?? []).map(nameKey));
         for (const m of dinners) if (recent.has(nameKey(m.name))) meals.push(m.id);

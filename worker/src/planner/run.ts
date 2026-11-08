@@ -4,8 +4,10 @@ import {
   ESTIMATE_PRIORITY,
   INGREDIENT_BY_ID,
   SLOTS,
+  assignCravingDinners,
   blockedFormIds,
   featuredIdsOf,
+  prepRefIssues,
   regularCandidates,
   typicalOffers,
   buildList,
@@ -57,7 +59,10 @@ import {
   type PlannerPayload,
 } from './prompt';
 import type { PlannerClient, SystemText } from './claude';
-import { normalisePrep } from './prep';
+import { generatePrep, normalisePrep, type PrepClient } from './prep';
+
+/** Forms of each ingredient craving the planner is always offered, when nothing else already offers them. */
+export const CRAVING_FORMS = 2;
 
 /** Most regular-priced items the planner is offered at once. */
 export const REGULAR_LIMIT = 40;
@@ -86,6 +91,7 @@ export interface RunInput {
   deals: Deal[];
   matched: MatchedItem[];
   client: PlannerClient;
+  prepClient?: PrepClient; // the prep call, used once when the meals' prep is missing or covers none of them
   recentDinnerNames: string[];
   neverBuy: string[]; // ingredient ids from never-buy item rules
   pantry?: PantryItem[]; // all pantry items; expired ones are ignored
@@ -201,7 +207,18 @@ export function weekFrame(input: FrameInput): WeekFrame {
     // Never-buy and blocked-form ids are left out of everything the planner may use, pantry stock and leftovers included.
     available: buildAvailable(deals, fixedCost, pantry, {
       onHand,
-      regular: regularItems(household, { neverBuy: neverSet, blocked: formBlocked, allergens, deals, pantry, matched, estimates, onHand }),
+      regular: regularItems(household, {
+        neverBuy: neverSet,
+        blocked: formBlocked,
+        allergens,
+        deals,
+        pantry,
+        matched,
+        estimates,
+        onHand,
+        fixedLeftovers: fixedCost.leftovers.map((l) => l.ingredientId),
+        cravings: request.cravings,
+      }),
     }).filter((a) => !formBlocked.has(a.id) && !neverSet.has(a.id)),
     listOptions: { preference: household.storePreference, pins: pinsOf(household.itemRules), estimates, onHand },
     guests: input.guests ?? {},
@@ -210,7 +227,9 @@ export function weekFrame(input: FrameInput): WeekFrame {
 }
 
 /**
- * Regular-priced items for the planner: the fresh and pantry staples of the household's cuisines, skipping anything already
+ * Regular-priced items for the planner. First, the cheapest forms of each ingredient craving that nothing already offers
+ * (CRAVING_FORMS of them, when the craving has that many): a craving is always in reach, and these do not count toward
+ * REGULAR_LIMIT. Then the fresh and pantry staples of the household's cuisines, up to the limit, skipping anything already
  * on offer (a deal, pantry stock, a flyer price, a kept staple), never-buy and blocked-form ids and allergens. Each is
  * priced from the first estimate it has (site, receipt, then typical), so it always has a pack size.
  */
@@ -225,25 +244,54 @@ function regularItems(
     matched: MatchedItem[];
     estimates: Offer[];
     onHand: string[];
+    fixedLeftovers: string[];
+    cravings: string[];
   },
 ): { id: string; packQty: number; packPrice: number; basis: EstimateBasis }[] {
+  const usable = (id: string) => {
+    const ing = INGREDIENT_BY_ID[id];
+    return ing !== undefined && !f.neverBuy.has(id) && !f.blocked.has(id) && !ing.allergens.some((a) => f.allergens.has(a));
+  };
+  const priced = (id: string): { id: string; packQty: number; packPrice: number; basis: EstimateBasis } | undefined => {
+    for (const basis of ESTIMATE_PRIORITY) {
+      const offer = f.estimates.find((e) => e.ingredientId === id && e.estimate?.basis === basis);
+      if (offer) return { id, packQty: offer.packQty, packPrice: offer.packPrice, basis };
+    }
+    return undefined;
+  };
+  const out: { id: string; packQty: number; packPrice: number; basis: EstimateBasis }[] = [];
+  const taken = new Set<string>();
+
+  const offered = new Set<string>([
+    ...f.deals.map((d) => d.ingredientId),
+    ...f.pantry.map((p) => p.ingredientId),
+    ...f.onHand,
+    ...f.fixedLeftovers,
+  ]);
+  for (const craving of f.cravings) {
+    const forms = [...featuredIdsOf(craving)].filter(usable);
+    const have = forms.filter((id) => offered.has(id)).length;
+    const cheapest = forms
+      .filter((id) => !offered.has(id) && !taken.has(id))
+      .map(priced)
+      .filter((o): o is NonNullable<typeof o> => o !== undefined)
+      .sort((a, b) => a.packPrice / a.packQty - b.packPrice / b.packQty);
+    for (const o of cheapest.slice(0, Math.max(0, CRAVING_FORMS - have))) {
+      out.push(o);
+      taken.add(o.id);
+    }
+  }
+
   const exclude = new Set<string>([
     ...f.deals.map((d) => d.ingredientId),
     ...f.pantry.map((p) => p.ingredientId),
     ...f.matched.map((m) => m.ingredientId),
     ...f.onHand,
   ]);
-  const out: { id: string; packQty: number; packPrice: number; basis: EstimateBasis }[] = [];
   for (const id of regularCandidates(household.cuisines, exclude, REGULAR_LIMIT)) {
-    const ing = INGREDIENT_BY_ID[id];
-    if (!ing || f.neverBuy.has(id) || f.blocked.has(id) || ing.allergens.some((a) => f.allergens.has(a))) continue;
-    for (const basis of ESTIMATE_PRIORITY) {
-      const offer = f.estimates.find((e) => e.ingredientId === id && e.estimate?.basis === basis);
-      if (offer) {
-        out.push({ id, packQty: offer.packQty, packPrice: offer.packPrice, basis });
-        break;
-      }
-    }
+    if (taken.has(id) || !usable(id)) continue;
+    const o = priced(id);
+    if (o) out.push(o);
   }
   return out;
 }
@@ -277,9 +325,13 @@ export function evaluateWeek(frame: WeekFrame, meals: PlannedMeal[], shapeIssues
   return plan;
 }
 
-/** What a week is checked against. Repair attribution reads the same context as validate. */
-export function validationContext(frame: WeekFrame): ValidateContext {
+/**
+ * What a week is checked against. Repair attribution reads the same context as validate. `cravingDinners` is the new
+ * plan's assignment of ingredient cravings to dinners, when there is one.
+ */
+export function validationContext(frame: WeekFrame, cravingDinners?: Partial<Record<Day, string>>): ValidateContext {
   return {
+    ...(cravingDinners ? { cravingDinners } : {}),
     household: frame.household,
     cells: frame.cells,
     fixed: frame.fixedCost,
@@ -386,6 +438,7 @@ export interface WeekStart {
   swap: boolean; // true for a swap, so the payload carries keptMeals even when none are kept
   note?: string; // the household's note for a swap
   notes?: string; // the notes to keep when nothing is written
+  cravingDinners?: Partial<Record<Day, string>>; // a new plan's ingredient cravings by dinner day; none for a swap
 }
 
 export interface WeekJob {
@@ -402,6 +455,7 @@ export interface WeekResult {
   best: Attempt;
   attempts: number;
   timings: PlanTimings;
+  latestPrep?: PrepPlan; // the most recent attempt's prep that had steps: kept when the best attempt has none
 }
 
 /** One attempt to write: the cells to fill, the meals kept, and what the last check said. */
@@ -415,6 +469,44 @@ interface Step {
   note?: string;
   notes: string;
   feedback: ValidationIssue[] | null;
+  cravingDinners?: Partial<Record<Day, string>>; // the assignments for the dinners this step writes
+}
+
+/** The craving assignments for the dinners among `cells`, or undefined when none of them has one. */
+function cravingDinnersFor(assigned: Partial<Record<Day, string>> | undefined, cells: SlotCell[]): Partial<Record<Day, string>> | undefined {
+  if (!assigned) return undefined;
+  const out: Partial<Record<Day, string>> = {};
+  for (const c of cells) {
+    const craving = assigned[c.day];
+    if (c.slot === 'dinner' && craving) out[c.day] = craving;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** A prep list with at least one step, or undefined. A list with no steps is no prep: it reads "Nothing to prep ahead". */
+export function usablePrep(prep: PrepPlan | undefined): PrepPlan | undefined {
+  return prep && prep.steps.length > 0 ? prep : undefined;
+}
+
+/**
+ * A prep list cut down to the meals a plan has: steps that serve only meals that are gone are dropped, and the steps keep
+ * their order and get fresh ids. Undefined when no step is left.
+ */
+export function prepForMeals(prep: PrepPlan | undefined, meals: PlannedMeal[]): PrepPlan | undefined {
+  const usable = usablePrep(prep);
+  if (!usable) return undefined;
+  const ids = new Set(meals.map((m) => m.id));
+  const steps = usable.steps
+    .filter((s) => s.forMeals.length === 0 || s.forMeals.some((id) => ids.has(id)))
+    .map((s, i) => ({ ...s, id: `prep-${i + 1}`, forMeals: s.forMeals.filter((id) => ids.has(id)) }));
+  if (steps.length === 0) return undefined;
+  return { ...usable, steps, totalMinutes: steps.reduce((sum, s) => sum + s.minutes, 0) };
+}
+
+/** The prep call is needed when the plan has no prep step that serves one of its meals, and it has a meal to cook. */
+function needsPrepCall(prep: PrepPlan | undefined, meals: PlannedMeal[]): boolean {
+  const covers = prep?.steps.some((s) => s.forMeals.length > 0) ?? false;
+  return !covers && meals.some((m) => m.ingredients.length > 0);
 }
 
 function payloadFor(frame: WeekFrame, step: Step): PlannerPayload {
@@ -433,6 +525,7 @@ function payloadFor(frame: WeekFrame, step: Step): PlannerPayload {
     issues: step.feedback ?? undefined,
     feedback: frame.feedback,
     guests: frame.guests,
+    cravingDinners: step.cravingDinners,
     ...(swapStyle(step)
       ? {
           keptMeals: step.kept.map(keptPayload),
@@ -498,7 +591,7 @@ const cellKey = (c: { day: string; slot: string }) => `${c.day}-${c.slot}`;
 function nextStep(job: WeekJob, tried: Attempt): { step: Step; repaired: Repair | null } {
   const { start } = job;
   const errors = tried.plan.issues.filter((i) => i.severity === 'error');
-  const rep = repairFor(tried.plan, validationContext(job.frame), tried.plan.issues);
+  const rep = repairFor(tried.plan, validationContext(job.frame, start.cravingDinners), tried.plan.issues);
   if (rep) {
     const replaced = new Set(rep.replaceIds);
     const kept = tried.plan.meals.filter((m) => !replaced.has(m.id));
@@ -515,6 +608,7 @@ function nextStep(job: WeekJob, tried: Attempt): { step: Step; repaired: Repair 
         note: start.note,
         notes: tried.plan.notes,
         feedback: errors,
+        cravingDinners: cravingDinnersFor(start.cravingDinners, rep.refill),
       },
     };
   }
@@ -530,6 +624,7 @@ function nextStep(job: WeekJob, tried: Attempt): { step: Step; repaired: Repair 
       note: start.note,
       notes: start.notes ?? '',
       feedback: tried.plan.issues,
+      cravingDinners: cravingDinnersFor(start.cravingDinners, start.cells),
     },
   };
 }
@@ -544,6 +639,7 @@ export async function runWeek(job: WeekJob): Promise<WeekResult> {
   const started = job.now();
   const records: AttemptTiming[] = [];
   let best: Attempt | null = null;
+  let latestPrep: PrepPlan | undefined;
   let attempts = 0;
   let step: Step = {
     mode: 'full',
@@ -555,6 +651,7 @@ export async function runWeek(job: WeekJob): Promise<WeekResult> {
     note: job.start.note,
     notes: job.start.notes ?? '',
     feedback: null,
+    cravingDinners: cravingDinnersFor(job.start.cravingDinners, job.start.cells),
   };
 
   for (;;) {
@@ -562,6 +659,7 @@ export async function runWeek(job: WeekJob): Promise<WeekResult> {
     const t0 = job.now();
     if (step.mode === 'full' && step.cells.length > 0) job.onProgress?.({ stage: 'writing', attempt: attempts });
     const tried = await attemptStep(job, step);
+    if (usablePrep(tried.prep)) latestPrep = tried.prep;
     if (step.cells.length > 0) job.onProgress?.({ stage: 'checking', attempt: attempts });
     const errors = errorCount(tried.plan.issues);
     records.push({ ms: job.now() - t0, mode: step.mode, replaced: step.cells.length, errors });
@@ -587,7 +685,7 @@ export async function runWeek(job: WeekJob): Promise<WeekResult> {
     }
     step = next.step;
   }
-  return { best: best!, attempts, timings: { totalMs: job.now() - started, attempts: records } };
+  return { best: best!, attempts, timings: { totalMs: job.now() - started, attempts: records }, latestPrep };
 }
 
 /**
@@ -595,10 +693,23 @@ export async function runWeek(job: WeekJob): Promise<WeekResult> {
  * "tap Regenerate prep" warning. A household with no prep day gets no prep at all.
  */
 export function attachWeekPrep(plan: MealPlan, prep: PrepPlan | undefined, prepDay: Day | null): MealPlan {
-  if (!prepDay) return plan;
+  const usable = usablePrep(prep);
+  // A meal whose steps say "prepped" needs a prep step for it, with or without a prep day.
+  const refs = prepRefIssues(plan.meals, usable);
+  const withRefs = refs.length > 0 ? { ...plan, issues: [...plan.issues, ...refs] } : plan;
+  if (!prepDay) return withRefs;
   // Timing breaches are warnings on the prep, never errors: they do not trigger a retry.
-  if (prep) return { ...plan, prep, issues: [...plan.issues, ...prepTimingIssues(prep, plan.meals)] };
-  return { ...plan, issues: [...plan.issues, PREP_MISSING] };
+  if (usable) return { ...withRefs, prep: usable, issues: [...withRefs.issues, ...prepTimingIssues(usable, plan.meals)] };
+  return { ...withRefs, issues: [...withRefs.issues, PREP_MISSING] };
+}
+
+/** A fresh prep list for the final meals from the prep call. Undefined when the call fails or its list has no steps. */
+async function freshPrep(plan: MealPlan, prepDay: Day, client: PrepClient, storage: Household['storage']): Promise<PrepPlan | undefined> {
+  try {
+    return prepForMeals(await generatePrep(plan, prepDay, client, storage), plan.meals);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -611,20 +722,33 @@ export function attachWeekPrep(plan: MealPlan, prep: PrepPlan | undefined, prepD
  */
 export async function runPlanner(input: RunInput): Promise<MealPlan> {
   const { household, client } = input;
+  const now = input.now ?? Date.now;
+  const started = now();
   const maxAttempts = Math.max(1, input.maxAttempts ?? 3);
   const frame = weekFrame(input);
   const { cells } = frame;
 
   if (cells.length === 0) return { ...evaluateWeek(frame, [], [], ''), timings: { totalMs: 0, attempts: [] } };
 
-  const { best, attempts, timings } = await runWeek({
+  const cravingDinners = assignCravingDinners(frame.request.cravings, cells);
+  const { best, attempts, timings, latestPrep } = await runWeek({
     frame,
-    start: { cells, kept: [], replacing: [], keptCost: 0, swap: false, notes: '' },
+    start: { cells, kept: [], replacing: [], keptCost: 0, swap: false, notes: '', cravingDinners },
     client,
     maxAttempts,
     prepDay: household.prepDay,
     onProgress: input.onProgress,
-    now: input.now ?? Date.now,
+    now,
   });
-  return { ...attachWeekPrep(best.plan, best.prep, household.prepDay), attempts, timings };
+  const plan: MealPlan = { ...best.plan, attempts, timings };
+  const prepDay = household.prepDay;
+  if (!prepDay) return attachWeekPrep(plan, undefined, null);
+
+  // The best attempt's own prep, else the most recent prep with steps. Either is cut down to the final meals.
+  let prep = prepForMeals(best.prep, plan.meals) ?? prepForMeals(latestPrep, plan.meals);
+  // The prep covers none of the final meals (or is missing): one prep call for them, unless the time limit has run out.
+  if (input.prepClient && needsPrepCall(prep, plan.meals) && now() - started <= ATTEMPT_TIME_LIMIT_MS) {
+    prep = (await freshPrep(plan, prepDay, input.prepClient, household.storage)) ?? prep;
+  }
+  return attachWeekPrep(plan, prep, prepDay);
 }

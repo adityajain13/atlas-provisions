@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DAYS, DAY_LONG, type Day } from './calendar';
-import type { ValidationIssue } from './plan';
+import type { PlannedMeal, ValidationIssue } from './plan';
 
 // Batch prep (milestone 3B) and when each step is done. The planner model writes the steps; the worker
 // validates them against the plan's meal ids before saving. Plans saved before the schedule and the
@@ -189,4 +189,22 @@ export function prepTimingIssues(prep: PrepPlan, meals: { id: string; day: Day }
     }
   }
   return issues;
+}
+
+/** A step that says food was cooked ahead: it needs a prep step that serves its meal. */
+const PREPPED_WORD = /\b(prepped|pre-?cooked|batch[- ]cooked)\b/i;
+
+/**
+ * A warning for each meal whose steps say the food is prepped, batch-cooked or pre-cooked when no prep step serves that
+ * meal (no prep list at all counts as none). The planner is told to refer to prepped items only when they are in `prep`.
+ */
+export function prepRefIssues(meals: PlannedMeal[], prep: PrepPlan | undefined): ValidationIssue[] {
+  const served = new Set(prep?.steps.flatMap((s) => s.forMeals) ?? []);
+  return meals
+    .filter((m) => m.steps.some((s) => PREPPED_WORD.test(s)) && !served.has(m.id))
+    .map((m) => ({
+      check: 'prep-ref' as const,
+      severity: 'warning' as const,
+      message: `"${m.name}" uses prepped food, but no prep step covers that meal. Cook it within the meal, or tap Regenerate prep.`,
+    }));
 }

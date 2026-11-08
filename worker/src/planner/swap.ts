@@ -20,7 +20,7 @@ import {
   type SlotCell,
 } from '@provisions/shared';
 import type { PlannerClient } from './claude';
-import { attachWeekPrep, evaluateWeek, keptCostOf, PREP_MISSING, runWeek, weekFrame, type Attempt, type PlanProgress, type WeekFrame } from './run';
+import { attachWeekPrep, evaluateWeek, keptCostOf, PREP_MISSING, runWeek, usablePrep, weekFrame, type Attempt, type PlanProgress, type WeekFrame } from './run';
 
 export interface SwapInput {
   household: Household;
@@ -69,7 +69,7 @@ function keptPrep(saved: PrepPlan | undefined, keptIds: ReadonlySet<string>, pre
  */
 function swapPrep(plan: MealPlan, prep: PrepPlan | undefined, saved: MealPlan, keptIds: ReadonlySet<string>, prepDay: Day | null): MealPlan {
   if (!prepDay) return plan;
-  if (prep) return attachWeekPrep(plan, prep, prepDay);
+  if (usablePrep(prep)) return attachWeekPrep(plan, prep, prepDay);
   const kept = keptPrep(saved.prep, keptIds, prepDay);
   const withSteps: MealPlan = kept ? { ...plan, prep: kept, issues: [...plan.issues, ...prepTimingIssues(kept, plan.meals)] } : plan;
   return { ...withSteps, issues: [...withSteps.issues, PREP_MISSING] };

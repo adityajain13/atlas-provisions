@@ -215,7 +215,7 @@ describe('buildPayload', () => {
 describe('the system prompt variants', () => {
   it('adds the prep rules only with a prep day', () => {
     expect(plannerSystem({ prep: false, leftovers: false })).not.toContain('Prep rule:');
-    expect(plannerSystem({ prep: false, leftovers: false })).not.toContain('prep');
+    expect(plannerSystem({ prep: false, leftovers: false })).not.toContain('Batch prep');
     expect(plannerSystem({ prep: true, leftovers: false })).toContain('Batch prep: when `prepDay` is set');
     expect(plannerSystem({ prep: true, leftovers: false })).toContain('Prep rule:');
   });
@@ -395,5 +395,34 @@ describe('seasonality, custom staples and the cravings and balance rules', () =>
     expect(SYSTEM_PROMPT).toContain('at least a third of the dinners');
     expect(SYSTEM_PROMPT).toContain('substantial protein');
     expect(SYSTEM_PROMPT).toContain('When preferSeasonal: avoid produce marked outOfSeason or imported unless it is on a flyer deal this week');
+  });
+});
+
+describe('cravingDinners, prep steps and the vegetarian meal in the prompt', () => {
+  const household = { ...defaultHousehold() };
+  const request: PlanRequest = { weekOf: '2026-11-15', budget: 150, cravings: ['chicken'], overrides: [], useItUp: false };
+
+  it('states the rule for a week with no prep day, and only that one', () => {
+    expect(plannerSystem({ prep: false, leftovers: false })).toContain("There is no prep day: every meal's steps must be self-contained — cook rice and other components within the meal, never refer to prepped or batch-cooked items.");
+    expect(plannerSystem({ prep: true, leftovers: false })).not.toContain('There is no prep day');
+  });
+
+  it('allows prepped items in steps only when they are in prep, for a week with a prep day', () => {
+    expect(plannerSystem({ prep: true, leftovers: false })).toContain('Steps may refer to prepped items only if they appear in `prep`.');
+  });
+
+  it('explains cravingDinners, and the vegetarian meal rule by its new name', () => {
+    expect(SYSTEM_PROMPT).toContain("cravingDinners assigns dinners to ingredient cravings: make that craving a main ingredient of that day's dinner (other dinners may also use it).");
+    expect(SYSTEM_PROMPT).toContain('One vegetarian meal a week');
+  });
+
+  it('sends cravingDinners in the payload only when there is an assignment', () => {
+    const { cells, fixed } = expandWeek(household, request);
+    const base = { household, request, cells, fixed, fixedCost: noFixed, available: [], recentDinnerNames: [] };
+    expect(buildPayload(base)).not.toHaveProperty('cravingDinners');
+    expect(buildPayload({ ...base, cravingDinners: {} })).not.toHaveProperty('cravingDinners');
+    const assigned = buildPayload({ ...base, cravingDinners: { mon: 'chicken', thu: 'chicken' } });
+    expect(assigned.cravingDinners).toEqual({ mon: 'chicken', thu: 'chicken' });
+    expect(splitPayload(assigned).variable).toHaveProperty('cravingDinners');
   });
 });

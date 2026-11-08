@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CUISINES,
   INGREDIENT_BY_ID,
+  assignCravingDinners,
+  featuredIdsOf,
   defaultHousehold,
   expandWeek,
   matchFlyerItem,
@@ -11,13 +13,15 @@ import {
   type FlyerItem,
   type Household,
   type MatchedItem,
+  type MealPlan,
   type PlanRequest,
   type RawPlan,
   type SlotCell,
 } from '@provisions/shared';
 import flyer from '../../fixtures/flyer-sample.json';
 import type { PlannerClient } from './claude';
-import { REGULAR_LIMIT, runPlanner, validationContext, weekFrame, type PlanProgress } from './run';
+import { CRAVING_FORMS, PREP_MISSING, REGULAR_LIMIT, attachWeekPrep, prepForMeals, runPlanner, usablePrep, validationContext, weekFrame, type PlanProgress } from './run';
+import type { PrepClient } from './prep';
 
 const matched: MatchedItem[] = (flyer as FlyerItem[])
   .map(matchFlyerItem)
@@ -681,3 +685,162 @@ describe('runPlanner: cravings the household never buys, the time limit, and a w
   });
 });
 
+describe('runPlanner: ingredient cravings are offered and assigned to dinners', () => {
+  const isChicken = (id: string) => featuredIdsOf('chicken').has(id);
+
+  it('offers the cheapest forms of a craving that no deal covers, outside the regular limit', () => {
+    const everyCuisineOften = Object.fromEntries(CUISINES.map((c) => [c.key, 'often' as const]));
+    const frame = weekFrame({
+      household: household({ cuisines: everyCuisineOften }),
+      request: request({ cravings: ['chicken'] }),
+      deals: deals.filter((d) => !isChicken(d.ingredientId)),
+      matched: matched.filter((m) => !isChicken(m.ingredientId)),
+      recentDinnerNames: [],
+      neverBuy: [],
+      today: '2026-11-06',
+    });
+    const chicken = frame.available.filter((a) => isChicken(a.id));
+    expect(chicken.length).toBeGreaterThanOrEqual(CRAVING_FORMS);
+    expect(chicken.every((a) => a.source === 'regular' && a.estimate !== undefined)).toBe(true);
+    expect(frame.available.filter((a) => a.source === 'regular' && !isChicken(a.id)).length).toBeLessThanOrEqual(REGULAR_LIMIT);
+  });
+
+  it('sends each ingredient craving to its assigned dinners as cravingDinners, with the quotas', async () => {
+    const h = household();
+    const req = request({ cravings: ['chicken', 'salmon'] });
+    const cells = cellsOf(h, req);
+    const { client, seen } = fakeClient([planFor(cells, DEAL_ID, DEAL_UNIT_QTY)]);
+
+    await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    const sent = (seen[0]!.payload as unknown as { cravingDinners: Record<string, string> }).cravingDinners;
+    expect(Object.values(sent).filter((c) => c === 'chicken')).toHaveLength(2);
+    expect(Object.values(sent).filter((c) => c === 'salmon')).toHaveLength(2);
+    expect(Object.keys(sent).every((d) => cells.some((c) => c.slot === 'dinner' && c.day === d))).toBe(true);
+  });
+
+  it('a cravings repair rewrites only the assigned dinners that lack the ingredient, and sends only their assignments', async () => {
+    const h = household({ varietyRules: { noRepeatProteinConsecutive: false, noRepeatDinner14: false, minVeg5: false, oneVegDinner: false } });
+    const req = request({ cravings: ['chicken'] });
+    const cells = cellsOf(h, req);
+    const assigned = Object.keys(assignCravingDinners(['chicken'], cells));
+    // The chicken the planner is offered: its cheapest forms (a form outside them is not on offer).
+    const offered = weekFrame({ household: h, request: req, deals, matched, recentDinnerNames: [], neverBuy: [] }).available.find((a) => isChicken(a.id))!.id;
+    const { client, seen, submitPlan } = scriptedModel((payload, call) =>
+      call === 1 ? planFor(cells, DEAL_ID, DEAL_UNIT_QTY) : mealsForSlots(cells, payload.slots, offered, () => 0.2),
+    );
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPlan).toHaveBeenCalledTimes(2);
+    const second = seen[1]!.payload as unknown as { slots: { id: string }[]; cravingDinners: Record<string, string> };
+    expect(second.slots.map((s) => s.id).sort()).toEqual(assigned.map((d) => `${d}-dinner`).sort());
+    expect(Object.keys(second.cravingDinners).sort()).toEqual([...assigned].sort());
+    expect(plan.issues.filter((i) => i.check === 'cravings' && i.severity === 'error')).toEqual([]);
+  });
+});
+
+describe('runPlanner: prep that survives repair, the prep call, and prep references', () => {
+  const prepWith = (task: string, forMeals: string[]) => ({ day: 'sun', steps: [{ task, minutes: 10, forMeals }] });
+  const prepClientReturning = (raw: unknown) => {
+    const submitPrep = vi.fn(async () => raw);
+    const client: PrepClient = { submitPrep };
+    return { client, submitPrep };
+  };
+
+  it('keeps an earlier attempt\'s prep when the attempt that is kept returned an empty list, cut to the final meals', async () => {
+    const h = household();
+    const req = request({ budget: 150 });
+    const cells = cellsOf(h, req);
+    const expensive = (slotId: string) => (slotId === `${cells[0]!.day}-${cells[0]!.slot}` ? 200 : DEAL_UNIT_QTY);
+    const first: RawPlan = { ...mealsForSlots(cells, cells.map((c) => ({ id: `${c.day}-${c.slot}` })), DEAL_ID, expensive), prep: prepWith('Cook rice', ['m1']) };
+    const { client, submitPlan } = scriptedModel((payload, call) =>
+      call === 1 ? first : { ...mealsForSlots(cells, payload.slots, DEAL_ID, () => DEAL_UNIT_QTY), prep: { day: 'sun', steps: [] } },
+    );
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPlan).toHaveBeenCalledTimes(2);
+    expect(plan.prep?.steps.map((s) => [s.task, s.forMeals])).toEqual([['Cook rice', ['m1']]]);
+    expect(plan.issues.filter((i) => i.check === 'prep')).toEqual([]);
+  });
+
+  it('calls the prep client once when the plan has no prep that serves its meals', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const { client } = fakeClient([planFor(cells, DEAL_ID, DEAL_UNIT_QTY)]);
+    const { client: prepClient, submitPrep } = prepClientReturning({ day: 'sun', steps: [{ task: 'Cook rice', minutes: 10, forMeals: ['m0'] }] });
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, prepClient, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPrep).toHaveBeenCalledTimes(1);
+    expect(plan.prep?.steps.map((s) => s.task)).toEqual(['Cook rice']);
+    expect(plan.issues.filter((i) => i.check === 'prep')).toEqual([]);
+  });
+
+  it('skips the prep call and warns when the time limit has passed', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const { client } = fakeClient([planFor(cells, DEAL_ID, DEAL_UNIT_QTY)]);
+    const { client: prepClient, submitPrep } = prepClientReturning({ day: 'sun', steps: [{ task: 'Cook rice', minutes: 10, forMeals: ['m0'] }] });
+    let clock = 0;
+    const now = () => (clock++ === 0 ? 0 : 200_000);
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, prepClient, now, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPrep).not.toHaveBeenCalled();
+    expect(plan.prep).toBeUndefined();
+    expect(plan.issues).toContainEqual(PREP_MISSING);
+  });
+
+  it('warns for a meal that says prepped when no prep step serves it, and makes no prep call without a prep day', async () => {
+    const h = household();
+    const req = request();
+    const cells = cellsOf(h, req);
+    const raw = planFor(cells, DEAL_ID, DEAL_UNIT_QTY);
+    raw.meals[0]!.steps = ['Add prepped cold rice'];
+    const { client } = fakeClient([raw]);
+    const { client: prepClient, submitPrep } = prepClientReturning({ day: 'sun', steps: [] });
+
+    const plan = await runPlanner({ household: h, request: req, deals, matched, client, prepClient, recentDinnerNames: [], neverBuy: [] });
+
+    expect(submitPrep).toHaveBeenCalledTimes(1);
+    expect(plan.issues.filter((i) => i.check === 'prep-ref')).toHaveLength(1);
+    expect(plan.prep).toBeUndefined();
+
+    const noDay = await runPlanner({ household: household({ prepDay: null }), request: req, deals, matched, client: fakeClient([raw]).client, prepClient, recentDinnerNames: [], neverBuy: [] });
+    expect(submitPrep).toHaveBeenCalledTimes(1);
+    expect(noDay.issues.filter((i) => i.check === 'prep-ref')).toHaveLength(1);
+  });
+
+  it('prepForMeals drops only the steps that serve meals that are gone, and renumbers the rest', () => {
+    const meal = (id: string) => ({ id }) as unknown as Parameters<typeof prepForMeals>[1][number];
+    const prep = {
+      day: 'sun' as const,
+      totalMinutes: 40,
+      steps: [
+        { id: 'a', task: 'A', minutes: 10, forMeals: ['m0'], day: 'sun' as const },
+        { id: 'b', task: 'B', minutes: 10, forMeals: ['gone'], day: 'sun' as const },
+        { id: 'c', task: 'C', minutes: 10, forMeals: [], day: 'sun' as const },
+        { id: 'd', task: 'D', minutes: 10, forMeals: ['m0', 'gone'], day: 'sun' as const },
+      ],
+    };
+    const out = prepForMeals(prep, [meal('m0')]);
+    expect(out?.steps.map((s) => [s.id, s.task, s.forMeals])).toEqual([
+      ['prep-1', 'A', ['m0']],
+      ['prep-2', 'C', []],
+      ['prep-3', 'D', ['m0']],
+    ]);
+    expect(out?.totalMinutes).toBe(30);
+    expect(prepForMeals(prep, [meal('other')])?.steps.map((s) => s.task)).toEqual(['C']);
+  });
+
+  it('an empty prep list is no prep: the plan gets the regenerate warning, not a prep with nothing in it', () => {
+    const plan = { meals: [], issues: [] } as unknown as MealPlan;
+    expect(usablePrep({ day: 'sun', steps: [], totalMinutes: 0 })).toBeUndefined();
+    expect(attachWeekPrep(plan, { day: 'sun', steps: [], totalMinutes: 0 }, 'sun')).toMatchObject({ issues: [PREP_MISSING] });
+    expect(attachWeekPrep(plan, { day: 'sun', steps: [], totalMinutes: 0 }, 'sun')).not.toHaveProperty('prep');
+  });
+});
