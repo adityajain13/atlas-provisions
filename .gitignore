@@ -4,3 +4,7 @@ dist
 .dev.vars
 extension-dist
 web-ext-artifacts
+
+.env
+.env.*
+.dev.vars.*
