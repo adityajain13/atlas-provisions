@@ -636,7 +636,7 @@ export async function getTntSyncStatus(): Promise<TntSyncStatus> {
   return json(await authFetch(`${BASE}/tnt-sync/status`), (raw) => raw as TntSyncStatus);
 }
 
-/** One of the household's sync keys: a browser, a device, or the iPhone bookmark. Never the key itself. */
+/** One of the household's sync keys: a browser, a device, or a bookmark. Never the key itself. */
 export interface SyncKeyRow {
   id: string;
   label: string;

@@ -28,7 +28,7 @@ const IDLE_MS = 60_000;
 /** The keys this browser holds, per household: the key itself, and its id so Devices can mark it. */
 const KEY_PREFIX = 'provisions:syncKey:';
 const KEY_ID_PREFIX = 'provisions:syncKeyId:';
-export const BOOKMARK_LABEL_DEFAULT = 'iPhone bookmark';
+export const BOOKMARK_LABEL_DEFAULT = 'Bookmark';
 
 export const SYNC_INSTALL_LINE = 'Install the Atlas Provisions Sync extension (Firefox, Chrome, Edge) to read T&T prices from your browser.';
 export const BOOKMARK_WARNING = "This bookmark contains your household's sync key. Don't share it; revoke it under Devices if you do.";
@@ -249,12 +249,12 @@ export function TntSync({ onDone }: { onDone?: () => void }) {
     track(sync(), sync).catch((e: unknown) => setOutcomeError(errorMessage(e)));
   }
 
-  /** A new key for the iPhone bookmark, under the label typed. Other keys are not changed. */
+  /** A new key for a bookmark, under the label typed. Other keys are not changed. */
   async function makeBookmark() {
     setOutcomeError(null);
     const label = bookmarkLabel.trim().replace(/\s+/g, ' ');
     if (label === '') {
-      setOutcomeError('Give the bookmark a label, such as iPhone bookmark.');
+      setOutcomeError('Give the bookmark a label, such as Phone.');
       return;
     }
     try {
@@ -354,7 +354,7 @@ export function TntSync({ onDone }: { onDone?: () => void }) {
       </div>
 
       <div className="mt-4">
-        <Disclosure variant="compact" open={bookmarkOpen} onToggle={() => setBookmarkOpen((v) => !v)} title="Use a bookmark instead (iPhone)">
+        <Disclosure variant="compact" open={bookmarkOpen} onToggle={() => setBookmarkOpen((v) => !v)} title="Use a bookmark instead">
           <div className="space-y-4">
             <label className="block">
               <span className={eyebrow}>Label for this bookmark&apos;s key</span>
